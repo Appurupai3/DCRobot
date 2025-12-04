@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
+from typing import Callable
 import json
 import os
 import random
@@ -376,6 +377,96 @@ class EconomyMenu(View):
         await interaction.response.send_message(**build_ranking_message())
 
 
+async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
+    if interaction.user.id != modal.user.id:
+        await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
+        return
+
+    await open_account(interaction.user)
+    users = load_data()
+    uid = str(interaction.user.id)
+
+    try:
+        amount = int(modal.bet_amount.value)
+    except ValueError:
+        await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+        return
+
+    if amount < 10:
+        await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+        return
+
+    if users[uid]["wallet"] < amount:
+        await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+        return
+
+    users[uid]["wallet"] -= amount
+
+    outcome = random.random()
+    critical = False
+
+    if outcome < modal.penalty_chance:
+        extra_loss = int(amount * random.uniform(*modal.penalty_mult_range))
+        users[uid]["wallet"] = max(0, users[uid]["wallet"] - extra_loss)
+        result_text = (
+            f"😢 {modal.game_name} 失利，扣除下注 ${amount}，另外被處罰 ${extra_loss}。\n"
+            "（扣款已反映在錢包）"
+        )
+    else:
+        reward_multiplier = random.uniform(*modal.reward_mult_range)
+        if random.random() < modal.crit_chance:
+            critical = True
+            reward_multiplier *= 1.5
+
+        reward = int(amount * reward_multiplier)
+        users[uid]["wallet"] += amount + reward
+        crit_text = "（暴擊收益 x1.5！）" if critical else ""
+        result_text = f"🎉 {modal.game_name} 成功！返還下注 ${amount}，另獲得 ${reward}。{crit_text}"
+
+    save_data(users)
+    balance = users[uid]["wallet"]
+    await interaction.response.send_message(
+        f"{result_text}\n目前錢包餘額：${balance}",
+        ephemeral=True,
+    )
+
+
+async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetModal):
+    if interaction.user.id != modal.user.id:
+        await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
+        return
+
+    await open_account(interaction.user)
+    users = load_data()
+    uid = str(interaction.user.id)
+
+    try:
+        amount = int(modal.bet_amount.value)
+    except ValueError:
+        await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+        return
+
+    if amount < 10:
+        await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+        return
+
+    if users[uid]["wallet"] < amount:
+        await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+        return
+
+    users[uid]["wallet"] -= amount
+
+    result_text, payout_change = modal.resolve_func(amount, uid)
+    users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
+
+    save_data(users)
+    balance = users[uid]["wallet"]
+    await interaction.response.send_message(
+        f"{result_text}\n目前錢包餘額：${balance}",
+        ephemeral=True,
+    )
+
+
 class BetModal(Modal):
     def __init__(
         self,
@@ -394,6 +485,154 @@ class BetModal(Modal):
         self.penalty_mult_range = penalty_mult_range
         self.crit_chance = crit_chance
 
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await process_basic_bet(interaction, self)
+
+
+class CustomBetModal(Modal):
+    def __init__(
+        self,
+        user: discord.User,
+        game_name: str,
+        resolve_func: Callable[[int, str], tuple[str, int]],
+    ):
+        super().__init__(title=f"💰 {game_name} - 請輸入下注金額")
+        self.user = user
+        self.game_name = game_name
+        self.resolve_func = resolve_func
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await process_custom_bet(interaction, self)
+
+
+class HorseRaceModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="🐎 賽馬競速 - 選擇座騎與下注")
+        self.user = user
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.horse_choice = TextInput(label="選擇賽馬 (1-3)", placeholder="1=赤焰、2=蒼影、3=金蹄", required=True, max_length=1)
+        self.add_item(self.bet_amount)
+        self.add_item(self.horse_choice)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的賽馬視窗！請自行開啟遊戲。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+            return
+
+        try:
+            pick = int(self.horse_choice.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 請輸入 1、2 或 3 來選擇賽馬。", ephemeral=True)
+            return
+
+        if pick not in (1, 2, 3):
+            await interaction.response.send_message("❌ 賽馬編號只能是 1、2、3。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= amount
+
+        names = ["赤焰", "蒼影", "金蹄"]
+        positions = [0, 0, 0]
+        log_lines = []
+        finish_line = 60
+
+        for round_idx in range(1, 8):
+            for i in range(3):
+                stride = random.randint(4, 10)
+                positions[i] += stride
+            bar = " | ".join(f"{names[i]}:{'■' * (positions[i] // 5)} {positions[i]}m" for i in range(3))
+            log_lines.append(f"第 {round_idx} 段 -> {bar}")
+            if max(positions) >= finish_line:
+                break
+
+        top_distance = max(positions)
+        top_indices = [i for i, pos in enumerate(positions) if pos == top_distance]
+        winner_idx = random.choice(top_indices)
+        user_idx = pick - 1
+
+        if user_idx == winner_idx:
+            reward_multiplier = random.uniform(1.8, 3.2)
+            reward = int(amount * reward_multiplier)
+            payout_change = amount + reward
+            result_text = (
+                f"🏁 {names[winner_idx]} 奪冠！你押中的賽馬狂奔到 {top_distance}m，返還下注 ${amount} 再贏得 ${reward}！"
+            )
+        else:
+            consolation = int(amount * 0.2)
+            payout_change = consolation
+            result_text = (
+                f"🐴 最終由 {names[winner_idx]} 奪冠 (距離 {top_distance}m)。你押的 {names[user_idx]} 落敗，只追回 ${consolation}。"
+            )
+
+        users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
+        save_data(users)
+
+        race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
+        race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
+        race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
+        race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)
+        balance = users[uid]["wallet"]
+
+        await interaction.response.send_message(
+            f"{result_text}\n目前錢包餘額：${balance}",
+            embed=race_embed,
+            ephemeral=True,
+        )
+
+
+def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int]:
+    die_one = random.randint(1, 6)
+    die_two = random.randint(1, 6)
+    total = die_one + die_two
+    difference = abs(die_one - die_two)
+
+    if total in (2, 12):
+        reward = int(amount * 20)
+        payout_change = amount + reward
+        result_text = (
+            f"🎲 骰子決鬥神奇爆擊！點數 {die_one} + {die_two} = {total}，贏得 20 倍獎勵 ${reward} 並返還本金。"
+        )
+    else:
+        multiplier = difference * 0.5
+        reward = int(amount * multiplier)
+        payout_change = amount + reward if reward > 0 else 0
+        if reward > 0:
+            result_text = (
+                f"🎲 你擲出 {die_one} 與 {die_two} (差值 {difference})，依差值×0.5 得到 {multiplier:.2f} 倍，獲得 ${reward}！"
+            )
+        else:
+            result_text = f"🎲 兩顆骰子都為 {die_one}，無差值，失去下注 ${amount}。"
+
+    return result_text, payout_change
+
+
+class PuzzleBetModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="🧩 解謎挑戰 - 下注並開始 2A2B")
+        self.user = user
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.add_item(self.bet_amount)
 
@@ -420,39 +659,112 @@ class BetModal(Modal):
             await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
             return
 
-        # 先扣除下注金額
         users[uid]["wallet"] -= amount
-
-        outcome = random.random()
-        critical = False
-        result_text = ""
-
-        if outcome < self.penalty_chance:
-            extra_loss = int(amount * random.uniform(*self.penalty_mult_range))
-            users[uid]["wallet"] = max(0, users[uid]["wallet"] - extra_loss)
-            result_text = (
-                f"😢 {self.game_name} 失利，扣除下注 ${amount}，另外被處罰 ${extra_loss}。\n"
-                "（扣款已反映在錢包）"
-            )
-        else:
-            reward_multiplier = random.uniform(*self.reward_mult_range)
-            if random.random() < self.crit_chance:
-                critical = True
-                reward_multiplier *= 1.5
-
-            reward = int(amount * reward_multiplier)
-            users[uid]["wallet"] += amount + reward
-            crit_text = "（暴擊收益 x1.5！）" if critical else ""
-            result_text = (
-                f"🎉 {self.game_name} 成功！返還下注 ${amount}，另獲得 ${reward}。{crit_text}"
-            )
-
         save_data(users)
-        balance = users[uid]["wallet"]
-        await interaction.response.send_message(
-            f"{result_text}\n目前錢包餘額：${balance}",
-            ephemeral=True,
-        )
+
+        secret_digits = "".join(random.sample("0123456789", 4))
+        view = PuzzleGuessView(interaction.user, secret_digits, amount)
+        embed = build_puzzle_embed(view, status_text="輸入 4 個不重複的數字，6 次內達成 4A0B 即可獲得獎勵！")
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+
+class PuzzleGuessView(View):
+    def __init__(self, user: discord.User, secret: str, bet_amount: int):
+        super().__init__(timeout=240)
+        self.author_id = user.id
+        self.secret = secret
+        self.bet_amount = bet_amount
+        self.history: list[str] = []
+        self.attempts = 0
+        self.max_attempts = 6
+        self.message: discord.Message | None = None
+        self.resolved = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的解謎面板！請自行開啟遊戲。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            embed = build_puzzle_embed(self, status_text="⏰ 時間到，挑戰結束！")
+            await self.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(label="提交猜測", style=discord.ButtonStyle.primary)
+    async def submit_guess(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(PuzzleGuessModal(self))
+
+
+class PuzzleGuessModal(Modal):
+    def __init__(self, view: PuzzleGuessView):
+        super().__init__(title="🧩 解謎挑戰 - 請輸入 4 位數")
+        self.view_ref = view
+        self.guess_input = TextInput(label="猜測", placeholder="例如：1234 (不可重複)", required=True, max_length=4)
+        self.add_item(self.guess_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.view_ref
+        if interaction.user.id != view.author_id:
+            await interaction.response.send_message("❌ 這不是你的解謎面板！", ephemeral=True)
+            return
+
+        guess = self.guess_input.value.strip()
+        if len(guess) != 4 or not guess.isdigit():
+            await interaction.response.send_message("❌ 必須輸入 4 位數字。", ephemeral=True)
+            return
+
+        if len(set(guess)) != 4:
+            await interaction.response.send_message("❌ 數字不能重複。", ephemeral=True)
+            return
+
+        view.attempts += 1
+        bulls, cows = score_guess(view.secret, guess)
+        view.history.append(f"第 {view.attempts} 次：{guess} -> {bulls}A{cows}B")
+
+        status_text = f"{bulls}A{cows}B，還有 {view.max_attempts - view.attempts} 次機會。"
+        solved = bulls == 4
+
+        if solved:
+            users = load_data()
+            uid = str(interaction.user.id)
+            reward = int(view.bet_amount * 2.5)
+            users[uid]["wallet"] += view.bet_amount + reward
+            save_data(users)
+            status_text = f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}。"
+            view.resolved = True
+            for child in view.children:
+                child.disabled = True
+        elif view.attempts >= view.max_attempts:
+            status_text = f"😢 挑戰失敗，正確答案為 {view.secret}。"
+            for child in view.children:
+                child.disabled = True
+
+        embed = build_puzzle_embed(view, status_text=status_text)
+        await interaction.response.edit_message(embed=embed, view=view)
+        if solved or view.attempts >= view.max_attempts:
+            view.stop()
+
+
+def score_guess(secret: str, guess: str) -> tuple[int, int]:
+    bulls = sum(s == g for s, g in zip(secret, guess))
+    cows = sum(min(secret.count(d), guess.count(d)) for d in set(guess)) - bulls
+    return bulls, cows
+
+
+def build_puzzle_embed(view: PuzzleGuessView, status_text: str) -> discord.Embed:
+    embed = discord.Embed(title="🧩 解謎挑戰 (2A2B)", color=discord.Color.purple())
+    embed.description = "在 6 次內猜出 4 個不重複的數字，達成 4A0B 就能拿獎勵！"
+    embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
+    embed.add_field(name="剩餘次數", value=f"{view.max_attempts - view.attempts}", inline=True)
+    embed.add_field(name="狀態", value=status_text, inline=False)
+    if view.history:
+        embed.add_field(name="猜測紀錄", value="\n".join(view.history), inline=False)
+    return embed
 
 
 class GameMenu(View):
@@ -487,15 +799,27 @@ class GameMenu(View):
             )
         )
 
+    async def start_custom_game(
+        self,
+        interaction: discord.Interaction,
+        *,
+        game_name: str,
+        resolve_func: Callable[[int, str], tuple[str, int]],
+    ):
+        await interaction.response.send_modal(
+            CustomBetModal(
+                interaction.user,
+                game_name,
+                resolve_func,
+            )
+        )
+
     @discord.ui.button(label="骰子決鬥", style=discord.ButtonStyle.primary, emoji="🎲", row=0)
     async def dice_duel(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
+        await self.start_custom_game(
             interaction,
             game_name="骰子決鬥",
-            reward_mult_range=(1.1, 1.8),
-            penalty_chance=0.35,
-            penalty_mult_range=(0.3, 0.9),
-            crit_chance=0.2,
+            resolve_func=resolve_dice_duel,
         )
 
     @discord.ui.button(label="太空探險", style=discord.ButtonStyle.secondary, emoji="🚀", row=0)
@@ -533,14 +857,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="賽馬競速",
-            reward_mult_range=(1.05, 1.6),
-            penalty_chance=0.2,
-            penalty_mult_range=(0.1, 0.5),
-            crit_chance=0.14,
-        )
+        await interaction.response.send_modal(HorseRaceModal(interaction.user))
 
     @discord.ui.button(label="卡丁車", style=discord.ButtonStyle.secondary, emoji="🏎️", row=1)
     async def kart_race(self, interaction: discord.Interaction, button: Button):
@@ -555,14 +872,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="解謎挑戰",
-            reward_mult_range=(1.08, 1.65),
-            penalty_chance=0.22,
-            penalty_mult_range=(0.2, 0.7),
-            crit_chance=0.12,
-        )
+        await interaction.response.send_modal(PuzzleBetModal(interaction.user))
 
     @discord.ui.button(label="賽博駭客", style=discord.ButtonStyle.danger, emoji="💻", row=1)
     async def cyber_hack(self, interaction: discord.Interaction, button: Button):
