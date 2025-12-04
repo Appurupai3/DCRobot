@@ -64,10 +64,11 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
     若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
     """
 
-    henrik_api_key = os.getenv("HENRIK_API_KEY")
-    bearer_key = None
-    if henrik_api_key:
-        bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
+    henrik_api_key = (os.getenv("HENRIK_API_KEY") or "").strip()
+    if not henrik_api_key:
+        return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
+
+    bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
 
     base_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
     alt_url = None
@@ -75,31 +76,23 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
         game_name, tag_line = full_name.split("#", 1)
         alt_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{VAL_REGION}/{game_name}/{tag_line}"
 
-    def try_request(url: str, with_key: bool):
-        headers = {}
-        if with_key and bearer_key:
-            headers["Authorization"] = bearer_key
+    def try_request(url: str):
+        headers = {"Authorization": bearer_key}
         return requests.get(url, headers=headers, timeout=10)
 
     try:
-        attempts = [
-            (base_url, False),  # 公開路徑（避免壞掉的 API Key 造成 401）
-            (base_url, True),   # 帶金鑰路徑
-        ]
+        attempts = [base_url]
 
         if alt_url:
-            attempts.extend([
-                (alt_url, False),
-                (alt_url, True),
-            ])
+            attempts.append(alt_url)
 
         last_status = None
-        for url, use_key in attempts:
-            response = try_request(url, use_key)
+        for url in attempts:
+            response = try_request(url)
             last_status = response.status_code
 
             if response.status_code == 401:
-                continue
+                return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
 
             if response.status_code != 200:
                 continue
@@ -128,9 +121,6 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
                 stats.get("deaths", 0),
                 stats.get("assists", 0)
             ), None
-
-        if last_status == 401:
-            return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
 
         return None, f"❌ 備援查詢失敗 (HTTP {last_status or '未知'})，請稍後再試。"
 
