@@ -58,53 +58,81 @@ def get_rank_name(tier_id):
     return f"未知 ({tier_id})"
 
 
-def fetch_fallback_valorant_stats(puuid: str):
+def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
     """
     嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
     若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
     """
 
     henrik_api_key = os.getenv("HENRIK_API_KEY")
-    headers = {}
+    bearer_key = None
     if henrik_api_key:
-        headers["Authorization"] = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
+        bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
 
-    url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
+    base_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
+    alt_url = None
+    if full_name and "#" in full_name:
+        game_name, tag_line = full_name.split("#", 1)
+        alt_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{VAL_REGION}/{game_name}/{tag_line}"
+
+    def try_request(url: str, with_key: bool):
+        headers = {}
+        if with_key and bearer_key:
+            headers["Authorization"] = bearer_key
+        return requests.get(url, headers=headers, timeout=10)
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        attempts = [
+            (base_url, False),  # 公開路徑（避免壞掉的 API Key 造成 401）
+            (base_url, True),   # 帶金鑰路徑
+        ]
 
-        # 如果有帶 API Key 但回傳 401，嘗試用無鑰匙的公共查詢再試一次
-        if response.status_code == 401 and headers:
-            response = requests.get(url, timeout=10)
+        if alt_url:
+            attempts.extend([
+                (alt_url, False),
+                (alt_url, True),
+            ])
 
-        if response.status_code != 200:
-            return None, f"❌ 備援查詢失敗 (HTTP {response.status_code})，請通知管理員更新 API Key。"
+        last_status = None
+        for url, use_key in attempts:
+            response = try_request(url, use_key)
+            last_status = response.status_code
 
-        body = response.json()
-        matches = body.get("data", [])
-        if not matches:
-            return None, "❌ 備援來源也沒有找到近期對戰紀錄。"
+            if response.status_code == 401:
+                continue
 
-        latest = matches[0]
-        player_stats = None
-        for player in latest.get("players", {}).get("all_players", []):
-            if player.get("puuid") == puuid:
-                player_stats = player
-                break
+            if response.status_code != 200:
+                continue
 
-        if not player_stats:
-            return None, "❌ 備援來源資料異常：找不到玩家統計。"
+            body = response.json()
+            matches = body.get("data", [])
+            if not matches:
+                return None, "❌ 備援來源也沒有找到近期對戰紀錄。"
 
-        tier_name = player_stats.get("currenttier_patched") or get_rank_name(player_stats.get("currenttier", 0))
-        stats = player_stats.get("stats", {})
+            latest = matches[0]
+            player_stats = None
+            for player in latest.get("players", {}).get("all_players", []):
+                if player.get("puuid") == puuid or (full_name and player.get("name") == full_name.split("#", 1)[0]):
+                    player_stats = player
+                    break
 
-        return (
-            tier_name,
-            stats.get("kills", 0),
-            stats.get("deaths", 0),
-            stats.get("assists", 0)
-        ), None
+            if not player_stats:
+                return None, "❌ 備援來源資料異常：找不到玩家統計。"
+
+            tier_name = player_stats.get("currenttier_patched") or get_rank_name(player_stats.get("currenttier", 0))
+            stats = player_stats.get("stats", {})
+
+            return (
+                tier_name,
+                stats.get("kills", 0),
+                stats.get("deaths", 0),
+                stats.get("assists", 0)
+            ), None
+
+        if last_status == 401:
+            return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
+
+        return None, f"❌ 備援查詢失敗 (HTTP {last_status or '未知'})，請稍後再試。"
 
     except Exception as e:
         print(f"Fallback Valorant stats error: {e}")
@@ -295,7 +323,7 @@ class EconomyMenu(View):
 
         except ApiError as err:
             if err.response.status_code == 403:
-                fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid)
+                fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
                 if fallback_stats:
                     tier_name, kills, deaths, assists = fallback_stats
                     embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
