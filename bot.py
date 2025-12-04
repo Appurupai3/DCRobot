@@ -63,12 +63,17 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
     嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
     若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
     """
+<<<<<<< HEAD
 
     henrik_api_key = (os.getenv("HENRIK_API_KEY") or "").strip()
     if not henrik_api_key:
         return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
 
     bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
+=======
+    henrik_api_key = (os.getenv("HENRIK_API_KEY") or "").strip()
+    bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}" if henrik_api_key else None
+>>>>>>> 9c6fcc399a2ccd4163c968fb556ae052f1087a84
 
     base_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
     alt_url = None
@@ -76,9 +81,18 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
         game_name, tag_line = full_name.split("#", 1)
         alt_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{VAL_REGION}/{game_name}/{tag_line}"
 
+<<<<<<< HEAD
     def try_request(url: str):
         headers = {"Authorization": bearer_key}
         return requests.get(url, headers=headers, timeout=10)
+=======
+    def build_requests(url: str):
+        attempts = []
+        if bearer_key:
+            attempts.append({"Authorization": bearer_key})
+        attempts.append(None)  # 最後嘗試無鑰匙，避免壞掉的 Key 阻擋查詢
+        return attempts
+>>>>>>> 9c6fcc399a2ccd4163c968fb556ae052f1087a84
 
     try:
         attempts = [base_url]
@@ -88,6 +102,7 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
 
         last_status = None
         for url in attempts:
+<<<<<<< HEAD
             response = try_request(url)
             last_status = response.status_code
 
@@ -96,6 +111,20 @@ def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
 
             if response.status_code != 200:
                 continue
+=======
+            for headers in build_requests(url):
+                response = requests.get(url, headers=headers or {}, timeout=10)
+                last_status = response.status_code
+
+                if response.status_code == 401:
+                    # 如果有嘗試帶鑰匙就繼續試無鑰匙；若已無鑰匙仍 401 則提示更新鑰匙
+                    if headers:
+                        continue
+                    return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
+
+                if response.status_code != 200:
+                    continue
+>>>>>>> 9c6fcc399a2ccd4163c968fb556ae052f1087a84
 
             body = response.json()
             matches = body.get("data", [])
