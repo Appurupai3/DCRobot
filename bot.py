@@ -376,6 +376,85 @@ class EconomyMenu(View):
         await interaction.response.send_message(**build_ranking_message())
 
 
+class BetModal(Modal):
+    def __init__(
+        self,
+        user: discord.User,
+        game_name: str,
+        reward_mult_range: tuple[float, float],
+        penalty_chance: float,
+        penalty_mult_range: tuple[float, float],
+        crit_chance: float = 0.1,
+    ):
+        super().__init__(title=f"💰 {game_name} - 請輸入下注金額")
+        self.user = user
+        self.game_name = game_name
+        self.reward_mult_range = reward_mult_range
+        self.penalty_chance = penalty_chance
+        self.penalty_mult_range = penalty_mult_range
+        self.crit_chance = crit_chance
+
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+            return
+
+        # 先扣除下注金額
+        users[uid]["wallet"] -= amount
+
+        outcome = random.random()
+        critical = False
+        result_text = ""
+
+        if outcome < self.penalty_chance:
+            extra_loss = int(amount * random.uniform(*self.penalty_mult_range))
+            users[uid]["wallet"] = max(0, users[uid]["wallet"] - extra_loss)
+            result_text = (
+                f"😢 {self.game_name} 失利，扣除下注 ${amount}，另外被處罰 ${extra_loss}。\n"
+                "（扣款已反映在錢包）"
+            )
+        else:
+            reward_multiplier = random.uniform(*self.reward_mult_range)
+            if random.random() < self.crit_chance:
+                critical = True
+                reward_multiplier *= 1.5
+
+            reward = int(amount * reward_multiplier)
+            users[uid]["wallet"] += amount + reward
+            crit_text = "（暴擊收益 x1.5！）" if critical else ""
+            result_text = (
+                f"🎉 {self.game_name} 成功！返還下注 ${amount}，另獲得 ${reward}。{crit_text}"
+            )
+
+        save_data(users)
+        balance = users[uid]["wallet"]
+        await interaction.response.send_message(
+            f"{result_text}\n目前錢包餘額：${balance}",
+            ephemeral=True,
+        )
+
+
 class GameMenu(View):
     def __init__(self, user: discord.User):
         super().__init__(timeout=180)
@@ -387,68 +466,148 @@ class GameMenu(View):
             return False
         return True
 
-    async def handle_game(self, interaction: discord.Interaction, game_name: str, reward_range=(10, 40), penalty_chance=0.2, penalty_range=(5, 20)):
-        await open_account(interaction.user)
-        users = load_data()
-        uid = str(interaction.user.id)
-
-        if random.random() < penalty_chance:
-            loss = random.randint(*penalty_range)
-            users[uid]["wallet"] = max(0, users[uid]["wallet"] - loss)
-            result = f"😢 {game_name} 失利，損失 ${loss}。"
-        else:
-            gain = random.randint(*reward_range)
-            users[uid]["wallet"] += gain
-            result = f"🎉 {game_name} 勝利，獲得 ${gain}！"
-
-        save_data(users)
-        balance = users[uid]["wallet"]
-        await interaction.response.send_message(f"{result}\n目前錢包餘額：${balance}", ephemeral=True)
+    async def start_game(
+        self,
+        interaction: discord.Interaction,
+        *,
+        game_name: str,
+        reward_mult_range: tuple[float, float],
+        penalty_chance: float,
+        penalty_mult_range: tuple[float, float],
+        crit_chance: float = 0.1,
+    ):
+        await interaction.response.send_modal(
+            BetModal(
+                interaction.user,
+                game_name,
+                reward_mult_range,
+                penalty_chance,
+                penalty_mult_range,
+                crit_chance,
+            )
+        )
 
     @discord.ui.button(label="骰子決鬥", style=discord.ButtonStyle.primary, emoji="🎲", row=0)
     async def dice_duel(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "骰子決鬥", reward_range=(15, 45), penalty_chance=0.25, penalty_range=(10, 25))
+        await self.start_game(
+            interaction,
+            game_name="骰子決鬥",
+            reward_mult_range=(1.1, 1.8),
+            penalty_chance=0.35,
+            penalty_mult_range=(0.3, 0.9),
+            crit_chance=0.2,
+        )
 
     @discord.ui.button(label="太空探險", style=discord.ButtonStyle.secondary, emoji="🚀", row=0)
     async def space_adventure(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "太空探險", reward_range=(20, 55), penalty_chance=0.3, penalty_range=(15, 30))
+        await self.start_game(
+            interaction,
+            game_name="太空探險",
+            reward_mult_range=(1.2, 2.0),
+            penalty_chance=0.3,
+            penalty_mult_range=(0.4, 1.0),
+            crit_chance=0.18,
+        )
 
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "海盜寶藏", reward_range=(25, 60), penalty_chance=0.35, penalty_range=(20, 35))
+        await self.start_game(
+            interaction,
+            game_name="海盜寶藏",
+            reward_mult_range=(1.3, 2.2),
+            penalty_chance=0.38,
+            penalty_mult_range=(0.5, 1.2),
+            crit_chance=0.22,
+        )
 
     @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
     async def magic_trial(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "魔法試煉", reward_range=(15, 50), penalty_chance=0.2, penalty_range=(10, 20))
+        await self.start_game(
+            interaction,
+            game_name="魔法試煉",
+            reward_mult_range=(1.15, 1.9),
+            penalty_chance=0.25,
+            penalty_mult_range=(0.2, 0.7),
+            crit_chance=0.16,
+        )
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "賽馬競速", reward_range=(10, 35), penalty_chance=0.15, penalty_range=(5, 15))
+        await self.start_game(
+            interaction,
+            game_name="賽馬競速",
+            reward_mult_range=(1.05, 1.6),
+            penalty_chance=0.2,
+            penalty_mult_range=(0.1, 0.5),
+            crit_chance=0.14,
+        )
 
     @discord.ui.button(label="卡丁車", style=discord.ButtonStyle.secondary, emoji="🏎️", row=1)
     async def kart_race(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "卡丁車", reward_range=(18, 42), penalty_chance=0.22, penalty_range=(10, 22))
+        await self.start_game(
+            interaction,
+            game_name="卡丁車",
+            reward_mult_range=(1.1, 1.7),
+            penalty_chance=0.24,
+            penalty_mult_range=(0.25, 0.8),
+            crit_chance=0.15,
+        )
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "解謎挑戰", reward_range=(12, 38), penalty_chance=0.18, penalty_range=(8, 18))
+        await self.start_game(
+            interaction,
+            game_name="解謎挑戰",
+            reward_mult_range=(1.08, 1.65),
+            penalty_chance=0.22,
+            penalty_mult_range=(0.2, 0.7),
+            crit_chance=0.12,
+        )
 
     @discord.ui.button(label="賽博駭客", style=discord.ButtonStyle.danger, emoji="💻", row=1)
     async def cyber_hack(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "賽博駭客", reward_range=(22, 48), penalty_chance=0.28, penalty_range=(12, 28))
+        await self.start_game(
+            interaction,
+            game_name="賽博駭客",
+            reward_mult_range=(1.25, 2.1),
+            penalty_chance=0.32,
+            penalty_mult_range=(0.45, 1.1),
+            crit_chance=0.2,
+        )
 
     @discord.ui.button(label="料理競賽", style=discord.ButtonStyle.primary, emoji="🍳", row=2)
     async def cooking_battle(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "料理競賽", reward_range=(10, 32), penalty_chance=0.12, penalty_range=(5, 15))
+        await self.start_game(
+            interaction,
+            game_name="料理競賽",
+            reward_mult_range=(1.05, 1.55),
+            penalty_chance=0.16,
+            penalty_mult_range=(0.15, 0.55),
+            crit_chance=0.1,
+        )
 
     @discord.ui.button(label="節奏挑戰", style=discord.ButtonStyle.secondary, emoji="🥁", row=2)
     async def rhythm_game(self, interaction: discord.Interaction, button: Button):
-        await self.handle_game(interaction, "節奏挑戰", reward_range=(14, 40), penalty_chance=0.2, penalty_range=(7, 20))
+        await self.start_game(
+            interaction,
+            game_name="節奏挑戰",
+            reward_mult_range=(1.12, 1.8),
+            penalty_chance=0.26,
+            penalty_mult_range=(0.3, 0.9),
+            crit_chance=0.18,
+        )
 
 
 def build_game_menu(user: discord.User):
-    embed = discord.Embed(title="🎮 經濟遊戲大廳", description="選擇遊戲來賺取金幣提升排行榜！", color=discord.Color.gold())
-    embed.add_field(name="玩法", value="每款遊戲都有不同的風險與收益，獲得的金幣會直接存入錢包。", inline=False)
+    embed = discord.Embed(title="🎮 經濟遊戲大廳", description="選擇遊戲，下注挑戰風險，衝高你的金幣！", color=discord.Color.gold())
+    embed.add_field(
+        name="玩法",
+        value=(
+            "每款遊戲都有不同的賠率與風險，可自由輸入下注金額，\n"
+            "成功會返還本金並給予額外收益，失敗則會失去本金且可能被追加處罰。"
+        ),
+        inline=False,
+    )
     return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
 
 
