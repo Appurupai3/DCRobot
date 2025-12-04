@@ -68,6 +68,17 @@ def get_rank_name(tier_id):
     return f"未知 ({tier_id})"
 
 
+ALT_VALORANT_STAT_SITES = [
+    ("dak.gg", "https://dak.gg/valorant"),
+    ("Tracker.gg", "https://tracker.gg/valorant"),
+    ("Henrik Match Checker", "https://docs.henrikdev.xyz/valorant"),
+]
+
+
+def format_alt_stat_sites():
+    return "\n".join(f"• {name}: {url}" for name, url in ALT_VALORANT_STAT_SITES)
+
+
 def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
     """
     嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
@@ -316,7 +327,7 @@ class EconomyMenu(View):
                 embed.description = "數據來源：最近一場對戰"
                 embed.add_field(name="🏆 目前牌位", value=f"**{get_rank_name(tier)}**", inline=False)
                 embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
-                
+
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
                 await interaction.followup.send("❌ 資料異常：找不到玩家數據。", ephemeral=True)
@@ -334,9 +345,11 @@ class EconomyMenu(View):
                     embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
+                    alt_sites = format_alt_stat_sites()
                     extra = f"\n{fallback_error}" if fallback_error else ""
+                    site_hint = f"\n\n若需立即查詢，可在以下網站輸入遊戲 ID：\n{alt_sites}"
                     await interaction.followup.send(
-                        f"{base_error}{extra}",
+                        f"{base_error}{extra}{site_hint}",
                         ephemeral=True,
                     )
             else:
