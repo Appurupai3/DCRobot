@@ -23,16 +23,26 @@ ACCOUNT_REGION = os.getenv('ACCOUNT_REGION', 'asia')
 # 查詢特戰戰績時，台灣屬於 'ap'
 VAL_REGION = os.getenv('VAL_REGION', 'ap')
 
+last_api_key = None
+
+
 def ensure_watchers():
-    global riot_watcher, val_watcher
+    global riot_watcher, val_watcher, last_api_key
 
     api_key = os.getenv('RIOT_API_KEY')
     if not api_key:
         return False
 
+    # 若環境變數更新過，需重建 watchers 才會生效
+    if api_key != last_api_key:
+        riot_watcher = RiotWatcher(api_key)
+        val_watcher = ValWatcher(api_key)
+        last_api_key = api_key
+
     if riot_watcher is None or val_watcher is None:
         riot_watcher = RiotWatcher(api_key)
         val_watcher = ValWatcher(api_key)
+        last_api_key = api_key
 
     return True
 
@@ -56,6 +66,30 @@ def get_rank_name(tier_id):
     if 24 <= tier_id <= 26: return f"神話 (Immortal) {tier_id - 23}"
     if tier_id >= 27: return "輻能戰魂 (Radiant)"
     return f"未知 ({tier_id})"
+
+
+ALT_VALORANT_STAT_SITES = [
+    ("dak.gg", "https://dak.gg/valorant"),
+    ("Tracker.gg", "https://tracker.gg/valorant"),
+    ("Henrik Match Checker", "https://docs.henrikdev.xyz/valorant"),
+]
+
+
+def format_alt_stat_sites():
+    return "\n".join(f"• {name}: {url}" for name, url in ALT_VALORANT_STAT_SITES)
+
+
+def build_permission_error_message(fallback_error: str | None = None):
+    base_error = (
+        "❌ 目前的 Riot API Key 沒有 VALORANT 戰績權限（可能只允許綁定帳號）。\n"
+        "請通知管理員重新申請/更新具備 VALORANT Match 查詢的 API Key。"
+    )
+
+    alt_sites = format_alt_stat_sites()
+    extra = f"\n{fallback_error}" if fallback_error else ""
+    site_hint = f"\n\n若需立即查詢，可在以下網站輸入遊戲 ID：\n{alt_sites}"
+
+    return f"{base_error}{extra}{site_hint}"
 
 
 def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
@@ -306,7 +340,7 @@ class EconomyMenu(View):
                 embed.description = "數據來源：最近一場對戰"
                 embed.add_field(name="🏆 目前牌位", value=f"**{get_rank_name(tier)}**", inline=False)
                 embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
-                
+
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
                 await interaction.followup.send("❌ 資料異常：找不到玩家數據。", ephemeral=True)
@@ -314,6 +348,7 @@ class EconomyMenu(View):
         except ApiError as err:
             if err.response.status_code == 403:
                 fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
+
                 if fallback_stats:
                     tier_name, kills, deaths, assists = fallback_stats
                     embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
@@ -322,7 +357,10 @@ class EconomyMenu(View):
                     embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
-                    await interaction.followup.send(fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
+                    await interaction.followup.send(
+                        build_permission_error_message(fallback_error),
+                        ephemeral=True,
+                    )
             else:
                 await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
         except Exception as e:
@@ -335,7 +373,20 @@ class EconomyMenu(View):
 
 @bot.event
 async def on_ready():
+    try:
+        await bot.tree.sync()
+    except Exception as e:
+        print(f"Slash command sync failed: {e}")
     print(f'已登入：{bot.user}')
+
+
+@bot.tree.command(name="testerror", description="回傳權限不足時的錯誤訊息與查詢網站")
+async def testerror_command(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        build_permission_error_message("❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"),
+        ephemeral=True,
+    )
+
 
 @bot.command()
 async def openmenu(ctx):
