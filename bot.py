@@ -322,7 +322,10 @@ class EconomyMenu(View):
                     embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
-                    await interaction.followup.send(fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
+                    await interaction.followup.send(
+                        fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。",
+                        ephemeral=True,
+                    )
             else:
                 await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
         except Exception as e:
