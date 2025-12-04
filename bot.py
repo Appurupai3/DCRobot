@@ -606,27 +606,54 @@ class HorseRaceModal(Modal):
 
 
 def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int]:
-    die_one = random.randint(1, 6)
-    die_two = random.randint(1, 6)
-    total = die_one + die_two
-    difference = abs(die_one - die_two)
+    player_rolls = (random.randint(1, 6), random.randint(1, 6))
+    enemy_rolls = (random.randint(1, 6), random.randint(1, 6))
 
-    if total in (2, 12):
-        reward = int(amount * 20)
+    player_total = sum(player_rolls)
+    enemy_total = sum(enemy_rolls)
+
+    if player_total == 12 and enemy_total == 2:
+        reward = amount * 50
         payout_change = amount + reward
         result_text = (
-            f"🎲 骰子決鬥神奇爆擊！點數 {die_one} + {die_two} = {total}，贏得 20 倍獎勵 ${reward} 並返還本金。"
+            "🎲 骰子決鬥 PVE！你擲出"
+            f" {player_rolls[0]}+{player_rolls[1]}=12，對手只有 {enemy_rolls[0]}+{enemy_rolls[1]}=2。"
+            f" 豪取 50 倍獎勵 ${reward} 並收回本金！"
+        )
+    elif player_total == 2 and enemy_total == 12:
+        penalty = amount * 10
+        payout_change = -penalty
+        result_text = (
+            "🎲 骰子決鬥 PVE！你不幸擲出"
+            f" {player_rolls[0]}+{player_rolls[1]}=2，而對手爆滿 {enemy_rolls[0]}+{enemy_rolls[1]}=12。"
+            f" 觸發重創，額外損失 ${penalty}（下注已扣除）。"
+        )
+    elif player_total > enemy_total:
+        diff = player_total - enemy_total
+        multiplier = diff * 0.5
+        reward = int(amount * multiplier)
+        payout_change = amount + reward
+        result_text = (
+            "🎲 你的點數"
+            f" {player_rolls[0]}+{player_rolls[1]}={player_total}，敵方 {enemy_rolls[0]}+{enemy_rolls[1]}={enemy_total}。"
+            f" 差值 {diff} 轉為 {multiplier:.1f} 倍收益，返還本金並獲得 ${reward}！"
+        )
+    elif enemy_total > player_total:
+        diff = enemy_total - player_total
+        multiplier = diff * 0.5
+        penalty = int(amount * multiplier)
+        payout_change = -penalty
+        result_text = (
+            "🎲 你的點數"
+            f" {player_rolls[0]}+{player_rolls[1]}={player_total}，敵方 {enemy_rolls[0]}+{enemy_rolls[1]}={enemy_total}。"
+            f" 差值 {diff} 造成 {multiplier:.1f} 倍懲罰，額外失去 ${penalty}（下注已扣除）。"
         )
     else:
-        multiplier = difference * 0.5
-        reward = int(amount * multiplier)
-        payout_change = amount + reward if reward > 0 else 0
-        if reward > 0:
-            result_text = (
-                f"🎲 你擲出 {die_one} 與 {die_two} (差值 {difference})，依差值×0.5 得到 {multiplier:.2f} 倍，獲得 ${reward}！"
-            )
-        else:
-            result_text = f"🎲 兩顆骰子都為 {die_one}，無差值，失去下注 ${amount}。"
+        payout_change = amount
+        result_text = (
+            "🎲 雙方點數"
+            f" {player_rolls[0]}+{player_rolls[1]}={player_total} 平手，退回下注 ${amount}，不增不減。"
+        )
 
     return result_text, payout_change
 
