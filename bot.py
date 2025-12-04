@@ -7,28 +7,34 @@ import random
 from dotenv import load_dotenv
 # 這裡多引入了 RiotWatcher
 from riotwatcher import ValWatcher, RiotWatcher, ApiError
+import requests
 
 # --- 初始化 ---
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-riot_api_key = os.getenv('RIOT_API_KEY')
 
-# 初始化 Watchers
+# 初始化 Watchers（延後建立，避免環境變數更新後要重啟）
 riot_watcher = None
 val_watcher = None
 
 # 地區設定 (重要)
 # 查詢帳號時，台灣屬於 'asia'
-ACCOUNT_REGION = 'asia' 
+ACCOUNT_REGION = os.getenv('ACCOUNT_REGION', 'asia')
 # 查詢特戰戰績時，台灣屬於 'ap'
-VAL_REGION = 'ap'       
+VAL_REGION = os.getenv('VAL_REGION', 'ap')
 
-if riot_api_key:
-    # 兩個都要初始化
-    riot_watcher = RiotWatcher(riot_api_key)
-    val_watcher = ValWatcher(riot_api_key)
-else:
-    print("⚠️ 警告：未設定 RIOT_API_KEY，特戰功能將無法使用。")
+def ensure_watchers():
+    global riot_watcher, val_watcher
+
+    api_key = os.getenv('RIOT_API_KEY')
+    if not api_key:
+        return False
+
+    if riot_watcher is None or val_watcher is None:
+        riot_watcher = RiotWatcher(api_key)
+        val_watcher = ValWatcher(api_key)
+
+    return True
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -50,6 +56,80 @@ def get_rank_name(tier_id):
     if 24 <= tier_id <= 26: return f"神話 (Immortal) {tier_id - 23}"
     if tier_id >= 27: return "輻能戰魂 (Radiant)"
     return f"未知 ({tier_id})"
+
+
+def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
+    """
+    嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
+    若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
+    """
+    henrik_api_key = (os.getenv("HENRIK_API_KEY") or "").strip()
+    bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}" if henrik_api_key else None
+
+    base_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
+    alt_url = None
+    if full_name and "#" in full_name:
+        game_name, tag_line = full_name.split("#", 1)
+        alt_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{VAL_REGION}/{game_name}/{tag_line}"
+
+    def build_requests(url: str):
+        attempts = []
+        if bearer_key:
+            attempts.append({"Authorization": bearer_key})
+        attempts.append(None)  # 最後嘗試無鑰匙，避免壞掉的 Key 阻擋查詢
+        return attempts
+
+    try:
+        attempts = [base_url]
+
+        if alt_url:
+            attempts.append(alt_url)
+
+        last_status = None
+        for url in attempts:
+            for headers in build_requests(url):
+                response = requests.get(url, headers=headers or {}, timeout=10)
+                last_status = response.status_code
+
+                if response.status_code == 401:
+                    # 如果有嘗試帶鑰匙就繼續試無鑰匙；若已無鑰匙仍 401 則提示更新鑰匙
+                    if headers:
+                        continue
+                    return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
+
+                if response.status_code != 200:
+                    continue
+
+            body = response.json()
+            matches = body.get("data", [])
+            if not matches:
+                return None, "❌ 備援來源也沒有找到近期對戰紀錄。"
+
+            latest = matches[0]
+            player_stats = None
+            for player in latest.get("players", {}).get("all_players", []):
+                if player.get("puuid") == puuid or (full_name and player.get("name") == full_name.split("#", 1)[0]):
+                    player_stats = player
+                    break
+
+            if not player_stats:
+                return None, "❌ 備援來源資料異常：找不到玩家統計。"
+
+            tier_name = player_stats.get("currenttier_patched") or get_rank_name(player_stats.get("currenttier", 0))
+            stats = player_stats.get("stats", {})
+
+            return (
+                tier_name,
+                stats.get("kills", 0),
+                stats.get("deaths", 0),
+                stats.get("assists", 0)
+            ), None
+
+        return None, f"❌ 備援查詢失敗 (HTTP {last_status or '未知'})，請稍後再試。"
+
+    except Exception as e:
+        print(f"Fallback Valorant stats error: {e}")
+        return None, "❌ 備援查詢時發生錯誤，請稍後再試或通知管理員。"
 
 # ===========================
 # === 資料存取區 ===
@@ -83,7 +163,7 @@ def save_riot_data(data):
 
 async def process_bind(user_id, game_name, tag_line, success_callback, error_callback):
     # 這裡改成檢查 riot_watcher
-    if not riot_watcher:
+    if not ensure_watchers():
         await error_callback("❌ 機器人未設定 API Key，無法綁定。")
         return
 
@@ -104,7 +184,7 @@ async def process_bind(user_id, game_name, tag_line, success_callback, error_cal
         if err.response.status_code == 404:
             await error_callback(f"❌ 找不到帳號 **{game_name}#{tag_line}**\n請確認 ID 與 Tag 正確，且位於亞太伺服器。")
         elif err.response.status_code == 403:
-            await error_callback("❌ API Key 已過期，請通知管理員更新。")
+            await error_callback("❌ API Key 已過期或未具備權限，請通知管理員更新。")
         else:
             await error_callback(f"❌ 未知錯誤 (Code: {err.response.status_code})")
     except Exception as e:
@@ -194,6 +274,10 @@ class EconomyMenu(View):
             await interaction.followup.send("❌ 請先綁定帳號！", ephemeral=True)
             return
 
+        if not ensure_watchers():
+            await interaction.followup.send("❌ 尚未設定 Riot API Key，請通知管理員。", ephemeral=True)
+            return
+
         try:
             puuid = riot_data[uid]['puuid']
             full_name = riot_data[uid]['full_name']
@@ -231,7 +315,19 @@ class EconomyMenu(View):
                 await interaction.followup.send("❌ 資料異常：找不到玩家數據。", ephemeral=True)
 
         except ApiError as err:
-            await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
+            if err.response.status_code == 403:
+                fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
+                if fallback_stats:
+                    tier_name, kills, deaths, assists = fallback_stats
+                    embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
+                    embed.description = "數據來源：最近一場對戰（備援 API）"
+                    embed.add_field(name="🏆 目前牌位", value=f"**{tier_name}**", inline=False)
+                    embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.followup.send(fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
+            else:
+                await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
         except Exception as e:
             print(f"Stats Error: {e}")
             await interaction.followup.send("❌ 發生未知錯誤。", ephemeral=True)
