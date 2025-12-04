@@ -23,16 +23,26 @@ ACCOUNT_REGION = os.getenv('ACCOUNT_REGION', 'asia')
 # 查詢特戰戰績時，台灣屬於 'ap'
 VAL_REGION = os.getenv('VAL_REGION', 'ap')
 
+last_api_key = None
+
+
 def ensure_watchers():
-    global riot_watcher, val_watcher
+    global riot_watcher, val_watcher, last_api_key
 
     api_key = os.getenv('RIOT_API_KEY')
     if not api_key:
         return False
 
+    # 若環境變數更新過，需重建 watchers 才會生效
+    if api_key != last_api_key:
+        riot_watcher = RiotWatcher(api_key)
+        val_watcher = ValWatcher(api_key)
+        last_api_key = api_key
+
     if riot_watcher is None or val_watcher is None:
         riot_watcher = RiotWatcher(api_key)
         val_watcher = ValWatcher(api_key)
+        last_api_key = api_key
 
     return True
 
@@ -314,6 +324,8 @@ class EconomyMenu(View):
         except ApiError as err:
             if err.response.status_code == 403:
                 fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
+                base_error = "❌ 目前的 Riot API Key 沒有 VALORANT 戰績權限（可能只允許綁定帳號）。\n請通知管理員重新申請/更新具備 VALORANT Match 查詢的 API Key。"
+
                 if fallback_stats:
                     tier_name, kills, deaths, assists = fallback_stats
                     embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
@@ -322,8 +334,9 @@ class EconomyMenu(View):
                     embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
+                    extra = f"\n{fallback_error}" if fallback_error else ""
                     await interaction.followup.send(
-                        fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。",
+                        f"{base_error}{extra}",
                         ephemeral=True,
                     )
             else:
