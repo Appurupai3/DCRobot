@@ -7,6 +7,7 @@ import random
 from dotenv import load_dotenv
 # 這裡多引入了 RiotWatcher
 from riotwatcher import ValWatcher, RiotWatcher, ApiError
+import requests
 
 # --- 初始化 ---
 load_dotenv()
@@ -55,6 +56,54 @@ def get_rank_name(tier_id):
     if 24 <= tier_id <= 26: return f"神話 (Immortal) {tier_id - 23}"
     if tier_id >= 27: return "輻能戰魂 (Radiant)"
     return f"未知 ({tier_id})"
+
+
+def fetch_fallback_valorant_stats(puuid: str):
+    """
+    嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
+    若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
+    """
+
+    henrik_api_key = os.getenv("HENRIK_API_KEY")
+    headers = {}
+    if henrik_api_key:
+        headers["Authorization"] = henrik_api_key
+
+    url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None, f"❌ 備援查詢失敗 (HTTP {response.status_code})，請通知管理員更新 API Key。"
+
+        body = response.json()
+        matches = body.get("data", [])
+        if not matches:
+            return None, "❌ 備援來源也沒有找到近期對戰紀錄。"
+
+        latest = matches[0]
+        player_stats = None
+        for player in latest.get("players", {}).get("all_players", []):
+            if player.get("puuid") == puuid:
+                player_stats = player
+                break
+
+        if not player_stats:
+            return None, "❌ 備援來源資料異常：找不到玩家統計。"
+
+        tier_name = player_stats.get("currenttier_patched") or get_rank_name(player_stats.get("currenttier", 0))
+        stats = player_stats.get("stats", {})
+
+        return (
+            tier_name,
+            stats.get("kills", 0),
+            stats.get("deaths", 0),
+            stats.get("assists", 0)
+        ), None
+
+    except Exception as e:
+        print(f"Fallback Valorant stats error: {e}")
+        return None, "❌ 備援查詢時發生錯誤，請稍後再試或通知管理員。"
 
 # ===========================
 # === 資料存取區 ===
@@ -241,7 +290,16 @@ class EconomyMenu(View):
 
         except ApiError as err:
             if err.response.status_code == 403:
-                await interaction.followup.send("❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
+                fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid)
+                if fallback_stats:
+                    tier_name, kills, deaths, assists = fallback_stats
+                    embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
+                    embed.description = "數據來源：最近一場對戰（備援 API）"
+                    embed.add_field(name="🏆 目前牌位", value=f"**{tier_name}**", inline=False)
+                    embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.followup.send(fallback_error or "❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
             else:
                 await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
         except Exception as e:
