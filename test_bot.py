@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 from unittest.mock import Mock, patch
@@ -39,9 +40,24 @@ def ensure_discord_and_riotwatcher_stubs():
             def default():
                 return DummyIntents()
 
+        class DummyResponse:
+            async def send_message(self, *args, **kwargs):
+                return None
+
+        class DummyInteraction:
+            def __init__(self):
+                self.response = DummyResponse()
+
         class DummyBot:
             def __init__(self, *args, **kwargs):
                 self.user = None
+                async def tree_sync():
+                    return None
+
+                self.tree = types.SimpleNamespace(
+                    command=lambda *a, **k: (lambda func: func),
+                    sync=tree_sync,
+                )
 
             def run(self, *args, **kwargs):
                 return None
@@ -84,11 +100,12 @@ def ensure_discord_and_riotwatcher_stubs():
         )
 
         discord_module = types.SimpleNamespace(
+            app_commands=types.SimpleNamespace(),
             Intents=DummyIntents,
             Color=DummyColor,
             Embed=DummyEmbed,
             ui=ui_namespace,
-            Interaction=object,
+            Interaction=DummyInteraction,
             ButtonStyle=types.SimpleNamespace(green=None, blurple=None, red=None, gray=None, danger=None),
         )
 
@@ -134,6 +151,15 @@ def test_format_alt_stat_sites_lists_known_domains():
         assert name in text
 
 
+def test_build_permission_error_message_includes_sites_and_extra():
+    message = bot.build_permission_error_message("extra line")
+
+    assert "VALORANT Match 查詢" in message
+    assert "extra line" in message
+    for name, _ in bot.ALT_VALORANT_STAT_SITES:
+        assert name in message
+
+
 def test_fetch_fallback_without_key_returns_error(monkeypatch):
     monkeypatch.delenv("HENRIK_API_KEY", raising=False)
     result, error = bot.fetch_fallback_valorant_stats("puuid")
@@ -173,3 +199,22 @@ def test_fetch_fallback_success(monkeypatch):
 
     assert error is None
     assert result == ("白金 (Platinum) 1", 10, 5, 3)
+
+
+def test_testerror_command_returns_ephemeral_message():
+    class DummyResponse:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, content=None, ephemeral=None):
+            self.sent.append((content, ephemeral))
+
+    interaction = Mock()
+    interaction.response = DummyResponse()
+
+    asyncio.run(bot.testerror_command(interaction))
+
+    assert interaction.response.sent
+    message, ephemeral = interaction.response.sent[0]
+    assert ephemeral is True
+    assert "Riot API Key" in message

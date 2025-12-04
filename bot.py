@@ -79,6 +79,19 @@ def format_alt_stat_sites():
     return "\n".join(f"• {name}: {url}" for name, url in ALT_VALORANT_STAT_SITES)
 
 
+def build_permission_error_message(fallback_error: str | None = None):
+    base_error = (
+        "❌ 目前的 Riot API Key 沒有 VALORANT 戰績權限（可能只允許綁定帳號）。\n"
+        "請通知管理員重新申請/更新具備 VALORANT Match 查詢的 API Key。"
+    )
+
+    alt_sites = format_alt_stat_sites()
+    extra = f"\n{fallback_error}" if fallback_error else ""
+    site_hint = f"\n\n若需立即查詢，可在以下網站輸入遊戲 ID：\n{alt_sites}"
+
+    return f"{base_error}{extra}{site_hint}"
+
+
 def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
     """
     嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
@@ -335,7 +348,6 @@ class EconomyMenu(View):
         except ApiError as err:
             if err.response.status_code == 403:
                 fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
-                base_error = "❌ 目前的 Riot API Key 沒有 VALORANT 戰績權限（可能只允許綁定帳號）。\n請通知管理員重新申請/更新具備 VALORANT Match 查詢的 API Key。"
 
                 if fallback_stats:
                     tier_name, kills, deaths, assists = fallback_stats
@@ -345,11 +357,8 @@ class EconomyMenu(View):
                     embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
-                    alt_sites = format_alt_stat_sites()
-                    extra = f"\n{fallback_error}" if fallback_error else ""
-                    site_hint = f"\n\n若需立即查詢，可在以下網站輸入遊戲 ID：\n{alt_sites}"
                     await interaction.followup.send(
-                        f"{base_error}{extra}{site_hint}",
+                        build_permission_error_message(fallback_error),
                         ephemeral=True,
                     )
             else:
@@ -364,7 +373,20 @@ class EconomyMenu(View):
 
 @bot.event
 async def on_ready():
+    try:
+        await bot.tree.sync()
+    except Exception as e:
+        print(f"Slash command sync failed: {e}")
     print(f'已登入：{bot.user}')
+
+
+@bot.tree.command(name="testerror", description="回傳權限不足時的錯誤訊息與查詢網站")
+async def testerror_command(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        build_permission_error_message("❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"),
+        ephemeral=True,
+    )
+
 
 @bot.command()
 async def openmenu(ctx):
