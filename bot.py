@@ -367,6 +367,106 @@ class EconomyMenu(View):
             print(f"Stats Error: {e}")
             await interaction.followup.send("❌ 發生未知錯誤。", ephemeral=True)
 
+    @discord.ui.button(label="開啟遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
+    async def open_game_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(**build_game_menu(interaction.user))
+
+    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2)
+    async def ranking_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(**build_ranking_message())
+
+
+class GameMenu(View):
+    def __init__(self, user: discord.User):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲面板！請自行使用 /opengame 開啟。", ephemeral=True)
+            return False
+        return True
+
+    async def handle_game(self, interaction: discord.Interaction, game_name: str, reward_range=(10, 40), penalty_chance=0.2, penalty_range=(5, 20)):
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        if random.random() < penalty_chance:
+            loss = random.randint(*penalty_range)
+            users[uid]["wallet"] = max(0, users[uid]["wallet"] - loss)
+            result = f"😢 {game_name} 失利，損失 ${loss}。"
+        else:
+            gain = random.randint(*reward_range)
+            users[uid]["wallet"] += gain
+            result = f"🎉 {game_name} 勝利，獲得 ${gain}！"
+
+        save_data(users)
+        balance = users[uid]["wallet"]
+        await interaction.response.send_message(f"{result}\n目前錢包餘額：${balance}", ephemeral=True)
+
+    @discord.ui.button(label="骰子決鬥", style=discord.ButtonStyle.primary, emoji="🎲", row=0)
+    async def dice_duel(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "骰子決鬥", reward_range=(15, 45), penalty_chance=0.25, penalty_range=(10, 25))
+
+    @discord.ui.button(label="太空探險", style=discord.ButtonStyle.secondary, emoji="🚀", row=0)
+    async def space_adventure(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "太空探險", reward_range=(20, 55), penalty_chance=0.3, penalty_range=(15, 30))
+
+    @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
+    async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "海盜寶藏", reward_range=(25, 60), penalty_chance=0.35, penalty_range=(20, 35))
+
+    @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
+    async def magic_trial(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "魔法試煉", reward_range=(15, 50), penalty_chance=0.2, penalty_range=(10, 20))
+
+    @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
+    async def horse_race(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "賽馬競速", reward_range=(10, 35), penalty_chance=0.15, penalty_range=(5, 15))
+
+    @discord.ui.button(label="卡丁車", style=discord.ButtonStyle.secondary, emoji="🏎️", row=1)
+    async def kart_race(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "卡丁車", reward_range=(18, 42), penalty_chance=0.22, penalty_range=(10, 22))
+
+    @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
+    async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "解謎挑戰", reward_range=(12, 38), penalty_chance=0.18, penalty_range=(8, 18))
+
+    @discord.ui.button(label="賽博駭客", style=discord.ButtonStyle.danger, emoji="💻", row=1)
+    async def cyber_hack(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "賽博駭客", reward_range=(22, 48), penalty_chance=0.28, penalty_range=(12, 28))
+
+    @discord.ui.button(label="料理競賽", style=discord.ButtonStyle.primary, emoji="🍳", row=2)
+    async def cooking_battle(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "料理競賽", reward_range=(10, 32), penalty_chance=0.12, penalty_range=(5, 15))
+
+    @discord.ui.button(label="節奏挑戰", style=discord.ButtonStyle.secondary, emoji="🥁", row=2)
+    async def rhythm_game(self, interaction: discord.Interaction, button: Button):
+        await self.handle_game(interaction, "節奏挑戰", reward_range=(14, 40), penalty_chance=0.2, penalty_range=(7, 20))
+
+
+def build_game_menu(user: discord.User):
+    embed = discord.Embed(title="🎮 經濟遊戲大廳", description="選擇遊戲來賺取金幣提升排行榜！", color=discord.Color.gold())
+    embed.add_field(name="玩法", value="每款遊戲都有不同的風險與收益，獲得的金幣會直接存入錢包。", inline=False)
+    return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
+
+
+def build_ranking_message(limit: int = 10):
+    users = load_data()
+    if not users:
+        return {"content": "目前沒有經濟資料，快去玩遊戲賺錢吧！", "ephemeral": True}
+
+    sorted_users = sorted(users.items(), key=lambda item: item[1].get("wallet", 0), reverse=True)
+    lines = []
+    for idx, (user_id, data) in enumerate(sorted_users[:limit], start=1):
+        wallet = data.get("wallet", 0)
+        lines.append(f"#{idx} - <@{user_id}>：${wallet}")
+
+    embed = discord.Embed(title="🏅 經濟排行榜", description="透過遊戲與工作累積你的財富！", color=discord.Color.blue())
+    embed.add_field(name="Top 成員", value="\n".join(lines), inline=False)
+    return {"embed": embed, "ephemeral": True}
+
 # ===========================
 # === 指令區 ===
 # ===========================
@@ -388,10 +488,25 @@ async def testerror_command(interaction: discord.Interaction):
     )
 
 
+@bot.tree.command(name="opengame", description="開啟遊戲 GUI")
+async def opengame_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**build_game_menu(interaction.user))
+
+
+@bot.tree.command(name="ranking", description="展示經濟排行榜")
+async def ranking_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**build_ranking_message())
+
+
+@bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
+async def rankgame_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**build_ranking_message())
+
+
 @bot.command()
 async def openmenu(ctx):
     embed = discord.Embed(title="🎮 特戰英豪 & 銀行系統", description="點擊按鈕或使用指令操作", color=discord.Color.dark_red())
-    embed.add_field(name="快速指令", value="`!bind 名字#標籤` 可快速綁定", inline=False)
+    embed.add_field(name="快速指令", value="`!bind 名字#標籤` 可快速綁定\n`/opengame` 開啟遊戲\n`/ranking` 查看排行榜", inline=False)
     await ctx.send(embed=embed, view=EconomyMenu())
 
 @bot.command()
