@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import discord
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
@@ -7,6 +8,7 @@ from typing import Callable
 import json
 import os
 import random
+import time
 from dotenv import load_dotenv
 # 這裡多引入了 RiotWatcher
 from riotwatcher import ValWatcher, RiotWatcher, ApiError
@@ -190,6 +192,10 @@ def load_riot_data():
 
 def save_riot_data(data):
     with open("riot.json", "w") as f: json.dump(data, f, indent=4)
+
+
+# 遊戲暫存冷卻（僅記憶體，重啟重置）
+heist_blacklist: dict[str, float] = {}
 
 # ===========================
 # === 核心邏輯區 (綁定) ===
@@ -458,15 +464,27 @@ async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetM
 
     users[uid]["wallet"] -= amount
 
-    result_text, payout_change = modal.resolve_func(amount, uid)
+    result_text, payout_change, frames = modal.resolve_func(amount, uid)
     users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
 
     save_data(users)
     balance = users[uid]["wallet"]
-    await interaction.response.send_message(
-        f"{result_text}\n目前錢包餘額：${balance}",
-        ephemeral=True,
-    )
+
+    if frames:
+        await interaction.response.defer(ephemeral=True)
+        progress = await interaction.followup.send(frames[0], ephemeral=True)
+        for frame in frames[1:]:
+            await asyncio.sleep(0.9)
+            await progress.edit(content=frame)
+
+        final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        await asyncio.sleep(0.9)
+        await progress.edit(content=f"{frames[-1]}\n{final_text}")
+    else:
+        await interaction.response.send_message(
+            f"{result_text}\n目前錢包餘額：${balance}",
+            ephemeral=True,
+        )
 
 
 class BetModal(Modal):
@@ -499,7 +517,7 @@ class CustomBetModal(Modal):
         self,
         user: discord.User,
         game_name: str,
-        resolve_func: Callable[[int, str], tuple[str, int]],
+        resolve_func: Callable[[int, str], tuple[str, int, list[str]]],
     ):
         super().__init__(title=f"💰 {game_name} - 請輸入下注金額")
         self.user = user
@@ -510,6 +528,275 @@ class CustomBetModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await process_custom_bet(interaction, self)
+
+
+class VoidRitualModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="🪄 魔法試煉：虛空獻祭")
+        self.user = user
+        self.bet_amount = TextInput(label="投入魔力", placeholder="至少 10 金幣", required=True)
+        self.overload_choice = TextInput(
+            label="啟用禁忌過載？(是/否)", placeholder="輸入 是 / Y / True 代表開啟", required=False
+        )
+        self.add_item(self.bet_amount)
+        self.add_item(self.overload_choice)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的獻祭視窗！", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 至少需要投入 10 金幣作為觸媒。", ephemeral=True)
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包不足，無法完成虛空獻祭。", ephemeral=True)
+            return
+
+        overload_text = (self.overload_choice.value or "").strip().lower()
+        overload = overload_text in {"y", "yes", "true", "1", "是", "開", "開啟", "啟用"}
+
+        users[uid]["wallet"] -= amount
+
+        roll = random.randint(1, 100)
+        payout_change = 0
+
+        if not overload:
+            if 1 <= roll <= 40:
+                result_text = f"⚠️ 法術反噬！擲出 {roll}，觸媒被吞噬，你失去全部投入。"
+            elif 41 <= roll <= 80:
+                payout_change = int(amount * 1.5)
+                result_text = f"✅ 施法成功！擲出 {roll}，獲得 1.5 倍返還 ${payout_change}。"
+            elif 81 <= roll <= 99:
+                payout_change = int(amount * 2.5)
+                result_text = f"🌟 完美詠唱！擲出 {roll}，獲得 2.5 倍返還 ${payout_change}！"
+            else:
+                payout_change = int(amount * 5)
+                result_text = (
+                    f"💎 奇蹟降臨！擲出 100，獲得 5 倍返還 ${payout_change}，並解鎖神秘榮譽！"
+                )
+        else:
+            if 1 <= roll <= 60:
+                extra_penalty = int(amount * 0.5)
+                payout_change = -extra_penalty
+                result_text = (
+                    f"☠️ 靈魂崩潰！過載擲出 {roll}，不僅失去觸媒，還倒扣 ${extra_penalty}。"
+                    "（請小心負債風險與禁言懲罰！）"
+                )
+            elif 61 <= roll <= 90:
+                payout_change = int(amount * 4)
+                result_text = f"🔥 混沌之力！過載擲出 {roll}，獲得 4 倍返還 ${payout_change}！"
+            else:
+                payout_change = int(amount * 10)
+                result_text = f"🌀 虛空降臨！過載擲出 {roll}，抱走 10 倍返還 ${payout_change} 並觸發全服喝采！"
+
+        users[uid]["wallet"] += payout_change
+        save_data(users)
+        balance = users[uid]["wallet"]
+
+        await interaction.response.send_message(
+            f"{result_text}\n目前錢包餘額：${balance}",
+            ephemeral=True,
+        )
+
+
+class DataHeistModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="💻 賽博駭客 - 資料神經駭入")
+        self.user = user
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的駭入介面！", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 最少投入 10 金幣啟動植入。", ephemeral=True)
+            return
+
+        now = time.time()
+        cooldown_end = heist_blacklist.get(uid)
+        if cooldown_end and cooldown_end > now:
+            remaining = int(cooldown_end - now)
+            await interaction.response.send_message(
+                f"⛔ 你仍在被追蹤者名單，請 {remaining} 秒後再試。",
+                ephemeral=True,
+            )
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包不足，無法駭入。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= amount
+        save_data(users)
+
+        view = DataHeistView(interaction.user, bet_amount=amount)
+        embed = build_data_heist_embed(view, status_text="潛入成功！選擇 Hack 持續挖掘或 Disconnect 帶走戰利品。")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+
+class DataHeistView(View):
+    def __init__(self, user: discord.User, bet_amount: int):
+        super().__init__(timeout=300)
+        self.author_id = user.id
+        self.bet_amount = bet_amount
+        self.pot = 0
+        self.alarm = 0
+        self.ghost_used = False
+        self.resolved = False
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的駭入會話！", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        self.resolved = True
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            embed = build_data_heist_embed(self, status_text="⏰ 連線逾時，植入自動斷開。")
+            await self.message.edit(embed=embed, view=self)
+
+    async def finish_with_status(self, interaction: discord.Interaction, status_text: str):
+        self.resolved = True
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            embed = build_data_heist_embed(self, status_text=status_text)
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(content=status_text, view=self)
+
+    @discord.ui.button(label="Hack", style=discord.ButtonStyle.primary)
+    async def hack(self, interaction: discord.Interaction, button: Button):
+        if self.resolved:
+            await interaction.response.send_message("✅ 已結算。", ephemeral=True)
+            return
+
+        roll = random.randint(1, 10)
+        gain = roll * 100
+        self.pot += gain
+        self.alarm += roll
+
+        if self.alarm >= 100:
+            self.resolved = True
+            heist_blacklist[str(self.author_id)] = time.time() + 600
+            for child in self.children:
+                child.disabled = True
+            status = (
+                f"🚨 ICE 攔截！擲出 {roll}，警報累積 {self.alarm}%，資料全數清空且你被列入黑名單 10 分鐘。"
+            )
+            embed = build_data_heist_embed(self, status_text=status)
+            await interaction.response.edit_message(embed=embed, view=self)
+            return
+
+        status = f"📡 深入挖掘：擲出 {roll}，暫得 ${gain}，警報值 {self.alarm}%！"
+        embed = build_data_heist_embed(self, status_text=status)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Disconnect", style=discord.ButtonStyle.success)
+    async def disconnect(self, interaction: discord.Interaction, button: Button):
+        if self.resolved:
+            await interaction.response.send_message("✅ 已結算。", ephemeral=True)
+            return
+
+        users = load_data()
+        uid = str(interaction.user.id)
+        reward = self.pot + self.bet_amount
+        users[uid]["wallet"] += reward
+        save_data(users)
+
+        status = f"🛡️ 安全斷線，帶走資料包 ${self.pot} 並收回觸媒，共入帳 ${reward}！"
+        await self.finish_with_status(interaction, status)
+
+    @discord.ui.button(label="Ghost Protocol", style=discord.ButtonStyle.danger)
+    async def ghost(self, interaction: discord.Interaction, button: Button):
+        if self.resolved:
+            await interaction.response.send_message("✅ 已結算。", ephemeral=True)
+            return
+
+        if self.ghost_used:
+            await interaction.response.send_message("❌ 幽靈協議已使用。", ephemeral=True)
+            return
+
+        if self.alarm < 80:
+            await interaction.response.send_message("⚠️ 警報未達 80%，暫不可啟動幽靈協議。", ephemeral=True)
+            return
+
+        self.ghost_used = True
+        roll = random.randint(1, 6)
+
+        if roll <= 3:
+            self.alarm += 20
+            if self.alarm >= 100:
+                self.resolved = True
+                heist_blacklist[str(self.author_id)] = time.time() + 600
+                for child in self.children:
+                    child.disabled = True
+                status = f"💥 防火牆加固！擲出 {roll}，警報 +20% 直達 {self.alarm}% ，任務失敗並進入黑名單。"
+            else:
+                status = f"🧱 防火牆加固！擲出 {roll}，警報提升至 {self.alarm}% ，趕緊決定後續策略。"
+        elif roll <= 5:
+            self.alarm = max(0, self.alarm - 15)
+            status = f"🔁 回滾日誌！擲出 {roll}，警報降至 {self.alarm}% ，你又多了一線生機。"
+        else:
+            users = load_data()
+            uid = str(interaction.user.id)
+            reward = self.bet_amount + (self.pot * 3)
+            users[uid]["wallet"] += reward
+            save_data(users)
+            self.resolved = True
+            for child in self.children:
+                child.disabled = True
+            status = f"👻 幽靈協議成功！擲出 6，立即強制結算當前獎金並放大 3 倍，總計入帳 ${reward}！"
+
+        embed = build_data_heist_embed(self, status_text=status)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+        if self.resolved and roll <= 3:
+            for child in self.children:
+                child.disabled = True
+            if self.message:
+                await self.message.edit(view=self)
+
+
+def build_data_heist_embed(view: DataHeistView, status_text: str) -> discord.Embed:
+    embed = discord.Embed(title="💻 資料神經駭入", color=discord.Color.red())
+    embed.add_field(name="投入金額", value=f"${view.bet_amount}", inline=True)
+    embed.add_field(name="暫存戰利品", value=f"${view.pot}", inline=True)
+    embed.add_field(name="警報值", value=f"{view.alarm}%", inline=True)
+    embed.add_field(name="幽靈協議", value="已使用" if view.ghost_used else "可用 (警報>=80%)", inline=True)
+    embed.add_field(name="操作", value="Hack 繼續挖掘 / Disconnect 立即撤離 / Ghost 再搏一把", inline=False)
+    embed.add_field(name="狀態", value=status_text, inline=False)
+    return embed
 
 
 class HorseRaceModal(Modal):
@@ -598,19 +885,33 @@ class HorseRaceModal(Modal):
         race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)
         balance = users[uid]["wallet"]
 
-        await interaction.response.send_message(
-            f"{result_text}\n目前錢包餘額：${balance}",
+        await interaction.response.defer(ephemeral=True)
+        progress = await interaction.followup.send("🏇 賽馬出閘！賽道加載中...", ephemeral=True)
+
+        for line in log_lines:
+            await asyncio.sleep(0.9)
+            await progress.edit(content=f"🏇 {line}")
+
+        await asyncio.sleep(0.9)
+        await progress.edit(
+            content=f"{result_text}\n目前錢包餘額：${balance}",
             embed=race_embed,
-            ephemeral=True,
         )
 
 
-def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int]:
+def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int, list[str]]:
     player_rolls = (random.randint(1, 6), random.randint(1, 6))
     enemy_rolls = (random.randint(1, 6), random.randint(1, 6))
 
     player_total = sum(player_rolls)
     enemy_total = sum(enemy_rolls)
+
+    frames = [
+        "🎲 PVE 骰子決鬥啟動！搖動兩顆骰子...",
+        f"🎲 你先擲出 **{player_rolls[0]}**，對手同時得到 **{enemy_rolls[0]}**...",
+        f"🎲 第二顆骰子彈跳中... 你現在顯示 **{player_rolls[0]} + {player_rolls[1]} = {player_total}**！",
+        f"🎲 對手第二顆落地，總和 **{enemy_rolls[0]} + {enemy_rolls[1]} = {enemy_total}**！",
+    ]
 
     if player_total == 12 and enemy_total == 2:
         reward = amount * 50
@@ -655,7 +956,9 @@ def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int]:
             f" {player_rolls[0]}+{player_rolls[1]}={player_total} 平手，退回下注 ${amount}，不增不減。"
         )
 
-    return result_text, payout_change
+    frames.append(f"🎲 結果判定：你 {player_total} vs 敵方 {enemy_total}！")
+
+    return result_text, payout_change, frames
 
 
 class PuzzleBetModal(Modal):
@@ -693,7 +996,7 @@ class PuzzleBetModal(Modal):
 
         secret_digits = "".join(random.sample("0123456789", 4))
         view = PuzzleGuessView(interaction.user, secret_digits, amount)
-        embed = build_puzzle_embed(view, status_text="輸入 4 個不重複的數字，6 次內達成 4A0B 即可獲得獎勵！")
+        embed = build_puzzle_embed(view, status_text="輸入 4 個不重複的數字，8 次內達成 4A0B，越早猜中倍率越高！")
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         view.message = await interaction.original_response()
@@ -707,7 +1010,7 @@ class PuzzleGuessView(View):
         self.bet_amount = bet_amount
         self.history: list[str] = []
         self.attempts = 0
-        self.max_attempts = 6
+        self.max_attempts = 8
         self.message: discord.Message | None = None
         self.resolved = False
 
@@ -755,16 +1058,24 @@ class PuzzleGuessModal(Modal):
         bulls, cows = score_guess(view.secret, guess)
         view.history.append(f"第 {view.attempts} 次：{guess} -> {bulls}A{cows}B")
 
-        status_text = f"{bulls}A{cows}B，還有 {view.max_attempts - view.attempts} 次機會。"
+        current_mult = puzzle_reward_multiplier(view.attempts)
+        status_text = (
+            f"{bulls}A{cows}B，還有 {view.max_attempts - view.attempts} 次機會。"
+            f" 當前解出可拿 {current_mult:.2f}x 獎勵。"
+        )
         solved = bulls == 4
 
         if solved:
             users = load_data()
             uid = str(interaction.user.id)
-            reward = int(view.bet_amount * 2.5)
+            reward_multiplier = puzzle_reward_multiplier(view.attempts)
+            reward = int(view.bet_amount * reward_multiplier)
             users[uid]["wallet"] += view.bet_amount + reward
             save_data(users)
-            status_text = f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}。"
+            status_text = (
+                f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}"
+                f"（獎勵倍率 {reward_multiplier:.2f}x）。"
+            )
             view.resolved = True
             for child in view.children:
                 child.disabled = True
@@ -785,9 +1096,15 @@ def score_guess(secret: str, guess: str) -> tuple[int, int]:
     return bulls, cows
 
 
+def puzzle_reward_multiplier(attempt: int) -> float:
+    base = 2.5
+    decay = 0.18 * (attempt - 1)
+    return max(1.2, base - decay)
+
+
 def build_puzzle_embed(view: PuzzleGuessView, status_text: str) -> discord.Embed:
     embed = discord.Embed(title="🧩 解謎挑戰 (2A2B)", color=discord.Color.purple())
-    embed.description = "在 6 次內猜出 4 個不重複的數字，達成 4A0B 就能拿獎勵！"
+    embed.description = "在 8 次內猜出 4 個不重複的數字，次數越多獎勵倍率逐步下降！"
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
     embed.add_field(name="剩餘次數", value=f"{view.max_attempts - view.attempts}", inline=True)
     embed.add_field(name="狀態", value=status_text, inline=False)
@@ -833,7 +1150,7 @@ class GameMenu(View):
         interaction: discord.Interaction,
         *,
         game_name: str,
-        resolve_func: Callable[[int, str], tuple[str, int]],
+        resolve_func: Callable[[int, str], tuple[str, int, list[str]]],
     ):
         await interaction.response.send_modal(
             CustomBetModal(
@@ -875,14 +1192,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
     async def magic_trial(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="魔法試煉",
-            reward_mult_range=(1.15, 1.9),
-            penalty_chance=0.25,
-            penalty_mult_range=(0.2, 0.7),
-            crit_chance=0.16,
-        )
+        await interaction.response.send_modal(VoidRitualModal(interaction.user))
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
@@ -905,14 +1215,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="賽博駭客", style=discord.ButtonStyle.danger, emoji="💻", row=1)
     async def cyber_hack(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="賽博駭客",
-            reward_mult_range=(1.25, 2.1),
-            penalty_chance=0.32,
-            penalty_mult_range=(0.45, 1.1),
-            crit_chance=0.2,
-        )
+        await interaction.response.send_modal(DataHeistModal(interaction.user))
 
     @discord.ui.button(label="料理競賽", style=discord.ButtonStyle.primary, emoji="🍳", row=2)
     async def cooking_battle(self, interaction: discord.Interaction, button: Button):
