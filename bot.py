@@ -11,24 +11,29 @@ from riotwatcher import ValWatcher, RiotWatcher, ApiError
 # --- 初始化 ---
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-riot_api_key = os.getenv('RIOT_API_KEY')
 
-# 初始化 Watchers
+# 初始化 Watchers（延後建立，避免環境變數更新後要重啟）
 riot_watcher = None
 val_watcher = None
 
 # 地區設定 (重要)
 # 查詢帳號時，台灣屬於 'asia'
-ACCOUNT_REGION = 'asia' 
+ACCOUNT_REGION = os.getenv('ACCOUNT_REGION', 'asia')
 # 查詢特戰戰績時，台灣屬於 'ap'
-VAL_REGION = 'ap'       
+VAL_REGION = os.getenv('VAL_REGION', 'ap')
 
-if riot_api_key:
-    # 兩個都要初始化
-    riot_watcher = RiotWatcher(riot_api_key)
-    val_watcher = ValWatcher(riot_api_key)
-else:
-    print("⚠️ 警告：未設定 RIOT_API_KEY，特戰功能將無法使用。")
+def ensure_watchers():
+    global riot_watcher, val_watcher
+
+    api_key = os.getenv('RIOT_API_KEY')
+    if not api_key:
+        return False
+
+    if riot_watcher is None or val_watcher is None:
+        riot_watcher = RiotWatcher(api_key)
+        val_watcher = ValWatcher(api_key)
+
+    return True
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -83,7 +88,7 @@ def save_riot_data(data):
 
 async def process_bind(user_id, game_name, tag_line, success_callback, error_callback):
     # 這裡改成檢查 riot_watcher
-    if not riot_watcher:
+    if not ensure_watchers():
         await error_callback("❌ 機器人未設定 API Key，無法綁定。")
         return
 
@@ -104,7 +109,7 @@ async def process_bind(user_id, game_name, tag_line, success_callback, error_cal
         if err.response.status_code == 404:
             await error_callback(f"❌ 找不到帳號 **{game_name}#{tag_line}**\n請確認 ID 與 Tag 正確，且位於亞太伺服器。")
         elif err.response.status_code == 403:
-            await error_callback("❌ API Key 已過期，請通知管理員更新。")
+            await error_callback("❌ API Key 已過期或未具備權限，請通知管理員更新。")
         else:
             await error_callback(f"❌ 未知錯誤 (Code: {err.response.status_code})")
     except Exception as e:
@@ -194,6 +199,10 @@ class EconomyMenu(View):
             await interaction.followup.send("❌ 請先綁定帳號！", ephemeral=True)
             return
 
+        if not ensure_watchers():
+            await interaction.followup.send("❌ 尚未設定 Riot API Key，請通知管理員。", ephemeral=True)
+            return
+
         try:
             puuid = riot_data[uid]['puuid']
             full_name = riot_data[uid]['full_name']
@@ -231,7 +240,10 @@ class EconomyMenu(View):
                 await interaction.followup.send("❌ 資料異常：找不到玩家數據。", ephemeral=True)
 
         except ApiError as err:
-            await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
+            if err.response.status_code == 403:
+                await interaction.followup.send("❌ API Key 已過期或缺少 VALORANT 權限，請通知管理員更新。", ephemeral=True)
+            else:
+                await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
         except Exception as e:
             print(f"Stats Error: {e}")
             await interaction.followup.send("❌ 發生未知錯誤。", ephemeral=True)
