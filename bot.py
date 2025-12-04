@@ -67,12 +67,17 @@ def fetch_fallback_valorant_stats(puuid: str):
     henrik_api_key = os.getenv("HENRIK_API_KEY")
     headers = {}
     if henrik_api_key:
-        headers["Authorization"] = henrik_api_key
+        headers["Authorization"] = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
 
     url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
+
+        # 如果有帶 API Key 但回傳 401，嘗試用無鑰匙的公共查詢再試一次
+        if response.status_code == 401 and headers:
+            response = requests.get(url, timeout=10)
+
         if response.status_code != 200:
             return None, f"❌ 備援查詢失敗 (HTTP {response.status_code})，請通知管理員更新 API Key。"
 
