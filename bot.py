@@ -73,6 +73,20 @@ BATTLE_GAMES = {
 }
 
 
+def normalize_game_key(game_input: str) -> str | None:
+    """Allow users to pick battle games by key or display name."""
+
+    lowered = game_input.lower()
+    if lowered in BATTLE_GAMES:
+        return lowered
+
+    for key, info in BATTLE_GAMES.items():
+        if lowered == info.get("name", "").lower():
+            return key
+
+    return None
+
+
 @dataclass
 class BattleMatch:
     id: int
@@ -1754,6 +1768,57 @@ async def battle_command(
         embed=build_battle_embed(match, "等待玩家加入，贏家全拿！"), view=view
     )
     match.message = await interaction.original_response()
+
+
+@bot.command(name="battle")
+async def battle_prefix(ctx, amount: int = None, *, game: str = None):
+    if amount is None or game is None:
+        await ctx.send(
+            "❌ 請提供下注金額與遊戲代碼，例如：`!battle 100 rps`\n"
+            "可用遊戲：" + ", ".join(f"`{key}`" for key in BATTLE_GAMES.keys())
+        )
+        return
+
+    if amount < 10:
+        await ctx.send("❌ 下注至少需要 10 金幣。")
+        return
+
+    game_key = normalize_game_key(game)
+    if not game_key:
+        await ctx.send(
+            "❌ 無效的遊戲，請使用以下代碼之一："
+            + ", ".join(f"`{key}`" for key in BATTLE_GAMES.keys())
+        )
+        return
+
+    await open_account(ctx.author)
+    users = load_data()
+    uid = str(ctx.author.id)
+    if users[uid]["wallet"] < amount:
+        await ctx.send("❌ 錢包餘額不足，無法開局。")
+        return
+
+    users[uid]["wallet"] -= amount
+    save_data(users)
+
+    global battle_counter
+    match = BattleMatch(
+        id=battle_counter,
+        host_id=ctx.author.id,
+        game_key=game_key,
+        bet=amount,
+        participants=[ctx.author.id],
+        pot=amount,
+        contributions={ctx.author.id: amount},
+    )
+    battle_counter += 1
+    active_battles[match.id] = match
+
+    view = BattleLobbyView(match.id)
+    sent = await ctx.send(
+        embed=build_battle_embed(match, "等待玩家加入，贏家全拿！"), view=view
+    )
+    match.message = sent
 
 
 @bot.tree.command(name="opengame", description="開啟遊戲 GUI")
