@@ -851,8 +851,8 @@ class HorseRaceModal(Modal):
         await interaction.response.defer(ephemeral=True)
 
         def build_bar(distance: int) -> str:
-            filled_segments = min(7, distance // 10)
-            empty_segments = 7 - filled_segments
+            filled_segments = min(14, distance // 5)
+            empty_segments = 14 - filled_segments
             return "🟩" * filled_segments + "⬛" * empty_segments
 
         progress_msg = await interaction.followup.send(
@@ -860,7 +860,7 @@ class HorseRaceModal(Modal):
         )
 
         def build_status(round_idx: int) -> str:
-            lines = [f"第 {round_idx} 段進度 (每格代表 10m)："]
+            lines = [f"第 {round_idx} 段進度 (每格代表 5m)："]
             for i in range(3):
                 lines.append(f"{names[i]} | {build_bar(positions[i])} {positions[i]}m")
             return "\n".join(lines)
@@ -874,10 +874,9 @@ class HorseRaceModal(Modal):
 
             await progress_msg.edit(content=build_status(round_idx))
 
-            bar_snapshot = " | ".join(
-                f"{names[i]}:{build_bar(positions[i])} {positions[i]}m" for i in range(3)
+            log_lines.append(
+                f"第 {round_idx} 段：{names[0]} {positions[0]}m / {names[1]} {positions[1]}m / {names[2]} {positions[2]}m"
             )
-            log_lines.append(f"第 {round_idx} 段 -> {bar_snapshot}")
 
             await asyncio.sleep(1.25)
 
@@ -914,7 +913,7 @@ class HorseRaceModal(Modal):
         segment_view = "\n".join(
             f"{names[i]} | {build_bar(positions[i])} {positions[i]}m" for i in range(3)
         )
-        race_embed.add_field(name="七段賽道視覺", value=segment_view, inline=False)
+        race_embed.add_field(name="十四格賽道視覺", value=segment_view, inline=False)
         balance = users[uid]["wallet"]
 
         await progress_msg.edit(content=build_status(round_idx))
