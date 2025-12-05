@@ -474,11 +474,11 @@ async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetM
         await interaction.response.defer(ephemeral=True)
         progress = await interaction.followup.send(frames[0], ephemeral=True)
         for frame in frames[1:]:
-            await asyncio.sleep(0.9)
+            await asyncio.sleep(1.1)
             await progress.edit(content=frame)
 
         final_text = f"{result_text}\n目前錢包餘額：${balance}"
-        await asyncio.sleep(0.9)
+        await asyncio.sleep(1.1)
         await progress.edit(content=f"{frames[-1]}\n{final_text}")
     else:
         await interaction.response.send_message(
@@ -908,9 +908,10 @@ def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int, list[str]]:
 
     frames = [
         "🎲 PVE 骰子決鬥啟動！搖動兩顆骰子...",
-        f"🎲 你先擲出 **{player_rolls[0]}**，對手同時得到 **{enemy_rolls[0]}**...",
-        f"🎲 第二顆骰子彈跳中... 你現在顯示 **{player_rolls[0]} + {player_rolls[1]} = {player_total}**！",
-        f"🎲 對手第二顆落地，總和 **{enemy_rolls[0]} + {enemy_rolls[1]} = {enemy_total}**！",
+        f"🎲 你第一顆落地顯示 **{player_rolls[0]}**，手中還有一顆等待拋出…",
+        f"🎲 你完成擲骰：**{player_rolls[0]} + {player_rolls[1]} = {player_total}**！輪到對手。",
+        f"🎲 對手第一顆彈跳中，翻出 **{enemy_rolls[0]}**，緊張升溫…",
+        f"🎲 對手也擲完：**{enemy_rolls[0]} + {enemy_rolls[1]} = {enemy_total}**！即將判定結果。",
     ]
 
     if player_total == 12 and enemy_total == 2:
@@ -1239,6 +1240,10 @@ class GameMenu(View):
             crit_chance=0.18,
         )
 
+    @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
+    async def game_help(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
+
 
 def build_game_menu(user: discord.User):
     embed = discord.Embed(title="🎮 經濟遊戲大廳", description="選擇遊戲，下注挑戰風險，衝高你的金幣！", color=discord.Color.gold())
@@ -1251,6 +1256,37 @@ def build_game_menu(user: discord.User):
         inline=False,
     )
     return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
+
+
+def build_game_help_embed() -> discord.Embed:
+    embed = discord.Embed(title="ℹ️ 遊戲說明", color=discord.Color.blurple())
+    embed.add_field(
+        name="🎲 骰子決鬥",
+        value="玩家與敵方各擲兩顆骰子，20 倍特例：你的 12 打敗對手 2 可拿 50 倍，反之受 10 倍懲罰；其餘依差值×0.5 決定收益或損失，平手退回本金。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🧩 解謎挑戰 (2A2B)",
+        value="下注後獲得 4 位不重複密碼，共 8 次機會猜中；A 表示數字與位置正確，B 表示數字正確但位置錯，次數越高獎勵倍率逐步下降。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🐎 賽馬競速",
+        value="選擇 1~3 號馬匹觀看動態賽況，押中隨機贏取約 1.8~3.2 倍獎勵，落敗則僅追回 20% 安慰金。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🪄 魔法試煉：虛空獻祭",
+        value="普通詠唱 1d100：41-80 得 1.5 倍，81-99 得 2.5 倍，100 得 5 倍與稱號，其餘失敗；禁忌過載 1d100：61-90 得 4 倍，91-100 得 10 倍公告，1-60 會倒扣 50% 並暫時禁言。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🛰️ 資料神經駭入",
+        value="每回合 1d10 決定臨時積分與警報值，警報 <30% 安全，30-99% 可隨時斷線帶走積分，>=100% 積分歸零並進入冷卻；高風險時可用一次幽靈協議 1d6 嘗試翻盤。",
+        inline=False,
+    )
+    embed.set_footer(text="所有遊戲需先輸入下注金額，請確認錢包餘額充足！")
+    return embed
 
 
 def build_ranking_message(limit: int = 10):
