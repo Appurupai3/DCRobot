@@ -1373,6 +1373,7 @@ class GreedyDiceBattleView(View):
         self.remaining_dice: dict[int, int] = {uid: 6 for uid in match.participants}
         self.standing: set[int] = set()
         self.busted: set[int] = set()
+        self.forfeited: set[int] = set()
         self.finished = False
         self.message: Optional[discord.Message] = None
         self.round_number = 0
@@ -1383,6 +1384,9 @@ class GreedyDiceBattleView(View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id not in self.match.participants:
             await interaction.response.send_message("❌ 你未加入此戰局。", ephemeral=True)
+            return False
+        if interaction.user.id in self.forfeited:
+            await interaction.response.send_message("⚠️ 你已棄權，無法再參與本戰局。", ephemeral=True)
             return False
         return True
 
@@ -1400,7 +1404,9 @@ class GreedyDiceBattleView(View):
         return total
 
     def player_status(self, uid: int) -> str:
-        if uid in self.busted:
+        if uid in self.forfeited:
+            state = "棄權"
+        elif uid in self.busted:
             state = "爆掉"
         elif uid in self.standing:
             state = "收分"
@@ -1416,7 +1422,10 @@ class GreedyDiceBattleView(View):
         )
 
     def everyone_resolved(self) -> bool:
-        return all(uid in self.standing or uid in self.busted for uid in self.match.participants)
+        return all(
+            uid in self.standing or uid in self.busted or uid in self.forfeited
+            for uid in self.match.participants
+        )
 
     def build_status_embed(self) -> discord.Embed:
         embed = discord.Embed(title=f"🎲 貪婪骰戰局｜第 {self.round_number} 回合", color=discord.Color.orange())
@@ -1442,6 +1451,11 @@ class GreedyDiceBattleView(View):
             self.round_task.cancel()
         self.round_task = asyncio.create_task(self.round_timer())
 
+        for uid in self.forfeited:
+            self.round_points[uid] = 0
+            self.remaining_dice[uid] = 0
+            self.standing.add(uid)
+
     async def round_timer(self):
         try:
             await asyncio.sleep(120)
@@ -1460,14 +1474,22 @@ class GreedyDiceBattleView(View):
             self.round_task.cancel()
             self.round_task = None
 
-        unresolved = [uid for uid in self.match.participants if uid not in self.standing and uid not in self.busted]
+        unresolved = [
+            uid
+            for uid in self.match.participants
+            if uid not in self.standing and uid not in self.busted and uid not in self.forfeited
+        ]
         for uid in unresolved:
             total = self.bank_points(uid)
             self.standing.add(uid)
             reason = "時間到自動收分" if timed_out else "所有人完成"
             self.history[uid].append(f"{reason}，停在 {total} 分。")
 
-        if any(self.current_total(uid) >= 3000 for uid in self.match.participants):
+        if not [uid for uid in self.match.participants if uid not in self.forfeited]:
+            await self.finish_round()
+            return
+
+        if any(self.current_total(uid) >= 3000 for uid in self.match.participants if uid not in self.forfeited):
             await self.finish_round()
             return
 
@@ -1487,12 +1509,18 @@ class GreedyDiceBattleView(View):
         for uid in self.match.participants:
             self.bank_points(uid)
 
-        top_score = max(self.totals.values()) if self.totals else 0
-        winners = [uid for uid, score in self.totals.items() if score == top_score and score > 0]
+        eligible_totals = {uid: score for uid, score in self.totals.items() if uid not in self.forfeited}
+        top_score = max(eligible_totals.values()) if eligible_totals else 0
+        winners = [uid for uid, score in eligible_totals.items() if score == top_score and score > 0]
 
         detail_text = "有玩家收分突破 3000 分門檻，結算最高分！" if top_score >= 3000 else "時間或回合結束，依最高分結算。"
 
-        payout_text = distribute_winnings(self.match, winners)
+        if winners:
+            payout_text = distribute_winnings(self.match, winners)
+        elif eligible_totals:
+            payout_text = "無人達成有效得分，彩池沒收。"
+        else:
+            payout_text = "所有玩家棄權，彩池沒收。"
 
         breakdowns = []
         for uid in self.match.participants:
@@ -1508,6 +1536,10 @@ class GreedyDiceBattleView(View):
 
         if self.message:
             await self.message.edit(embed=result_embed, view=self)
+            try:
+                await self.message.channel.send(embed=result_embed)
+            except Exception:
+                pass
 
         await finalize_battle(self.match, "已結算")
 
@@ -1591,6 +1623,27 @@ class GreedyDiceBattleView(View):
             f"🎲 你的貪婪骰累積 {total} 分，手上剩 {remaining} 顆可擲。",
             ephemeral=True,
         )
+
+    @discord.ui.button(label="中途退出", style=discord.ButtonStyle.danger, emoji="🏳️")
+    async def forfeit_button(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+
+        if uid in self.forfeited:
+            await interaction.response.send_message("你已經棄權退出。", ephemeral=True)
+            return
+
+        self.forfeited.add(uid)
+        self.round_points[uid] = 0
+        self.totals[uid] = 0
+        self.remaining_dice[uid] = 0
+        self.standing.add(uid)
+        self.history[uid].append("選擇棄權，放棄後續權利與獎勵。")
+
+        await interaction.response.edit_message(embed=self.build_status_embed(), view=self)
+
+        if self.everyone_resolved():
+            await asyncio.sleep(1)
+            await self.conclude_round()
 
 
 class RevolverDuelView(View):
