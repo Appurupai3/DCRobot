@@ -28,7 +28,7 @@ BATTLE_GAMES = {
     "blackjack": {"name": "21 點", "desc": "每人隨機抽牌，最接近 21 且不爆牌者獲勝，若全員爆牌則退回下注。"},
     "dice_duel": {
         "name": "貪婪骰",
-        "desc": "Farkle/10,000 規則：6 顆骰子推進分數，1=100、5=50、同點數成組高分；可冒險重擲累積，但空手即爆，先衝到 5000 分勝。",
+        "desc": "Farkle/10,000：6 顆骰子推進分數，1=100、2=20、5=50，三/四/五/六條倍乘 (x3/x5/x10/x20)。空手爆掉清零，率先衝到 10,000 分！",
     },
     "archery": {"name": "神射手", "desc": "隨機 1-100 精準度，最高分奪冠；滿分 100 直接展示全場。"},
     "drift": {"name": "夜間飄移賽", "desc": "每人獲得 0-3 秒加速與隨機終點時間，最短完賽時間贏。"},
@@ -1015,31 +1015,36 @@ async def finalize_battle(match: BattleMatch, status_text: str):
         except Exception:
             pass
 
-def score_farkle_roll(rolls: list[int]) -> tuple[int, int]:
+def score_greedy_roll(rolls: list[int]) -> tuple[int, int, int]:
+    """Return gained score, scoring dice count, and multiplier for a greedy dice roll."""
+
+    add_values = {1: 100, 2: 20, 5: 50}
     counts = {i: rolls.count(i) for i in range(1, 7)}
-    score = 0
-    scoring_dice = 0
 
-    for face, count in counts.items():
-        if count >= 3:
-            base = 1000 if face == 1 else face * 100
-            score += base + (count - 3) * base
-            scoring_dice += count
-            counts[face] = 0
+    add_sum = sum(add_values.get(face, 0) * count for face, count in counts.items())
+    max_count = max(counts.values()) if counts else 0
 
-    score += counts.get(1, 0) * 100
-    scoring_dice += counts.get(1, 0)
-    score += counts.get(5, 0) * 50
-    scoring_dice += counts.get(5, 0)
+    multiplier = 1
+    if max_count >= 6:
+        multiplier = 20
+    elif max_count == 5:
+        multiplier = 10
+    elif max_count == 4:
+        multiplier = 5
+    elif max_count == 3:
+        multiplier = 3
 
-    return score, scoring_dice
+    gained = add_sum * multiplier
+    scoring_dice = sum(count for face, count in counts.items() if add_values.get(face, 0) > 0)
+
+    return gained, scoring_dice, multiplier
 
 
 def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
     scores = {}
     higher_is_better = True
     details = []
-    target_score = 5000 if match.game_key == "dice_duel" else None
+    target_score = 10000 if match.game_key == "dice_duel" else None
 
     for uid in match.participants:
         if match.game_key == "dice_duel":
@@ -1049,7 +1054,7 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
 
             while True:
                 roll = [random.randint(1, 6) for _ in range(dice_pool)]
-                gained, scoring_dice = score_farkle_roll(roll)
+                gained, scoring_dice, multiplier = score_greedy_roll(roll)
 
                 if gained == 0:
                     steps.append(
@@ -1060,7 +1065,7 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
 
                 total += gained
                 steps.append(
-                    f"第 {len(steps) + 1} 擲 {roll} → +{gained}，累積 {total} 分。"
+                    f"第 {len(steps) + 1} 擲 {roll} → +{gained} (x{multiplier})，累積 {total} 分。"
                 )
 
                 if target_score and total >= target_score:
@@ -1321,6 +1326,168 @@ class BlackjackBattleView(View):
         )
 
 
+class GreedyDiceBattleView(View):
+    def __init__(self, match: BattleMatch):
+        super().__init__(timeout=180)
+        self.match = match
+        self.totals: dict[int, int] = {uid: 0 for uid in match.participants}
+        self.remaining_dice: dict[int, int] = {uid: 6 for uid in match.participants}
+        self.standing: set[int] = set()
+        self.busted: set[int] = set()
+        self.history: dict[int, list[str]] = {uid: [] for uid in match.participants}
+        self.finished = False
+        self.message: Optional[discord.Message] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.match.participants:
+            await interaction.response.send_message("❌ 你未加入此戰局。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if self.match.active and not self.finished:
+            await self.finish_round()
+
+    def player_status(self, uid: int) -> str:
+        if uid in self.busted:
+            state = "爆掉"
+        elif uid in self.standing:
+            state = "收分"
+        else:
+            state = "行動中"
+
+        last_note = self.history[uid][-1] if self.history[uid] else "尚未擲骰"
+        return (
+            f"<@{uid}> | 總分 {self.totals[uid]} | 剩餘骰 {self.remaining_dice[uid]} 顆 | {state}\n"
+            f"最近紀錄：{last_note}"
+        )
+
+    def everyone_resolved(self) -> bool:
+        return all(uid in self.standing or uid in self.busted for uid in self.match.participants)
+
+    def build_status_embed(self) -> discord.Embed:
+        embed = discord.Embed(title="🎲 貪婪骰戰局", color=discord.Color.orange())
+        embed.description = (
+            "每回合擲出 6 顆骰子，以 1=100、2=20、5=50 計入加區，\n"
+            "若有三/四/五/六條，總分再乘以 3/5/10/20。沒有得分會爆掉清零，\n"
+            "若所有骰子皆計分則重置 6 顆繼續擲；先達到或超過 10,000 分即鎖定勝利。"
+        )
+        embed.add_field(
+            name="狀態",
+            value="\n\n".join(self.player_status(uid) for uid in self.match.participants),
+            inline=False,
+        )
+        return embed
+
+    async def finish_round(self):
+        if self.finished:
+            return
+        self.finished = True
+
+        top_score = max(self.totals.values()) if self.totals else 0
+        target_reached = top_score >= 10000
+        winners = [uid for uid, score in self.totals.items() if score == top_score and score > 0]
+
+        if target_reached:
+            detail_text = "滿足 10,000 分終點，即刻結算！"
+        else:
+            detail_text = "所有玩家已收分或爆掉，依最高分結算。"
+
+        payout_text = distribute_winnings(self.match, winners)
+
+        breakdowns = []
+        for uid in self.match.participants:
+            logs = self.history[uid] or ["尚未擲骰"]
+            breakdowns.append(f"<@{uid}> 最終 {self.totals[uid]} 分\n" + "\n".join(logs))
+
+        result_embed = discord.Embed(title="🎲 貪婪骰結果", color=discord.Color.blurple())
+        result_embed.add_field(name="賽況", value="\n\n".join(breakdowns), inline=False)
+        result_embed.add_field(name="說明", value=detail_text, inline=False)
+        result_embed.add_field(name="結算", value=payout_text, inline=False)
+
+        if self.message:
+            await self.message.edit(embed=result_embed, view=None)
+        elif self.match.message:
+            await self.match.message.channel.send(embed=result_embed)
+
+        await finalize_battle(self.match, payout_text)
+
+    async def record_roll(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+        if uid in self.standing or uid in self.busted:
+            await interaction.response.send_message("你已經停止或爆掉。", ephemeral=True)
+            return
+
+        dice_count = max(1, self.remaining_dice[uid])
+        roll = [random.randint(1, 6) for _ in range(dice_count)]
+        gained, scoring_dice, multiplier = score_greedy_roll(roll)
+
+        if gained == 0:
+            self.totals[uid] = 0
+            self.busted.add(uid)
+            self.remaining_dice[uid] = 0
+            note = f"擲出 {roll} → 無得分，爆掉歸零！"
+        else:
+            self.totals[uid] += gained
+            if scoring_dice == dice_count:
+                self.remaining_dice[uid] = 6
+                carry_text = "所有骰子都有分，重置 6 顆繼續！"
+            else:
+                self.remaining_dice[uid] = max(1, dice_count - scoring_dice)
+                carry_text = f"留下 {self.remaining_dice[uid]} 顆可再擲。"
+
+            if self.totals[uid] >= 10000:
+                self.standing.add(uid)
+                finish_text = "達到 10,000 分，收分待結算！"
+            else:
+                finish_text = ""
+
+            note = (
+                f"擲出 {roll} → +{gained} 分 (倍數 x{multiplier})，累積 {self.totals[uid]} 分；"
+                f" {carry_text} {finish_text}"
+            ).strip()
+
+        self.history[uid].append(note)
+
+        await interaction.response.edit_message(embed=self.build_status_embed(), view=self)
+
+        if self.everyone_resolved():
+            await asyncio.sleep(1)
+            await self.finish_round()
+
+    async def stop_and_bank(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+        if uid in self.standing or uid in self.busted:
+            await interaction.response.send_message("你已結束行動。", ephemeral=True)
+            return
+
+        self.standing.add(uid)
+        self.history[uid].append(f"選擇收分，停在 {self.totals[uid]} 分。")
+        await interaction.response.edit_message(embed=self.build_status_embed(), view=self)
+
+        if self.everyone_resolved():
+            await asyncio.sleep(1)
+            await self.finish_round()
+
+    @discord.ui.button(label="擲骰", style=discord.ButtonStyle.primary, emoji="🎲")
+    async def roll_button(self, interaction: discord.Interaction, button: Button):
+        await self.record_roll(interaction)
+
+    @discord.ui.button(label="收分", style=discord.ButtonStyle.success, emoji="👜")
+    async def bank_button(self, interaction: discord.Interaction, button: Button):
+        await self.stop_and_bank(interaction)
+
+    @discord.ui.button(label="目前分數", style=discord.ButtonStyle.secondary, emoji="📊")
+    async def status_button(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+        total = self.totals.get(uid, 0)
+        remaining = self.remaining_dice.get(uid, 6)
+        await interaction.response.send_message(
+            f"🎲 你的貪婪骰累積 {total} 分，手上剩 {remaining} 顆可擲。",
+            ephemeral=True,
+        )
+
+
 class RPSBattleView(View):
     def __init__(self, match: BattleMatch):
         super().__init__(timeout=40)
@@ -1486,6 +1653,11 @@ class BattleLobbyView(View):
             prompt = discord.Embed(title="✊✌️✋ 剪刀石頭布", description="所有玩家請在 40 秒內出拳。", color=discord.Color.teal())
             rps_message = await interaction.followup.send(embed=prompt, view=rps_view)
             rps_view.message = rps_message
+        elif match.game_key == "dice_duel":
+            dice_view = GreedyDiceBattleView(match)
+            prompt = dice_view.build_status_embed()
+            dice_message = await interaction.followup.send(embed=prompt, view=dice_view)
+            dice_view.message = dice_message
         elif match.game_key == "blackjack":
             blackjack_view = BlackjackBattleView(match)
             prompt = blackjack_view.build_status_embed()
