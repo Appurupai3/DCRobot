@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import discord
+from discord import app_commands
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Callable, Optional
 import json
 import os
 import random
@@ -56,6 +58,36 @@ intents.message_content = True
 intents.members = True 
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+BATTLE_GAMES = {
+    "rps": {"name": "剪刀石頭布", "desc": "每人出拳一次，出拳克制對手即可全拿彩池，平局退回所有下注。"},
+    "blackjack": {"name": "21 點", "desc": "每人隨機抽牌，最接近 21 且不爆牌者獲勝，若全員爆牌則退回下注。"},
+    "dice_duel": {"name": "骰子大亂鬥", "desc": "每人擲 3 顆骰子，比總和最高，遇到同分以最大單骰決勝。"},
+    "archery": {"name": "神射手", "desc": "隨機 1-100 精準度，最高分奪冠；滿分 100 直接展示全場。"},
+    "drift": {"name": "夜間飄移賽", "desc": "每人獲得 0-3 秒加速與隨機終點時間，最短完賽時間贏。"},
+    "maze": {"name": "迷宮衝刺", "desc": "隨機 3 條路線耗時，耗時最短者先抵達出口。"},
+    "cookoff": {"name": "廚神對決", "desc": "每人抽到 1-10 味覺分與 1-10 創意分，總和最高獲勝。"},
+    "quiz": {"name": "快問快答", "desc": "模擬搶答速度 1-100，速度越快越可能拿下彩池。"},
+    "sprint": {"name": "百米衝刺", "desc": "每人獲得起跑反應與衝刺力，計算終點時間，最短者贏。"},
+    "space": {"name": "太空競賽", "desc": "火箭品質 50-100 與燃料 1-5 倍影響距離，最遠航程稱王。"},
+}
+
+
+@dataclass
+class BattleMatch:
+    id: int
+    host_id: int
+    game_key: str
+    bet: int
+    participants: list[int]
+    pot: int
+    contributions: dict[int, int] = field(default_factory=dict)
+    message: Optional[discord.Message] = None
+    active: bool = True
+
+
+active_battles: dict[int, BattleMatch] = {}
+battle_counter = 1
 
 # --- 輔助工具 ---
 def get_rank_name(tier_id):
@@ -1140,6 +1172,335 @@ def build_puzzle_embed(view: PuzzleGuessView, status_text: str) -> discord.Embed
     return embed
 
 
+def format_battle_game_list() -> str:
+    return "\n".join(f"• {info['name']}: {info['desc']}" for info in BATTLE_GAMES.values())
+
+
+def build_battle_embed(match: BattleMatch, status_text: str) -> discord.Embed:
+    game_info = BATTLE_GAMES.get(match.game_key, {"name": match.game_key, "desc": ""})
+    embed = discord.Embed(
+        title=f"⚔️ 戰局 #{match.id} - {game_info['name']}",
+        color=discord.Color.orange(),
+    )
+    embed.description = (
+        "建立戰局後，加入者會立即扣除下注金，開局者可取消退回。\n"
+        "戰局開始後贏家全拿彩池，平手則退回所有下注。"
+    )
+    participant_mentions = "、".join(f"<@{uid}>" for uid in match.participants) or "尚無"
+    embed.add_field(name="每人下注", value=f"${match.bet}", inline=True)
+    embed.add_field(name="彩池", value=f"${match.pot}", inline=True)
+    embed.add_field(name="參戰者", value=participant_mentions, inline=False)
+    embed.add_field(name="本局說明", value=game_info.get("desc", ""), inline=False)
+    embed.add_field(name="遊戲一覽 (10)" , value=format_battle_game_list(), inline=False)
+    embed.set_footer(text=status_text)
+    return embed
+
+
+def refund_contributions(match: BattleMatch):
+    users = load_data()
+    for uid, amount in match.contributions.items():
+        users.setdefault(str(uid), {"wallet": 0, "bank": 0})
+        users[str(uid)]["wallet"] += amount
+    save_data(users)
+
+
+def distribute_winnings(match: BattleMatch, winners: list[int]) -> str:
+    if not winners:
+        refund_contributions(match)
+        return "戰局平手，已退回所有下注。"
+
+    users = load_data()
+    share = match.pot // len(winners)
+    remainder = match.pot - (share * len(winners))
+    for idx, uid in enumerate(winners):
+        users.setdefault(str(uid), {"wallet": 0, "bank": 0})
+        gain = share + (remainder if idx == 0 else 0)
+        users[str(uid)]["wallet"] += gain
+    save_data(users)
+
+    winner_text = "、".join(f"<@{uid}>" for uid in winners)
+    return f"🎉 {winner_text} 贏得彩池 ${match.pot}！每人分得約 ${share}。"
+
+
+async def finalize_battle(match: BattleMatch, status_text: str):
+    match.active = False
+    active_battles.pop(match.id, None)
+    if match.message:
+        embed = build_battle_embed(match, status_text)
+        try:
+            await match.message.edit(embed=embed, view=None)
+        except Exception:
+            pass
+
+
+def simulate_blackjack_hands(participants: list[int]):
+    def draw_hand():
+        cards = [random.randint(2, 11), random.randint(2, 11)]
+        while sum(cards) < 16:
+            cards.append(random.randint(1, 11))
+        return cards
+
+    results = {}
+    for uid in participants:
+        hand = draw_hand()
+        total = sum(hand)
+        results[uid] = {"hand": hand, "total": total, "bust": total > 21}
+    return results
+
+
+def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
+    scores = {}
+    higher_is_better = True
+    details = []
+
+    for uid in match.participants:
+        if match.game_key == "dice_duel":
+            rolls = [random.randint(1, 6) for _ in range(3)]
+            total = sum(rolls)
+            score = total + max(rolls) / 10
+            details.append(f"<@{uid}> 擲出 {rolls}，總和 {total}")
+            scores[uid] = score
+        elif match.game_key == "archery":
+            score = random.randint(1, 100)
+            details.append(f"<@{uid}> 精準度 {score}")
+            scores[uid] = score
+        elif match.game_key == "drift":
+            base_time = random.uniform(36.0, 48.0)
+            boost = random.uniform(0, 3)
+            finish = base_time - boost
+            scores[uid] = finish
+            higher_is_better = False
+            details.append(f"<@{uid}> 完賽 {finish:.2f}s (加速 {boost:.1f}s)")
+        elif match.game_key == "maze":
+            path_times = [random.uniform(12, 18), random.uniform(15, 22), random.uniform(10, 25)]
+            finish = min(path_times)
+            scores[uid] = finish
+            higher_is_better = False
+            details.append(f"<@{uid}> 最快路線 {finish:.2f}s")
+        elif match.game_key == "cookoff":
+            taste = random.randint(1, 10)
+            creative = random.randint(1, 10)
+            score = taste + creative
+            scores[uid] = score
+            details.append(f"<@{uid}> 味覺 {taste} + 創意 {creative} = {score}")
+        elif match.game_key == "quiz":
+            score = random.randint(40, 100)
+            scores[uid] = score
+            details.append(f"<@{uid}> 搶答速度 {score}")
+        elif match.game_key == "sprint":
+            reaction = random.uniform(0.05, 0.3)
+            sprint_speed = random.uniform(8.5, 11.5)
+            finish = sprint_speed + reaction
+            higher_is_better = False
+            scores[uid] = finish
+            details.append(f"<@{uid}> 完賽 {finish:.2f}s (反應 {reaction:.2f}s)")
+        elif match.game_key == "space":
+            quality = random.uniform(50, 100)
+            fuel = random.uniform(1.0, 5.0)
+            distance = quality * fuel
+            scores[uid] = distance
+            details.append(f"<@{uid}> 航程 {distance:.1f} 單位 (品質 {quality:.1f}, 燃料 {fuel:.2f})")
+
+    if not scores:
+        return [], "沒有有效的參與者。"
+
+    comparator = max if higher_is_better else min
+    best_value = comparator(scores.values())
+    winners = [uid for uid, val in scores.items() if val == best_value]
+
+    return winners, "\n".join(details)
+
+
+class RPSBattleView(View):
+    def __init__(self, match: BattleMatch):
+        super().__init__(timeout=40)
+        self.match = match
+        self.choices: dict[int, str] = {}
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.match.participants:
+            await interaction.response.send_message("❌ 你未加入此戰局。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if self.match.active:
+            await self.finish_round()
+
+    async def record_choice(self, interaction: discord.Interaction, move: str):
+        uid = interaction.user.id
+        if uid in self.choices:
+            await interaction.response.send_message("❌ 你已經出拳了！", ephemeral=True)
+            return
+
+        self.choices[uid] = move
+        await interaction.response.send_message(f"✅ 已出拳：{move}", ephemeral=True)
+
+        if len(self.choices) == len(self.match.participants):
+            await self.finish_round(interaction)
+
+    async def finish_round(self, interaction: Optional[discord.Interaction] = None):
+        for child in self.children:
+            child.disabled = True
+
+        result_embed = discord.Embed(title="✊✌️✋ 剪刀石頭布", color=discord.Color.teal())
+        if not self.choices:
+            refund_contributions(self.match)
+            result_embed.description = "無人出拳，已退回下注。"
+            if interaction:
+                await interaction.response.edit_message(embed=result_embed, view=self)
+            return
+
+        move_map = {"rock": "石頭", "paper": "布", "scissors": "剪刀"}
+        lines = [f"<@{uid}> 出 {move_map.get(move, move)}" for uid, move in self.choices.items()]
+        result_embed.add_field(name="出拳紀錄", value="\n".join(lines), inline=False)
+
+        unique_moves = set(self.choices.values())
+        winners: list[int] = []
+        if len(unique_moves) == 2:
+            if {"rock", "scissors"} == unique_moves:
+                winning_move = "rock"
+            elif {"paper", "rock"} == unique_moves:
+                winning_move = "paper"
+            else:
+                winning_move = "scissors"
+            winners = [uid for uid, move in self.choices.items() if move == winning_move]
+
+        payout_text = distribute_winnings(self.match, winners)
+        result_embed.add_field(name="結算", value=payout_text, inline=False)
+
+        if interaction:
+            await interaction.response.edit_message(embed=result_embed, view=self)
+        elif self.match.message:
+            await self.match.message.channel.send(embed=result_embed)
+
+        await finalize_battle(self.match, payout_text)
+
+    @discord.ui.button(label="石頭", style=discord.ButtonStyle.secondary, emoji="✊")
+    async def rock(self, interaction: discord.Interaction, button: Button):
+        await self.record_choice(interaction, "rock")
+
+    @discord.ui.button(label="剪刀", style=discord.ButtonStyle.secondary, emoji="✌️")
+    async def scissors(self, interaction: discord.Interaction, button: Button):
+        await self.record_choice(interaction, "scissors")
+
+    @discord.ui.button(label="布", style=discord.ButtonStyle.secondary, emoji="🖐️")
+    async def paper(self, interaction: discord.Interaction, button: Button):
+        await self.record_choice(interaction, "paper")
+
+
+class BattleLobbyView(View):
+    def __init__(self, match_id: int):
+        super().__init__(timeout=3600)
+        self.match_id = match_id
+
+    def get_match(self) -> Optional[BattleMatch]:
+        return active_battles.get(self.match_id)
+
+    async def on_timeout(self) -> None:
+        match = self.get_match()
+        if match and match.active:
+            refund_contributions(match)
+            await finalize_battle(match, "戰局逾時，已退回下注。")
+
+    @discord.ui.button(label="加入戰局", style=discord.ButtonStyle.success, emoji="✅")
+    async def join(self, interaction: discord.Interaction, button: Button):
+        match = self.get_match()
+        if not match or not match.active:
+            await interaction.response.send_message("❌ 戰局已結束。", ephemeral=True)
+            return
+
+        if interaction.user.id in match.participants:
+            await interaction.response.send_message("⚠️ 你已加入戰局。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+        if users[uid]["wallet"] < match.bet:
+            await interaction.response.send_message("❌ 錢包不足以加入。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= match.bet
+        save_data(users)
+        match.participants.append(interaction.user.id)
+        match.pot += match.bet
+        match.contributions[interaction.user.id] = match.bet
+
+        embed = build_battle_embed(match, "已加入，等待開局者開始。")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="開始戰局", style=discord.ButtonStyle.primary, emoji="🚀")
+    async def start(self, interaction: discord.Interaction, button: Button):
+        match = self.get_match()
+        if not match or not match.active:
+            await interaction.response.send_message("❌ 戰局不存在或已結束。", ephemeral=True)
+            return
+
+        if interaction.user.id != match.host_id:
+            await interaction.response.send_message("❌ 只有開局者可以開始戰局。", ephemeral=True)
+            return
+
+        if len(match.participants) < 2:
+            await interaction.response.send_message("⚠️ 至少需要兩名玩家。", ephemeral=True)
+            return
+
+        for child in self.children:
+            child.disabled = True
+
+        embed = build_battle_embed(match, "戰局進行中，準備結算...")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+        if match.game_key == "rps":
+            rps_view = RPSBattleView(match)
+            prompt = discord.Embed(title="✊✌️✋ 剪刀石頭布", description="所有玩家請在 40 秒內出拳。", color=discord.Color.teal())
+            await interaction.followup.send(embed=prompt, view=rps_view)
+        elif match.game_key == "blackjack":
+            results = simulate_blackjack_hands(match.participants)
+            best_total = max((data["total"] for data in results.values() if not data["bust"]), default=None)
+            if best_total is None:
+                winners: list[int] = []
+            else:
+                winners = [uid for uid, data in results.items() if data["total"] == best_total and not data["bust"]]
+
+            lines = []
+            for uid, data in results.items():
+                state = "爆牌" if data["bust"] else "安全"
+                lines.append(f"<@{uid}> 手牌 {data['hand']} = {data['total']} ({state})")
+
+            payout_text = distribute_winnings(match, winners)
+            summary = discord.Embed(title="🃏 21 點戰局結果", description="\n".join(lines), color=discord.Color.dark_green())
+            summary.add_field(name="結算", value=payout_text, inline=False)
+            await interaction.followup.send(embed=summary)
+            await finalize_battle(match, payout_text)
+        else:
+            winners, detail_text = resolve_random_contest(match)
+            payout_text = distribute_winnings(match, winners)
+            summary = discord.Embed(title=f"🎯 {BATTLE_GAMES.get(match.game_key, {}).get('name', '戰局')} 結果", color=discord.Color.blurple())
+            summary.add_field(name="賽況", value=detail_text or "--", inline=False)
+            summary.add_field(name="結算", value=payout_text, inline=False)
+            await interaction.followup.send(embed=summary)
+            await finalize_battle(match, payout_text)
+
+    @discord.ui.button(label="取消戰局", style=discord.ButtonStyle.danger, emoji="🛑")
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        match = self.get_match()
+        if not match or not match.active:
+            await interaction.response.send_message("❌ 戰局已結束。", ephemeral=True)
+            return
+
+        if interaction.user.id != match.host_id:
+            await interaction.response.send_message("❌ 只有開局者可以取消。", ephemeral=True)
+            return
+
+        refund_contributions(match)
+        match.active = False
+        active_battles.pop(match.id, None)
+        for child in self.children:
+            child.disabled = True
+        embed = build_battle_embed(match, "已取消並退回所有下注。")
+        await interaction.response.edit_message(embed=embed, view=self)
+
 class GameMenu(View):
     def __init__(self, user: discord.User):
         super().__init__(timeout=180)
@@ -1349,6 +1710,50 @@ async def testerror_command(interaction: discord.Interaction):
         build_permission_error_message("❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"),
         ephemeral=True,
     )
+
+
+@bot.tree.command(name="battle", description="建立下注戰局並邀請玩家加入")
+@app_commands.describe(amount="每位玩家的下注金額")
+@app_commands.choices(
+    game=[app_commands.Choice(name=info["name"], value=key) for key, info in BATTLE_GAMES.items()]
+)
+async def battle_command(
+    interaction: discord.Interaction,
+    amount: int,
+    game: app_commands.Choice[str],
+):
+    global battle_counter
+    if amount < 10:
+        await interaction.response.send_message("❌ 下注至少需要 10 金幣。", ephemeral=True)
+        return
+
+    await open_account(interaction.user)
+    users = load_data()
+    uid = str(interaction.user.id)
+    if users[uid]["wallet"] < amount:
+        await interaction.response.send_message("❌ 錢包餘額不足，無法開局。", ephemeral=True)
+        return
+
+    users[uid]["wallet"] -= amount
+    save_data(users)
+
+    match = BattleMatch(
+        id=battle_counter,
+        host_id=interaction.user.id,
+        game_key=game.value,
+        bet=amount,
+        participants=[interaction.user.id],
+        pot=amount,
+        contributions={interaction.user.id: amount},
+    )
+    battle_counter += 1
+    active_battles[match.id] = match
+
+    view = BattleLobbyView(match.id)
+    await interaction.response.send_message(
+        embed=build_battle_embed(match, "等待玩家加入，贏家全拿！"), view=view
+    )
+    match.message = await interaction.original_response()
 
 
 @bot.tree.command(name="opengame", description="開啟遊戲 GUI")
