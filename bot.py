@@ -327,6 +327,24 @@ class BattleSetupModal(Modal):
         await launch_battle_lobby(interaction, amount, game_key)
 
 
+class BattleBetModal(Modal):
+    def __init__(self, game_key: str):
+        game_name = BATTLE_GAMES.get(game_key, {}).get("name", "多人遊戲")
+        super().__init__(title=f"⚔️ {game_name} - 設定下注")
+        self.game_key = game_key
+        self.bet_amount = TextInput(label="每人下注", placeholder="至少 10 金幣", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 金額需為正整數。", ephemeral=True)
+            return
+
+        await launch_battle_lobby(interaction, amount, self.game_key)
+
+
 class VoidRitualModal(Modal):
     def __init__(self, user: discord.User):
         super().__init__(title="🪄 魔法試煉：虛空獻祭")
@@ -1501,6 +1519,25 @@ class BattleLobbyView(View):
         embed = build_battle_embed(match, "已取消並退回所有下注。")
         await interaction.response.edit_message(embed=embed, view=self)
 
+
+class MultiBattleMenu(View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        self._build_buttons()
+
+    def _build_buttons(self):
+        for idx, (key, info) in enumerate(BATTLE_GAMES.items()):
+            style_cycle = [discord.ButtonStyle.primary, discord.ButtonStyle.secondary, discord.ButtonStyle.success]
+            style = style_cycle[idx % len(style_cycle)]
+            button = Button(label=info.get("name", key), style=style, row=idx // 3)
+
+            async def make_callback(interaction: discord.Interaction, game_key=key):
+                await interaction.response.send_modal(BattleBetModal(game_key))
+
+            button.callback = make_callback
+            self.add_item(button)
+
+
 class GameMenu(View):
     def __init__(self, user: discord.User):
         super().__init__(timeout=180)
@@ -1627,9 +1664,10 @@ class GameMenu(View):
             crit_chance=0.18,
         )
 
-    @discord.ui.button(label="開啟戰局", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
+    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
     async def open_battle(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(BattleSetupModal())
+        embed = build_multiplayer_lobby_embed()
+        await interaction.response.send_message(embed=embed, view=MultiBattleMenu(), ephemeral=True)
 
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
@@ -1647,6 +1685,22 @@ def build_game_menu(user: discord.User):
         inline=False,
     )
     return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
+
+
+def build_multiplayer_lobby_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="⚔️ 多人遊戲大廳",
+        description="選擇想玩的遊戲，設定下注後建立戰局，邀請其他人一同加入！",
+        color=discord.Color.dark_red(),
+    )
+    embed.add_field(
+        name="流程",
+        value="1️⃣ 按下遊戲按鈕選擇玩法\n2️⃣ 輸入每人下注金額\n3️⃣ 系統建立戰局貼文，其他人可加入或開始",
+        inline=False,
+    )
+    game_lines = [f"• {info['name']}：{info['desc']}" for info in BATTLE_GAMES.values()]
+    embed.add_field(name="支援遊戲", value="\n".join(game_lines), inline=False)
+    return embed
 
 
 def build_game_help_embed() -> discord.Embed:
