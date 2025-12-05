@@ -848,12 +848,39 @@ class HorseRaceModal(Modal):
         log_lines = []
         finish_line = 60
 
+        progress_messages: list[discord.Message] = []
+        await interaction.response.defer(ephemeral=True)
+        for idx, name in enumerate(names):
+            msg = await interaction.followup.send(
+                f"🏇 {name} 出閘準備中...", ephemeral=True
+            )
+            progress_messages.append(msg)
+
+        def build_bar(distance: int) -> str:
+            filled_segments = min(7, distance // (finish_line // 7))
+            empty_segments = 7 - filled_segments
+            return "🟩" * filled_segments + "⬛" * empty_segments
+
         for round_idx in range(1, 8):
             for i in range(3):
                 stride = random.randint(4, 10)
                 positions[i] += stride
-            bar = " | ".join(f"{names[i]}:{'■' * (positions[i] // 5)} {positions[i]}m" for i in range(3))
-            log_lines.append(f"第 {round_idx} 段 -> {bar}")
+
+            for i, msg in enumerate(progress_messages):
+                bar = build_bar(positions[i])
+                await msg.edit(
+                    content=(
+                        f"第 {round_idx} 段 {names[i]} 奮力奔馳 | {bar} {positions[i]}m"
+                    )
+                )
+
+            bar_snapshot = " | ".join(
+                f"{names[i]}:{build_bar(positions[i])} {positions[i]}m" for i in range(3)
+            )
+            log_lines.append(f"第 {round_idx} 段 -> {bar_snapshot}")
+
+            await asyncio.sleep(1.1)
+
             if max(positions) >= finish_line:
                 break
 
@@ -883,19 +910,24 @@ class HorseRaceModal(Modal):
         race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
         race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
         race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)
+
+        segment_view = "\n".join(
+            f"{names[i]} | {build_bar(positions[i])} {positions[i]}m" for i in range(3)
+        )
+        race_embed.add_field(name="七段賽道視覺", value=segment_view, inline=False)
         balance = users[uid]["wallet"]
 
-        await interaction.response.defer(ephemeral=True)
-        progress = await interaction.followup.send("🏇 賽馬出閘！賽道加載中...", ephemeral=True)
+        for i, msg in enumerate(progress_messages):
+            await msg.edit(
+                content=(
+                    f"🏁 {names[i]} 衝線！最終距離 {positions[i]}m | {build_bar(positions[i])}"
+                )
+            )
 
-        for line in log_lines:
-            await asyncio.sleep(0.9)
-            await progress.edit(content=f"🏇 {line}")
-
-        await asyncio.sleep(0.9)
-        await progress.edit(
+        await interaction.followup.send(
             content=f"{result_text}\n目前錢包餘額：${balance}",
             embed=race_embed,
+            ephemeral=True,
         )
 
 
