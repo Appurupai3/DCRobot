@@ -1334,6 +1334,7 @@ class GreedyDiceBattleView(View):
         super().__init__(timeout=None)
         self.match = match
         self.totals: dict[int, int] = {uid: 0 for uid in match.participants}
+        self.round_points: dict[int, int] = {uid: 0 for uid in match.participants}
         self.history: dict[int, list[str]] = {uid: [] for uid in match.participants}
         self.remaining_dice: dict[int, int] = {uid: 6 for uid in match.participants}
         self.standing: set[int] = set()
@@ -1351,6 +1352,19 @@ class GreedyDiceBattleView(View):
             return False
         return True
 
+    def current_total(self, uid: int) -> int:
+        return self.totals.get(uid, 0) + self.round_points.get(uid, 0)
+
+    def bank_points(self, uid: int, reason: Optional[str] = None) -> int:
+        if self.round_points.get(uid, 0) > 0:
+            self.totals[uid] += self.round_points[uid]
+            self.round_points[uid] = 0
+
+        total = self.totals.get(uid, 0)
+        if reason:
+            self.history[uid].append(f"{reason}，累積 {total} 分。")
+        return total
+
     def player_status(self, uid: int) -> str:
         if uid in self.busted:
             state = "爆掉"
@@ -1360,8 +1374,10 @@ class GreedyDiceBattleView(View):
             state = "行動中"
 
         last_note = self.history[uid][-1] if self.history[uid] else "尚未擲骰"
+        round_gain = self.round_points.get(uid, 0)
+        round_text = f" (+本回 {round_gain})" if round_gain else ""
         return (
-            f"<@{uid}> | 總分 {self.totals[uid]} | 剩餘骰 {self.remaining_dice[uid]} 顆 | {state}\n"
+            f"<@{uid}> | 總分 {self.totals[uid]}{round_text} | 剩餘骰 {self.remaining_dice[uid]} 顆 | {state}\n"
             f"最近紀錄：{last_note}"
         )
 
@@ -1372,7 +1388,7 @@ class GreedyDiceBattleView(View):
         embed = discord.Embed(title=f"🎲 貪婪骰戰局｜第 {self.round_number} 回合", color=discord.Color.orange())
         embed.description = (
             "每回合 2 分鐘內擲出 6 顆骰子：1=100、5=50，加上三/四/五/六條 300/500/1500/3000，\n"
-            "沒有得分會爆掉清零，得分骰全用完則補滿 6 顆再擲。所有人收分或爆掉即提前進入下一回合，達到 3000 分結算最高分。"
+            "本回合無得分會讓本回積分歸零，已收分不會被洗掉。得分骰全用完則補滿 6 顆再擲，所有人收分或爆掉即提前進入下一回合，達到 3000 分結算最高分。"
         )
         embed.add_field(
             name="狀態",
@@ -1384,6 +1400,7 @@ class GreedyDiceBattleView(View):
     def start_new_round(self):
         self.round_number += 1
         self.remaining_dice = {uid: 6 for uid in self.match.participants}
+        self.round_points = {uid: 0 for uid in self.match.participants}
         self.standing.clear()
         self.busted.clear()
         self.round_active = True
@@ -1411,11 +1428,12 @@ class GreedyDiceBattleView(View):
 
         unresolved = [uid for uid in self.match.participants if uid not in self.standing and uid not in self.busted]
         for uid in unresolved:
+            total = self.bank_points(uid)
             self.standing.add(uid)
             reason = "時間到自動收分" if timed_out else "所有人完成"
-            self.history[uid].append(f"{reason}，停在 {self.totals[uid]} 分。")
+            self.history[uid].append(f"{reason}，停在 {total} 分。")
 
-        if any(score >= 3000 for score in self.totals.values()):
+        if any(self.current_total(uid) >= 3000 for uid in self.match.participants):
             await self.finish_round()
             return
 
@@ -1431,6 +1449,9 @@ class GreedyDiceBattleView(View):
         if self.round_task:
             self.round_task.cancel()
             self.round_task = None
+
+        for uid in self.match.participants:
+            self.bank_points(uid)
 
         top_score = max(self.totals.values()) if self.totals else 0
         winners = [uid for uid, score in self.totals.items() if score == top_score and score > 0]
@@ -1474,11 +1495,11 @@ class GreedyDiceBattleView(View):
 
         if gained == 0:
             self.busted.add(uid)
-            self.totals[uid] = 0
+            self.round_points[uid] = 0
             self.remaining_dice[uid] = 0
-            note = f"{roll} → 無得分，爆掉總分歸零！"
+            note = f"{roll} → 無得分，爆掉本回合分數歸零，累積保持 {self.totals[uid]} 分。"
         else:
-            self.totals[uid] += gained
+            self.round_points[uid] += gained
             remaining = self.remaining_dice[uid] - scoring_dice
             self.remaining_dice[uid] = 6 if remaining <= 0 else remaining
 
@@ -1488,13 +1509,15 @@ class GreedyDiceBattleView(View):
             else:
                 carry_text = f"留下 {self.remaining_dice[uid]} 顆可再擲。"
 
-            if self.totals[uid] >= 3000:
+            total_now = self.current_total(uid)
+            if total_now >= 3000:
+                total_now = self.bank_points(uid)
                 self.standing.add(uid)
-                finish_text = "達到 3000 分，收分待結算！"
+                finish_text = f"達到 3000 分，收分待結算！ (累積 {total_now} 分)"
             else:
                 finish_text = ""
 
-            note = f"擲出 {roll} → +{gained} 分，累積 {self.totals[uid]} 分； {carry_text} {finish_text}".strip()
+            note = f"擲出 {roll} → +{gained} 分，累積 {total_now} 分； {carry_text} {finish_text}".strip()
 
         self.history[uid].append(note)
 
@@ -1513,8 +1536,9 @@ class GreedyDiceBattleView(View):
             await interaction.response.send_message("你已結束行動。", ephemeral=True)
             return
 
+        total = self.bank_points(uid)
         self.standing.add(uid)
-        self.history[uid].append(f"選擇收分，停在 {self.totals[uid]} 分。")
+        self.history[uid].append(f"選擇收分，累積 {total} 分。")
         await interaction.response.edit_message(embed=self.build_status_embed(), view=self)
 
         if self.everyone_resolved():
@@ -1532,7 +1556,7 @@ class GreedyDiceBattleView(View):
     @discord.ui.button(label="目前分數", style=discord.ButtonStyle.secondary, emoji="📊")
     async def status_button(self, interaction: discord.Interaction, button: Button):
         uid = interaction.user.id
-        total = self.totals.get(uid, 0)
+        total = self.current_total(uid)
         remaining = self.remaining_dice.get(uid, 6)
         await interaction.response.send_message(
             f"🎲 你的貪婪骰累積 {total} 分，手上剩 {remaining} 顆可擲。",
