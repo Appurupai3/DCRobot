@@ -28,7 +28,7 @@ BATTLE_GAMES = {
     "blackjack": {"name": "21 點", "desc": "每人隨機抽牌，最接近 21 且不爆牌者獲勝，若全員爆牌則退回下注。"},
     "dice_duel": {
         "name": "貪婪骰",
-        "desc": "Farkle：6 顆骰子推進分數，1=100、5=50，三/四/五/六條得分 300/500/1500/3000，率先衝破 3000 分即決勝。",
+        "desc": "Farkle：6 顆骰子推進分數，1=100、5=50，三/四/五/六條得分 300/500/1500/3000，收分後突破 3000 分即決勝。",
     },
     "archery": {
         "name": "命運左輪：死之交涉",
@@ -1075,7 +1075,7 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
                 )
 
                 if target_score and total >= target_score:
-                    steps.append(f"衝破 {target_score} 分門檻，立即收手！")
+                    steps.append(f"衝破 {target_score} 分門檻，收分等待結算。")
                     break
 
                 remaining = dice_pool - scoring_dice
@@ -1422,7 +1422,7 @@ class GreedyDiceBattleView(View):
         embed = discord.Embed(title=f"🎲 貪婪骰戰局｜第 {self.round_number} 回合", color=discord.Color.orange())
         embed.description = (
             "每回合 2 分鐘內擲出 6 顆骰子：1=100、5=50，加上三/四/五/六條 300/500/1500/3000，\n"
-            "本回合無得分會讓本回積分歸零，已收分不會被洗掉。得分骰全用完則補滿 6 顆再擲，所有人收分或爆掉即提前進入下一回合，達到 3000 分結算最高分。"
+            "本回合無得分會讓本回積分歸零，已收分不會被洗掉。得分骰全用完則補滿 6 顆再擲，所有人收分或爆掉即提前進入下一回合，收分突破 3000 分再結算最高分。"
         )
         embed.add_field(
             name="狀態",
@@ -1490,7 +1490,7 @@ class GreedyDiceBattleView(View):
         top_score = max(self.totals.values()) if self.totals else 0
         winners = [uid for uid, score in self.totals.items() if score == top_score and score > 0]
 
-        detail_text = "達到 3000 分門檻，立即結算最高分！" if top_score >= 3000 else "時間或回合結束，依最高分結算。"
+        detail_text = "有玩家收分突破 3000 分門檻，結算最高分！" if top_score >= 3000 else "時間或回合結束，依最高分結算。"
 
         payout_text = distribute_winnings(self.match, winners)
 
@@ -1544,12 +1544,7 @@ class GreedyDiceBattleView(View):
                 carry_text = f"留下 {self.remaining_dice[uid]} 顆可再擲。"
 
             total_now = self.current_total(uid)
-            if total_now >= 3000:
-                total_now = self.bank_points(uid)
-                self.standing.add(uid)
-                finish_text = f"達到 3000 分，收分待結算！ (累積 {total_now} 分)"
-            else:
-                finish_text = ""
+            finish_text = "已突破 3000 分，請收分等待結算！" if total_now >= 3000 else ""
 
             note = f"擲出 {roll} → +{gained} 分，累積 {total_now} 分； {carry_text} {finish_text}".strip()
 
@@ -1611,8 +1606,9 @@ class RevolverDuelView(View):
         self.item_used: dict[int, bool] = {uid: False for uid in match.participants}
         self.turn_log: list[str] = []
         self.message: Optional[discord.Message] = None
+        self.initial_items_shared = False
+        self.setup_task: Optional[asyncio.Task] = None
         self.reload_cylinder()
-        self.deal_item(self.current_player)
 
     @property
     def current_player(self) -> int:
@@ -1632,10 +1628,30 @@ class RevolverDuelView(View):
             self.reload_cylinder()
         return self.cylinder[0]
 
-    def deal_item(self, uid: int):
+    async def send_item_notice(self, uid: int, item: str, public: bool):
+        if public:
+            self.log_action(f"<@{uid}> 開局獲得 {self.item_name(item)}。")
+            return
+
+        try:
+            user = await bot.fetch_user(uid)
+            await user.send(f"🔫 你抽到：{self.item_name(item)}。道具資訊僅你可見。")
+        except Exception:
+            pass
+
+    async def deal_item(self, uid: int, reveal_public: bool = False):
         items = ["magnifier", "knife", "handcuff", "beer"]
-        self.current_item[uid] = random.choice(items)
+        item = random.choice(items)
+        self.current_item[uid] = item
         self.item_used[uid] = False
+        await self.send_item_notice(uid, item, public=reveal_public)
+
+    async def setup_initial_items(self):
+        if self.initial_items_shared:
+            return
+        self.initial_items_shared = True
+        for uid in self.match.participants:
+            await self.deal_item(uid, reveal_public=True)
 
     def hp_bar(self, hp: int) -> str:
         return "❤️" * hp if hp > 0 else "☠️"
@@ -1686,7 +1702,7 @@ class RevolverDuelView(View):
     def build_status_embed(self) -> discord.Embed:
         desc = (
             "3 實 2 空的彈巢，輪流選擇對方或自己開槍；自己中空包彈可多一回合。\n"
-            "每回合隨機獲得一個道具：🔍 看子彈、🔪 下一發傷害加倍、⛓️ 讓對方跳過、🍺 退掉當前子彈。"
+            "每回合隨機獲得一個道具：🔍 看子彈、🔪 下一發傷害加倍、⛓️ 讓對方跳過、🍺 退掉當前子彈。開局公開道具，之後的道具僅持有人知道（會私訊通知）。"
         )
         embed = discord.Embed(title="🔫 命運左輪：死之交涉", description=desc, color=discord.Color.dark_red())
         status_lines = [
@@ -1697,7 +1713,7 @@ class RevolverDuelView(View):
         embed.add_field(
             name="輪到",
             value=(
-                f"<@{self.current_player}> 的回合｜手上道具：{self.item_name(self.current_item[self.current_player])}\n"
+                f"<@{self.current_player}> 的回合｜手上道具：僅本人可見（已私訊提醒）\n"
                 f"彈巢剩餘 {len(self.cylinder)} 發 (含當前)"
             ),
             inline=False,
@@ -1729,7 +1745,7 @@ class RevolverDuelView(View):
             await self.message.edit(embed=result, view=self)
         await finalize_battle(self.match, payout_text)
 
-    def advance_turn(self):
+    async def advance_turn(self):
         turns = 0
         while turns < len(self.match.participants):
             self.current_index = (self.current_index + 1) % len(self.match.participants)
@@ -1743,7 +1759,7 @@ class RevolverDuelView(View):
                 turns += 1
                 continue
             break
-        self.deal_item(self.current_player)
+        await self.deal_item(self.current_player)
 
     async def handle_shot(self, interaction: discord.Interaction, target: int, self_shot: bool = False):
         shooter = interaction.user.id
@@ -1776,11 +1792,11 @@ class RevolverDuelView(View):
             return
 
         if self_shot and not bullet_live:
-            self.deal_item(shooter)
+            await self.deal_item(shooter)
             await self.update_status()
             return
 
-        self.advance_turn()
+        await self.advance_turn()
         await self.update_status()
 
     async def use_item(self, interaction: discord.Interaction):
@@ -1793,6 +1809,9 @@ class RevolverDuelView(View):
             return
 
         item = self.current_item.get(uid)
+        if not item:
+            await interaction.response.send_message("沒有可用道具。", ephemeral=True)
+            return
         opponent = next(p for p in self.match.participants if p != uid)
         self.item_used[uid] = True
         self.current_item[uid] = None
@@ -1812,17 +1831,15 @@ class RevolverDuelView(View):
             self.skip_next.add(opponent)
             self.log_action(f"<@{uid}> 用手銬鎖住 <@{opponent}>，對方下回合將被跳過。")
             await interaction.response.send_message("對方將被迫跳過一回合。", ephemeral=True)
-            self.advance_turn()
+            await self.advance_turn()
             await self.update_status()
         elif item == "beer":
             discarded_live = self.pull_bullet()
             status = "實彈" if discarded_live else "空包彈"
             self.log_action(f"<@{uid}> 開啟啤酒，丟棄一發 {status}。")
             await interaction.response.send_message(f"丟棄當前子彈：{status}。", ephemeral=True)
-            self.advance_turn()
+            await self.advance_turn()
             await self.update_status()
-        else:
-            await interaction.response.send_message("沒有可用道具。", ephemeral=True)
 
     @discord.ui.button(label="射擊對手", style=discord.ButtonStyle.danger, emoji="💥")
     async def shoot_enemy(self, interaction: discord.Interaction, button: Button):
@@ -2018,6 +2035,7 @@ class BattleLobbyView(View):
             blackjack_view.message = bj_message
         elif match.game_key == "archery":
             duel_view = RevolverDuelView(match)
+            await duel_view.setup_initial_items()
             prompt = duel_view.build_status_embed()
             duel_message = await interaction.followup.send(embed=prompt, view=duel_view)
             duel_view.message = duel_message
