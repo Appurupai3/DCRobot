@@ -1246,22 +1246,6 @@ async def finalize_battle(match: BattleMatch, status_text: str):
         except Exception:
             pass
 
-
-def simulate_blackjack_hands(participants: list[int]):
-    def draw_hand():
-        cards = [random.randint(2, 11), random.randint(2, 11)]
-        while sum(cards) < 16:
-            cards.append(random.randint(1, 11))
-        return cards
-
-    results = {}
-    for uid in participants:
-        hand = draw_hand()
-        total = sum(hand)
-        results[uid] = {"hand": hand, "total": total, "bust": total > 21}
-    return results
-
-
 def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
     scores = {}
     higher_is_better = True
@@ -1325,11 +1309,168 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
     return winners, "\n".join(details)
 
 
+def draw_blackjack_card() -> int:
+    return random.randint(1, 11)
+
+
+def blackjack_total(cards: list[int]) -> int:
+    total = sum(cards)
+    aces = cards.count(11)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+
+class BlackjackBattleView(View):
+    def __init__(self, match: BattleMatch):
+        super().__init__(timeout=120)
+        self.match = match
+        self.hands: dict[int, list[int]] = {uid: [draw_blackjack_card(), draw_blackjack_card()] for uid in match.participants}
+        self.standing: set[int] = set()
+        self.surrendered: set[int] = set()
+        self.message: Optional[discord.Message] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.match.participants:
+            await interaction.response.send_message("❌ 你未加入此戰局。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if self.match.active:
+            await self.finish_round()
+
+    def player_status(self, uid: int) -> str:
+        total = blackjack_total(self.hands[uid])
+        if uid in self.surrendered:
+            state = "投降"
+        elif total > 21:
+            state = "爆牌"
+        elif uid in self.standing:
+            state = "停牌"
+        else:
+            state = "行動中"
+        return f"<@{uid}> 起始牌 {self.hands[uid][0]}｜總計 {total}｜{state}"
+
+    def everyone_resolved(self) -> bool:
+        for uid in self.match.participants:
+            total = blackjack_total(self.hands[uid])
+            if uid in self.surrendered or total > 21 or uid in self.standing:
+                continue
+            return False
+        return True
+
+    def build_status_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title="🃏 21 點戰局",
+            description="可選：加牌、停止加牌、投降。所有人完成後等待 1 秒結算。",
+            color=discord.Color.dark_green(),
+        )
+        lines = [self.player_status(uid) for uid in self.match.participants]
+        embed.add_field(name="牌局狀態 (首張牌公開)", value="\n".join(lines), inline=False)
+        return embed
+
+    async def update_status(self):
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed(), view=self)
+
+    async def finish_round(self):
+        if not self.match.active:
+            return
+
+        if self.everyone_resolved():
+            await asyncio.sleep(1)
+
+        for child in self.children:
+            child.disabled = True
+
+        results = {}
+        for uid in self.match.participants:
+            total = blackjack_total(self.hands[uid])
+            bust = total > 21
+            results[uid] = {"total": total, "bust": bust, "surrender": uid in self.surrendered}
+
+        best_total = max((data["total"] for data in results.values() if not data["bust"] and not data["surrender"]), default=None)
+        winners: list[int]
+        if best_total is None:
+            winners = []
+        else:
+            winners = [uid for uid, data in results.items() if data["total"] == best_total and not data["bust"] and not data["surrender"]]
+
+        payout_text = distribute_winnings(self.match, winners)
+        lines = []
+        for uid in self.match.participants:
+            total = results[uid]["total"]
+            state = "投降" if results[uid]["surrender"] else ("爆牌" if results[uid]["bust"] else "完成")
+            lines.append(f"<@{uid}> 手牌 {self.hands[uid]} = {total} ({state})")
+
+        summary = discord.Embed(title="🃏 21 點戰局結果", description="\n".join(lines), color=discord.Color.dark_green())
+        summary.add_field(name="結算", value=payout_text, inline=False)
+
+        if self.message:
+            await self.message.edit(embed=summary, view=None)
+        elif self.match.message:
+            await self.match.message.channel.send(embed=summary)
+
+        await finalize_battle(self.match, payout_text)
+
+    @discord.ui.button(label="加牌", style=discord.ButtonStyle.primary, emoji="➕")
+    async def hit(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+        total = blackjack_total(self.hands[uid])
+        if uid in self.surrendered or total > 21 or uid in self.standing:
+            await interaction.response.send_message("⚠️ 你已經結束行動。", ephemeral=True)
+            return
+
+        card = draw_blackjack_card()
+        self.hands[uid].append(card)
+        total = blackjack_total(self.hands[uid])
+        state = "爆牌" if total > 21 else f"目前 {total}"
+        await interaction.response.send_message(f"你抽到 {card}，{state}。", ephemeral=True)
+        await self.update_status()
+
+        if self.everyone_resolved():
+            await self.finish_round()
+
+    @discord.ui.button(label="停止加牌", style=discord.ButtonStyle.success, emoji="🛑")
+    async def stand(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+        if uid in self.surrendered:
+            await interaction.response.send_message("⚠️ 你已投降。", ephemeral=True)
+            return
+        if uid in self.standing:
+            await interaction.response.send_message("⚠️ 已經停牌。", ephemeral=True)
+            return
+
+        self.standing.add(uid)
+        await interaction.response.send_message("你選擇停牌。", ephemeral=True)
+        await self.update_status()
+
+        if self.everyone_resolved():
+            await self.finish_round()
+
+    @discord.ui.button(label="投降", style=discord.ButtonStyle.danger, emoji="🏳️")
+    async def surrender(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+        if uid in self.surrendered:
+            await interaction.response.send_message("⚠️ 你已投降。", ephemeral=True)
+            return
+
+        self.surrendered.add(uid)
+        await interaction.response.send_message("你選擇投降並放棄彩池。", ephemeral=True)
+        await self.update_status()
+
+        if self.everyone_resolved():
+            await self.finish_round()
+
+
 class RPSBattleView(View):
     def __init__(self, match: BattleMatch):
         super().__init__(timeout=40)
         self.match = match
         self.choices: dict[int, str] = {}
+        self.message: Optional[discord.Message] = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id not in self.match.participants:
@@ -1350,10 +1491,29 @@ class RPSBattleView(View):
         self.choices[uid] = move
         await interaction.response.send_message(f"✅ 已出拳：{move}", ephemeral=True)
 
+        await self.refresh_prompt()
+
         if len(self.choices) == len(self.match.participants):
             await self.finish_round(interaction)
 
+    async def refresh_prompt(self):
+        if not self.message:
+            return
+
+        status_embed = discord.Embed(
+            title="✊✌️✋ 剪刀石頭布",
+            description="所有玩家請在 40 秒內出拳。",
+            color=discord.Color.teal(),
+        )
+        if self.choices:
+            played = "、".join(f"<@{uid}>" for uid in self.choices)
+            status_embed.add_field(name="已出拳", value=played, inline=False)
+        await self.message.edit(embed=status_embed, view=self)
+
     async def finish_round(self, interaction: Optional[discord.Interaction] = None):
+        if len(self.choices) == len(self.match.participants):
+            await asyncio.sleep(1)
+
         for child in self.children:
             child.disabled = True
 
@@ -1361,8 +1521,8 @@ class RPSBattleView(View):
         if not self.choices:
             refund_contributions(self.match)
             result_embed.description = "無人出拳，已退回下注。"
-            if interaction:
-                await interaction.response.edit_message(embed=result_embed, view=self)
+            if self.message:
+                await self.message.edit(embed=result_embed, view=self)
             return
 
         move_map = {"rock": "石頭", "paper": "布", "scissors": "剪刀"}
@@ -1383,8 +1543,8 @@ class RPSBattleView(View):
         payout_text = distribute_winnings(self.match, winners)
         result_embed.add_field(name="結算", value=payout_text, inline=False)
 
-        if interaction:
-            await interaction.response.edit_message(embed=result_embed, view=self)
+        if self.message:
+            await self.message.edit(embed=result_embed, view=None)
         elif self.match.message:
             await self.match.message.channel.send(embed=result_embed)
 
@@ -1468,25 +1628,13 @@ class BattleLobbyView(View):
         if match.game_key == "rps":
             rps_view = RPSBattleView(match)
             prompt = discord.Embed(title="✊✌️✋ 剪刀石頭布", description="所有玩家請在 40 秒內出拳。", color=discord.Color.teal())
-            await interaction.followup.send(embed=prompt, view=rps_view)
+            rps_message = await interaction.followup.send(embed=prompt, view=rps_view)
+            rps_view.message = rps_message
         elif match.game_key == "blackjack":
-            results = simulate_blackjack_hands(match.participants)
-            best_total = max((data["total"] for data in results.values() if not data["bust"]), default=None)
-            if best_total is None:
-                winners: list[int] = []
-            else:
-                winners = [uid for uid, data in results.items() if data["total"] == best_total and not data["bust"]]
-
-            lines = []
-            for uid, data in results.items():
-                state = "爆牌" if data["bust"] else "安全"
-                lines.append(f"<@{uid}> 手牌 {data['hand']} = {data['total']} ({state})")
-
-            payout_text = distribute_winnings(match, winners)
-            summary = discord.Embed(title="🃏 21 點戰局結果", description="\n".join(lines), color=discord.Color.dark_green())
-            summary.add_field(name="結算", value=payout_text, inline=False)
-            await interaction.followup.send(embed=summary)
-            await finalize_battle(match, payout_text)
+            blackjack_view = BlackjackBattleView(match)
+            prompt = blackjack_view.build_status_embed()
+            bj_message = await interaction.followup.send(embed=prompt, view=blackjack_view)
+            blackjack_view.message = bj_message
         else:
             winners, detail_text = resolve_random_contest(match)
             payout_text = distribute_winnings(match, winners)
