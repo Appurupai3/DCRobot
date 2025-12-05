@@ -1226,9 +1226,9 @@ class BlackjackBattleView(View):
         lines = []
         for uid in self.match.participants:
             total = results[uid]["total"]
-        state = "投降" if results[uid]["surrender"] else ("爆牌" if results[uid]["bust"] else "完成")
-        hand_text = format_blackjack_hand(self.hands[uid])
-        lines.append(f"<@{uid}> 手牌 [{hand_text}] = {total} ({state})")
+            state = "投降" if results[uid]["surrender"] else ("爆牌" if results[uid]["bust"] else "完成")
+            hand_text = format_blackjack_hand(self.hands[uid])
+            lines.append(f"<@{uid}> 手牌 [{hand_text}] = {total} ({state})")
 
         summary = discord.Embed(title="🃏 21 點戰局結果", description="\n".join(lines), color=discord.Color.dark_green())
         summary.add_field(name="結算", value=payout_text, inline=False)
