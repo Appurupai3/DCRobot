@@ -12,57 +12,24 @@ import os
 import random
 import time
 from dotenv import load_dotenv
-# 這裡多引入了 RiotWatcher
-from riotwatcher import ValWatcher, RiotWatcher, ApiError
-import requests
 
 # --- 初始化 ---
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 
-# 初始化 Watchers（延後建立，避免環境變數更新後要重啟）
-riot_watcher = None
-val_watcher = None
-
-# 地區設定 (重要)
-# 查詢帳號時，台灣屬於 'asia'
-ACCOUNT_REGION = os.getenv('ACCOUNT_REGION', 'asia')
-# 查詢特戰戰績時，台灣屬於 'ap'
-VAL_REGION = os.getenv('VAL_REGION', 'ap')
-
-last_api_key = None
-
-
-def ensure_watchers():
-    global riot_watcher, val_watcher, last_api_key
-
-    api_key = os.getenv('RIOT_API_KEY')
-    if not api_key:
-        return False
-
-    # 若環境變數更新過，需重建 watchers 才會生效
-    if api_key != last_api_key:
-        riot_watcher = RiotWatcher(api_key)
-        val_watcher = ValWatcher(api_key)
-        last_api_key = api_key
-
-    if riot_watcher is None or val_watcher is None:
-        riot_watcher = RiotWatcher(api_key)
-        val_watcher = ValWatcher(api_key)
-        last_api_key = api_key
-
-    return True
-
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True 
+intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 BATTLE_GAMES = {
     "rps": {"name": "剪刀石頭布", "desc": "每人出拳一次，出拳克制對手即可全拿彩池，平局退回所有下注。"},
     "blackjack": {"name": "21 點", "desc": "每人隨機抽牌，最接近 21 且不爆牌者獲勝，若全員爆牌則退回下注。"},
-    "dice_duel": {"name": "骰子大亂鬥", "desc": "每人擲 3 顆骰子，比總和最高，遇到同分以最大單骰決勝。"},
+    "dice_duel": {
+        "name": "貪婪骰",
+        "desc": "Farkle/10,000 規則：6 顆骰子推進分數，1=100、5=50、同點數成組高分；可冒險重擲累積，但空手即爆，先衝到 5000 分勝。",
+    },
     "archery": {"name": "神射手", "desc": "隨機 1-100 精準度，最高分奪冠；滿分 100 直接展示全場。"},
     "drift": {"name": "夜間飄移賽", "desc": "每人獲得 0-3 秒加速與隨機終點時間，最短完賽時間贏。"},
     "maze": {"name": "迷宮衝刺", "desc": "隨機 3 條路線耗時，耗時最短者先抵達出口。"},
@@ -103,116 +70,6 @@ class BattleMatch:
 active_battles: dict[int, BattleMatch] = {}
 battle_counter = 1
 
-# --- 輔助工具 ---
-def get_rank_name(tier_id):
-    if tier_id == 0: return "未分級 (Unranked)"
-    if tier_id < 3: return "未使用"
-    if 3 <= tier_id <= 5: return f"鐵牌 (Iron) {tier_id - 2}"
-    if 6 <= tier_id <= 8: return f"銅牌 (Bronze) {tier_id - 5}"
-    if 9 <= tier_id <= 11: return f"銀牌 (Silver) {tier_id - 8}"
-    if 12 <= tier_id <= 14: return f"金牌 (Gold) {tier_id - 11}"
-    if 15 <= tier_id <= 17: return f"白金 (Platinum) {tier_id - 14}"
-    if 18 <= tier_id <= 20: return f"鑽石 (Diamond) {tier_id - 17}"
-    if 21 <= tier_id <= 23: return f"超凡入聖 (Ascendant) {tier_id - 20}"
-    if 24 <= tier_id <= 26: return f"神話 (Immortal) {tier_id - 23}"
-    if tier_id >= 27: return "輻能戰魂 (Radiant)"
-    return f"未知 ({tier_id})"
-
-
-ALT_VALORANT_STAT_SITES = [
-    ("dak.gg", "https://dak.gg/valorant"),
-    ("Tracker.gg", "https://tracker.gg/valorant"),
-    ("Henrik Match Checker", "https://docs.henrikdev.xyz/valorant"),
-]
-
-
-def format_alt_stat_sites():
-    return "\n".join(f"• {name}: {url}" for name, url in ALT_VALORANT_STAT_SITES)
-
-
-def build_permission_error_message(fallback_error: str | None = None):
-    base_error = (
-        "❌ 目前的 Riot API Key 沒有 VALORANT 戰績權限（可能只允許綁定帳號）。\n"
-        "請通知管理員重新申請/更新具備 VALORANT Match 查詢的 API Key。"
-    )
-
-    alt_sites = format_alt_stat_sites()
-    extra = f"\n{fallback_error}" if fallback_error else ""
-    site_hint = f"\n\n若需立即查詢，可在以下網站輸入遊戲 ID：\n{alt_sites}"
-
-    return f"{base_error}{extra}{site_hint}"
-
-
-def fetch_fallback_valorant_stats(puuid: str, full_name: str = None):
-    """
-    嘗試透過 Henrik API 取得最近一場特戰英豪對戰資料。
-    若成功返回 (rank_name, kills, deaths, assists)，失敗則回傳 (None, error_msg)。
-    """
-
-    henrik_api_key = (os.getenv("HENRIK_API_KEY") or "").strip()
-    if not henrik_api_key:
-        return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
-
-    bearer_key = henrik_api_key if henrik_api_key.startswith("Bearer ") else f"Bearer {henrik_api_key}"
-
-    base_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{VAL_REGION}/{puuid}"
-    alt_url = None
-    if full_name and "#" in full_name:
-        game_name, tag_line = full_name.split("#", 1)
-        alt_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{VAL_REGION}/{game_name}/{tag_line}"
-
-    def try_request(url: str):
-        headers = {"Authorization": bearer_key}
-        return requests.get(url, headers=headers, timeout=10)
-
-    try:
-        attempts = [base_url]
-
-        if alt_url:
-            attempts.append(alt_url)
-
-        last_status = None
-        for url in attempts:
-            response = try_request(url)
-            last_status = response.status_code
-
-            if response.status_code == 401:
-                return None, "❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"
-
-            if response.status_code != 200:
-                continue
-
-            body = response.json()
-            matches = body.get("data", [])
-            if not matches:
-                return None, "❌ 備援來源也沒有找到近期對戰紀錄。"
-
-            latest = matches[0]
-            player_stats = None
-            for player in latest.get("players", {}).get("all_players", []):
-                if player.get("puuid") == puuid or (full_name and player.get("name") == full_name.split("#", 1)[0]):
-                    player_stats = player
-                    break
-
-            if not player_stats:
-                return None, "❌ 備援來源資料異常：找不到玩家統計。"
-
-            tier_name = player_stats.get("currenttier_patched") or get_rank_name(player_stats.get("currenttier", 0))
-            stats = player_stats.get("stats", {})
-
-            return (
-                tier_name,
-                stats.get("kills", 0),
-                stats.get("deaths", 0),
-                stats.get("assists", 0)
-            ), None
-
-        return None, f"❌ 備援查詢失敗 (HTTP {last_status or '未知'})，請稍後再試。"
-
-    except Exception as e:
-        print(f"Fallback Valorant stats error: {e}")
-        return None, "❌ 備援查詢時發生錯誤，請稍後再試或通知管理員。"
-
 # ===========================
 # === 資料存取區 ===
 # ===========================
@@ -232,70 +89,12 @@ async def open_account(user):
         return True
     return False
 
-def load_riot_data():
-    if not os.path.exists("riot.json"): return {}
-    with open("riot.json", "r") as f: return json.load(f)
-
-def save_riot_data(data):
-    with open("riot.json", "w") as f: json.dump(data, f, indent=4)
-
-
 # 遊戲暫存冷卻（僅記憶體，重啟重置）
 heist_blacklist: dict[str, float] = {}
 
 # ===========================
-# === 核心邏輯區 (綁定) ===
-# ===========================
-
-async def process_bind(user_id, game_name, tag_line, success_callback, error_callback):
-    # 這裡改成檢查 riot_watcher
-    if not ensure_watchers():
-        await error_callback("❌ 機器人未設定 API Key，無法綁定。")
-        return
-
-    try:
-        # [修正點] 使用 riot_watcher.account 來查帳號，並使用 ACCOUNT_REGION (asia)
-        account = riot_watcher.account.by_riot_id(ACCOUNT_REGION, game_name, tag_line)
-        
-        riot_data = load_riot_data()
-        riot_data[str(user_id)] = {
-            "puuid": account['puuid'],
-            "full_name": f"{account['gameName']}#{account['tagLine']}"
-        }
-        save_riot_data(riot_data)
-
-        await success_callback(f"{account['gameName']}#{account['tagLine']}")
-
-    except ApiError as err:
-        if err.response.status_code == 404:
-            await error_callback(f"❌ 找不到帳號 **{game_name}#{tag_line}**\n請確認 ID 與 Tag 正確，且位於亞太伺服器。")
-        elif err.response.status_code == 403:
-            await error_callback("❌ API Key 已過期或未具備權限，請通知管理員更新。")
-        else:
-            await error_callback(f"❌ 未知錯誤 (Code: {err.response.status_code})")
-    except Exception as e:
-        print(f"Bind Error: {e}")
-        await error_callback("❌ 發生系統錯誤，請檢查後台紀錄。")
-
-# ===========================
 # === UI 組件定義區 ===
 # ===========================
-
-class RiotBindModal(Modal, title='🔗 綁定 Riot 帳號'):
-    game_name = TextInput(label='遊戲 ID', placeholder='例如: ZmjjKK', required=True)
-    tag_line = TextInput(label='標籤 (Tag)', placeholder='例如: 1234 (不用加#)', required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        async def send_success(full_name):
-            await interaction.followup.send(f"✅ **綁定成功！**\n已連結帳號：`{full_name}`", ephemeral=True)
-
-        async def send_error(msg):
-            await interaction.followup.send(msg, ephemeral=True)
-
-        await process_bind(interaction.user.id, self.game_name.value, self.tag_line.value, send_success, send_error)
-
 
 class PayModal(Modal, title='💸 轉帳中心'):
     recipient_id = TextInput(label='對方 User ID', placeholder='右鍵複製 ID', required=True, min_length=15)
@@ -345,82 +144,6 @@ class EconomyMenu(View):
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0)
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
-
-    @discord.ui.button(label="綁定特戰", style=discord.ButtonStyle.gray, emoji="🔗", row=1)
-    async def bind_val_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(RiotBindModal())
-
-    @discord.ui.button(label="特戰戰績", style=discord.ButtonStyle.danger, emoji="🔫", row=1)
-    async def check_val_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer(ephemeral=True)
-        riot_data = load_riot_data()
-        uid = str(interaction.user.id)
-
-        if uid not in riot_data:
-            await interaction.followup.send("❌ 請先綁定帳號！", ephemeral=True)
-            return
-
-        if not ensure_watchers():
-            await interaction.followup.send("❌ 尚未設定 Riot API Key，請通知管理員。", ephemeral=True)
-            return
-
-        try:
-            puuid = riot_data[uid]['puuid']
-            full_name = riot_data[uid]['full_name']
-            
-            # [修正點] 這裡使用 val_watcher 查戰績，並使用 VAL_REGION (ap)
-            matches = val_watcher.match.matchlist_by_puuid(VAL_REGION, puuid)
-            if not matches:
-                await interaction.followup.send(f"❌ {full_name} 最近沒有對戰紀錄。", ephemeral=True)
-                return
-            
-           
-            last_match_id = matches[0]['matchId']
-            print(f"正在查詢: Region={VAL_REGION}, PUUID={puuid}") # <--- 加入這行除錯
-            match_detail = val_watcher.match.by_id(VAL_REGION, last_match_id)
-            
-            player_stats = None
-            for player in match_detail['players']:
-                if player['puuid'] == puuid:
-                    player_stats = player
-                    break
-            
-            if player_stats:
-                tier = player_stats['competitiveTier']
-                kills = player_stats['stats']['kills']
-                deaths = player_stats['stats']['deaths']
-                assists = player_stats['stats']['assists']
-
-                embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
-                embed.description = "數據來源：最近一場對戰"
-                embed.add_field(name="🏆 目前牌位", value=f"**{get_rank_name(tier)}**", inline=False)
-                embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
-
-                await interaction.followup.send(embed=embed, ephemeral=True)
-            else:
-                await interaction.followup.send("❌ 資料異常：找不到玩家數據。", ephemeral=True)
-
-        except ApiError as err:
-            if err.response.status_code == 403:
-                fallback_stats, fallback_error = fetch_fallback_valorant_stats(puuid, full_name)
-
-                if fallback_stats:
-                    tier_name, kills, deaths, assists = fallback_stats
-                    embed = discord.Embed(title=f"🔫 {full_name} 的戰績", color=discord.Color.red())
-                    embed.description = "數據來源：最近一場對戰（備援 API）"
-                    embed.add_field(name="🏆 目前牌位", value=f"**{tier_name}**", inline=False)
-                    embed.add_field(name="📊 KDA", value=f"{kills} / {deaths} / {assists}", inline=True)
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-                else:
-                    await interaction.followup.send(
-                        build_permission_error_message(fallback_error),
-                        ephemeral=True,
-                    )
-            else:
-                await interaction.followup.send(f"❌ Riot API 錯誤 ({err.response.status_code})。", ephemeral=True)
-        except Exception as e:
-            print(f"Stats Error: {e}")
-            await interaction.followup.send("❌ 發生未知錯誤。", ephemeral=True)
 
     @discord.ui.button(label="開啟遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
@@ -574,6 +297,34 @@ class CustomBetModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await process_custom_bet(interaction, self)
+
+
+class BattleSetupModal(Modal):
+    def __init__(self):
+        super().__init__(title="⚔️ 建立戰局")
+        self.bet_amount = TextInput(label="每人下注", placeholder="至少 10 金幣", required=True)
+        self.game_choice = TextInput(
+            label="遊戲", placeholder="rps / 21 點 / 貪婪骰 ...", required=True
+        )
+        self.add_item(self.bet_amount)
+        self.add_item(self.game_choice)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 金額需為正整數。", ephemeral=True)
+            return
+
+        game_key = normalize_game_key(self.game_choice.value)
+        if not game_key:
+            valid = "、".join(info["name"] for info in BATTLE_GAMES.values())
+            await interaction.response.send_message(
+                f"❌ 找不到這個遊戲，請輸入：{valid}", ephemeral=True
+            )
+            return
+
+        await launch_battle_lobby(interaction, amount, game_key)
 
 
 class VoidRitualModal(Modal):
@@ -1246,18 +997,68 @@ async def finalize_battle(match: BattleMatch, status_text: str):
         except Exception:
             pass
 
+def score_farkle_roll(rolls: list[int]) -> tuple[int, int]:
+    counts = {i: rolls.count(i) for i in range(1, 7)}
+    score = 0
+    scoring_dice = 0
+
+    for face, count in counts.items():
+        if count >= 3:
+            base = 1000 if face == 1 else face * 100
+            score += base + (count - 3) * base
+            scoring_dice += count
+            counts[face] = 0
+
+    score += counts.get(1, 0) * 100
+    scoring_dice += counts.get(1, 0)
+    score += counts.get(5, 0) * 50
+    scoring_dice += counts.get(5, 0)
+
+    return score, scoring_dice
+
+
 def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
     scores = {}
     higher_is_better = True
     details = []
+    target_score = 5000 if match.game_key == "dice_duel" else None
 
     for uid in match.participants:
         if match.game_key == "dice_duel":
-            rolls = [random.randint(1, 6) for _ in range(3)]
-            total = sum(rolls)
-            score = total + max(rolls) / 10
-            details.append(f"<@{uid}> 擲出 {rolls}，總和 {total}")
-            scores[uid] = score
+            total = 0
+            dice_pool = 6
+            steps = []
+
+            while True:
+                roll = [random.randint(1, 6) for _ in range(dice_pool)]
+                gained, scoring_dice = score_farkle_roll(roll)
+
+                if gained == 0:
+                    steps.append(
+                        f"第 {len(steps) + 1} 擲 {roll} → 無得分，爆掉本回合！總分歸零。"
+                    )
+                    total = 0
+                    break
+
+                total += gained
+                steps.append(
+                    f"第 {len(steps) + 1} 擲 {roll} → +{gained}，累積 {total} 分。"
+                )
+
+                if target_score and total >= target_score:
+                    steps.append(f"衝破 {target_score} 分門檻，立即收手！")
+                    break
+
+                remaining = dice_pool - scoring_dice
+                dice_pool = 6 if remaining == 0 else max(remaining, 1)
+                risk_tolerance = 0.6 if total < 3500 else 0.4
+                if random.random() > risk_tolerance:
+                    steps.append("見好就收，結束回合。")
+                    break
+
+            scores[uid] = total
+            detail_block = "\n".join([f"<@{uid}> 貪婪骰總分 {total}:"] + steps)
+            details.append(detail_block)
         elif match.game_key == "archery":
             score = random.randint(1, 100)
             details.append(f"<@{uid}> 精準度 {score}")
@@ -1303,7 +1104,15 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
         return [], "沒有有效的參與者。"
 
     comparator = max if higher_is_better else min
-    best_value = comparator(scores.values())
+    if match.game_key == "dice_duel" and target_score:
+        qualified = [val for val in scores.values() if val >= target_score]
+        if qualified:
+            best_value = max(qualified)
+        else:
+            best_value = comparator(scores.values())
+    else:
+        best_value = comparator(scores.values())
+
     winners = [uid for uid, val in scores.items() if val == best_value]
 
     return winners, "\n".join(details)
@@ -1311,6 +1120,14 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
 
 def draw_blackjack_card() -> int:
     return random.randint(1, 11)
+
+
+def format_blackjack_value(card: int) -> str:
+    return "A" if card == 11 else str(card)
+
+
+def format_blackjack_hand(cards: list[int]) -> str:
+    return ", ".join(format_blackjack_value(c) for c in cards)
 
 
 def blackjack_total(cards: list[int]) -> int:
@@ -1354,7 +1171,8 @@ class BlackjackBattleView(View):
 
         hidden_count = max(len(self.hands[uid]) - 1, 0)
         hidden_cards = "🂠" * hidden_count if hidden_count else "無蓋牌"
-        return f"<@{uid}> 亮牌 {self.hands[uid][0]}｜蓋牌 {hidden_cards}｜{state}"
+        first_card = format_blackjack_value(self.hands[uid][0])
+        return f"<@{uid}> 亮牌 {first_card}｜蓋牌 {hidden_cards}｜{state}"
 
     def everyone_resolved(self) -> bool:
         for uid in self.match.participants:
@@ -1408,8 +1226,9 @@ class BlackjackBattleView(View):
         lines = []
         for uid in self.match.participants:
             total = results[uid]["total"]
-            state = "投降" if results[uid]["surrender"] else ("爆牌" if results[uid]["bust"] else "完成")
-            lines.append(f"<@{uid}> 手牌 {self.hands[uid]} = {total} ({state})")
+        state = "投降" if results[uid]["surrender"] else ("爆牌" if results[uid]["bust"] else "完成")
+        hand_text = format_blackjack_hand(self.hands[uid])
+        lines.append(f"<@{uid}> 手牌 [{hand_text}] = {total} ({state})")
 
         summary = discord.Embed(title="🃏 21 點戰局結果", description="\n".join(lines), color=discord.Color.dark_green())
         summary.add_field(name="結算", value=payout_text, inline=False)
@@ -1433,7 +1252,9 @@ class BlackjackBattleView(View):
         self.hands[uid].append(card)
         total = blackjack_total(self.hands[uid])
         state = "爆牌" if total > 21 else f"目前 {total}"
-        await interaction.response.send_message(f"你抽到 {card}，{state}。", ephemeral=True)
+        await interaction.response.send_message(
+            f"你抽到 {format_blackjack_value(card)}，{state}。", ephemeral=True
+        )
         await self.update_status()
 
         if self.everyone_resolved():
@@ -1474,7 +1295,7 @@ class BlackjackBattleView(View):
     async def show_total(self, interaction: discord.Interaction, button: Button):
         uid = interaction.user.id
         total = blackjack_total(self.hands[uid])
-        cards = ", ".join(str(c) for c in self.hands[uid])
+        cards = format_blackjack_hand(self.hands[uid])
         state = "投降" if uid in self.surrendered else ("爆牌" if total > 21 else "進行中")
         await interaction.response.send_message(
             f"你的手牌：{cards}\n目前點數：{total} ({state})",
@@ -1806,6 +1627,10 @@ class GameMenu(View):
             crit_chance=0.18,
         )
 
+    @discord.ui.button(label="開啟戰局", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
+    async def open_battle(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(BattleSetupModal())
+
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
@@ -1883,25 +1708,16 @@ async def on_ready():
     print(f'已登入：{bot.user}')
 
 
-@bot.tree.command(name="testerror", description="回傳權限不足時的錯誤訊息與查詢網站")
-async def testerror_command(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        build_permission_error_message("❌ 備援 API 需要有效的鑰匙，請通知管理員更新或移除損壞的憑證。"),
-        ephemeral=True,
-    )
-
-
-@bot.tree.command(name="battle", description="建立下注戰局並邀請玩家加入")
-@app_commands.describe(amount="每位玩家的下注金額")
-@app_commands.choices(
-    game=[app_commands.Choice(name=info["name"], value=key) for key, info in BATTLE_GAMES.items()]
-)
-async def battle_command(
-    interaction: discord.Interaction,
-    amount: int,
-    game: app_commands.Choice[str],
-):
+async def launch_battle_lobby(interaction: discord.Interaction, amount: int, game_key: str):
     global battle_counter
+
+    normalized_key = normalize_game_key(game_key)
+    if not normalized_key:
+        await interaction.response.send_message(
+            "❌ 無效的遊戲代碼，請重新選擇。", ephemeral=True
+        )
+        return
+
     if amount < 10:
         await interaction.response.send_message("❌ 下注至少需要 10 金幣。", ephemeral=True)
         return
@@ -1919,7 +1735,7 @@ async def battle_command(
     match = BattleMatch(
         id=battle_counter,
         host_id=interaction.user.id,
-        game_key=game.value,
+        game_key=normalized_key,
         bet=amount,
         participants=[interaction.user.id],
         pot=amount,
@@ -1933,6 +1749,19 @@ async def battle_command(
         embed=build_battle_embed(match, "等待玩家加入，贏家全拿！"), view=view
     )
     match.message = await interaction.original_response()
+
+
+@bot.tree.command(name="battle", description="建立下注戰局並邀請玩家加入")
+@app_commands.describe(amount="每位玩家的下注金額")
+@app_commands.choices(
+    game=[app_commands.Choice(name=info["name"], value=key) for key, info in BATTLE_GAMES.items()]
+)
+async def battle_command(
+    interaction: discord.Interaction,
+    amount: int,
+    game: app_commands.Choice[str],
+):
+    await launch_battle_lobby(interaction, amount, game.value)
 
 
 @bot.command(name="battle")
@@ -2003,37 +1832,9 @@ async def rankgame_command(interaction: discord.Interaction):
 
 @bot.command()
 async def openmenu(ctx):
-    embed = discord.Embed(title="🎮 特戰英豪 & 銀行系統", description="點擊按鈕或使用指令操作", color=discord.Color.dark_red())
-    embed.add_field(name="快速指令", value="`!bind 名字#標籤` 可快速綁定\n`/opengame` 開啟遊戲\n`/ranking` 查看排行榜", inline=False)
+    embed = discord.Embed(title="🎮 經濟遊戲 & 銀行系統", description="點擊按鈕或使用指令操作", color=discord.Color.dark_red())
+    embed.add_field(name="快速指令", value="`/opengame` 開啟遊戲\n`/ranking` 查看排行榜", inline=False)
     await ctx.send(embed=embed, view=EconomyMenu())
-
-@bot.command()
-async def bind(ctx, *, riot_id_input: str = None):
-    if not riot_id_input:
-        await ctx.send("❌ 請輸入 Riot ID！\n格式範例：`!bind ZmjjKK#1234`")
-        return
-
-    if "#" not in riot_id_input:
-        await ctx.send("❌ 格式錯誤！\n請務必包含 `#`，例如：`!bind ZmjjKK#1234`")
-        return
-
-    try:
-        name, tag = riot_id_input.rsplit("#", 1) 
-    except:
-        await ctx.send("❌ 格式解析失敗，請重新輸入。")
-        return
-    
-    loading_msg = await ctx.send("🔄 正在連接 Riot 伺服器驗證中...")
-
-    async def on_success(full_name):
-        embed = discord.Embed(title="✅ 綁定成功", description=f"已成功連結帳號：**{full_name}**", color=discord.Color.green())
-        embed.set_footer(text=f"綁定者: {ctx.author.name}")
-        await loading_msg.edit(content=None, embed=embed)
-
-    async def on_error(msg):
-        await loading_msg.edit(content=msg)
-
-    await process_bind(ctx.author.id, name, tag, on_success, on_error)
 
 if token:
     bot.run(token)
