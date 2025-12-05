@@ -846,40 +846,40 @@ class HorseRaceModal(Modal):
         names = ["赤焰", "蒼影", "金蹄"]
         positions = [0, 0, 0]
         log_lines = []
-        finish_line = 60
+        finish_line = 70
 
-        progress_messages: list[discord.Message] = []
         await interaction.response.defer(ephemeral=True)
-        for idx, name in enumerate(names):
-            msg = await interaction.followup.send(
-                f"🏇 {name} 出閘準備中...", ephemeral=True
-            )
-            progress_messages.append(msg)
 
         def build_bar(distance: int) -> str:
-            filled_segments = min(7, distance // (finish_line // 7))
+            filled_segments = min(7, distance // 10)
             empty_segments = 7 - filled_segments
             return "🟩" * filled_segments + "⬛" * empty_segments
 
+        progress_msg = await interaction.followup.send(
+            content="🏇 三匹賽馬出閘準備中...", ephemeral=True
+        )
+
+        def build_status(round_idx: int) -> str:
+            lines = [f"第 {round_idx} 段進度 (每格代表 10m)："]
+            for i in range(3):
+                lines.append(f"{names[i]} | {build_bar(positions[i])} {positions[i]}m")
+            return "\n".join(lines)
+
+        await progress_msg.edit(content=build_status(0))
+
         for round_idx in range(1, 8):
             for i in range(3):
-                stride = random.randint(4, 10)
+                stride = random.randint(6, 12)
                 positions[i] += stride
 
-            for i, msg in enumerate(progress_messages):
-                bar = build_bar(positions[i])
-                await msg.edit(
-                    content=(
-                        f"第 {round_idx} 段 {names[i]} 奮力奔馳 | {bar} {positions[i]}m"
-                    )
-                )
+            await progress_msg.edit(content=build_status(round_idx))
 
             bar_snapshot = " | ".join(
                 f"{names[i]}:{build_bar(positions[i])} {positions[i]}m" for i in range(3)
             )
             log_lines.append(f"第 {round_idx} 段 -> {bar_snapshot}")
 
-            await asyncio.sleep(1.1)
+            await asyncio.sleep(1.25)
 
             if max(positions) >= finish_line:
                 break
@@ -917,12 +917,7 @@ class HorseRaceModal(Modal):
         race_embed.add_field(name="七段賽道視覺", value=segment_view, inline=False)
         balance = users[uid]["wallet"]
 
-        for i, msg in enumerate(progress_messages):
-            await msg.edit(
-                content=(
-                    f"🏁 {names[i]} 衝線！最終距離 {positions[i]}m | {build_bar(positions[i])}"
-                )
-            )
+        await progress_msg.edit(content=build_status(round_idx))
 
         await interaction.followup.send(
             content=f"{result_text}\n目前錢包餘額：${balance}",
