@@ -1351,7 +1351,10 @@ class BlackjackBattleView(View):
             state = "停牌"
         else:
             state = "行動中"
-        return f"<@{uid}> 起始牌 {self.hands[uid][0]}｜總計 {total}｜{state}"
+
+        hidden_count = max(len(self.hands[uid]) - 1, 0)
+        hidden_cards = "🂠" * hidden_count if hidden_count else "無蓋牌"
+        return f"<@{uid}> 亮牌 {self.hands[uid][0]}｜蓋牌 {hidden_cards}｜{state}"
 
     def everyone_resolved(self) -> bool:
         for uid in self.match.participants:
@@ -1364,11 +1367,14 @@ class BlackjackBattleView(View):
     def build_status_embed(self) -> discord.Embed:
         embed = discord.Embed(
             title="🃏 21 點戰局",
-            description="可選：加牌、停止加牌、投降。所有人完成後等待 1 秒結算。",
+            description=(
+                "可選：加牌、停止加牌、投降。使用下方『目前點數』按鈕查看自己的總和。 "
+                "所有人完成後等待 1 秒結算。"
+            ),
             color=discord.Color.dark_green(),
         )
         lines = [self.player_status(uid) for uid in self.match.participants]
-        embed.add_field(name="牌局狀態 (首張牌公開)", value="\n".join(lines), inline=False)
+        embed.add_field(name="牌局狀態 (首張牌公開、總和隱藏)", value="\n".join(lines), inline=False)
         return embed
 
     async def update_status(self):
@@ -1463,6 +1469,17 @@ class BlackjackBattleView(View):
 
         if self.everyone_resolved():
             await self.finish_round()
+
+    @discord.ui.button(label="目前點數", style=discord.ButtonStyle.secondary, emoji="👁️")
+    async def show_total(self, interaction: discord.Interaction, button: Button):
+        uid = interaction.user.id
+        total = blackjack_total(self.hands[uid])
+        cards = ", ".join(str(c) for c in self.hands[uid])
+        state = "投降" if uid in self.surrendered else ("爆牌" if total > 21 else "進行中")
+        await interaction.response.send_message(
+            f"你的手牌：{cards}\n目前點數：{total} ({state})",
+            ephemeral=True,
+        )
 
 
 class RPSBattleView(View):
