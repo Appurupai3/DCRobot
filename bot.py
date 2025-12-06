@@ -1370,6 +1370,8 @@ class GreedyDiceBattleView(View):
         self.totals: dict[int, int] = {uid: 0 for uid in match.participants}
         self.round_points: dict[int, int] = {uid: 0 for uid in match.participants}
         self.history: dict[int, list[str]] = {uid: [] for uid in match.participants}
+        self.round_results: list[tuple[int, list[str]]] = []
+        self.round_start_totals: dict[int, int] = self.totals.copy()
         self.remaining_dice: dict[int, int] = {uid: 6 for uid in match.participants}
         self.standing: set[int] = set()
         self.busted: set[int] = set()
@@ -1442,6 +1444,7 @@ class GreedyDiceBattleView(View):
 
     def start_new_round(self):
         self.round_number += 1
+        self.round_start_totals = self.totals.copy()
         self.remaining_dice = {uid: 6 for uid in self.match.participants}
         self.round_points = {uid: 0 for uid in self.match.participants}
         self.standing.clear()
@@ -1485,6 +1488,8 @@ class GreedyDiceBattleView(View):
             reason = "時間到自動收分" if timed_out else "所有人完成"
             self.history[uid].append(f"{reason}，停在 {total} 分。")
 
+        self.record_round_summary(timed_out)
+
         if not [uid for uid in self.match.participants if uid not in self.forfeited]:
             await self.finish_round()
             return
@@ -1496,6 +1501,23 @@ class GreedyDiceBattleView(View):
         self.start_new_round()
         if self.message:
             await self.message.edit(embed=self.build_status_embed(), view=self)
+
+    def record_round_summary(self, timed_out: bool = False):
+        entries = []
+        for uid in self.match.participants:
+            start_total = self.round_start_totals.get(uid, 0)
+            gain = self.totals[uid] - start_total
+            status = ""
+            if uid in self.forfeited:
+                status = "🏳️"
+            elif uid in self.busted:
+                status = "💥"
+            elif timed_out:
+                status = "⏰"
+            gain_text = f"{gain:+d}分"
+            entries.append(f"<@{uid}>:{gain_text}{status}|總分 {self.totals[uid]} 分")
+
+        self.round_results.append((self.round_number, entries))
 
     async def finish_round(self):
         if self.finished:
@@ -1525,13 +1547,19 @@ class GreedyDiceBattleView(View):
         result_embed = discord.Embed(title="🎲 貪婪骰結果", color=discord.Color.blurple())
         result_embed.description = f"{detail_text}\n\n{payout_text}"
 
-        for uid in self.match.participants:
-            logs = self.history[uid] or ["尚未擲骰"]
-            trimmed_logs = logs[-8:]
-            entry = f"最終 {self.totals[uid]} 分\n" + "\n".join(trimmed_logs)
-            if len(entry) > 1024:
-                entry = entry[:1000] + "..."
-            result_embed.add_field(name=f"玩家 <@{uid}>", value=entry, inline=False)
+        for round_no, entries in self.round_results:
+            block = "\n".join(entries) if entries else "無紀錄"
+            if len(block) > 1024:
+                block = block[:1000] + "..."
+            result_embed.add_field(name=f"第 {round_no} 回合", value=block, inline=False)
+
+        totals_text = "\n".join(
+            f"<@{uid}>：{self.totals[uid]} 分" + ("（棄權）" if uid in self.forfeited else "")
+            for uid in self.match.participants
+        )
+        if len(totals_text) > 1024:
+            totals_text = totals_text[:1000] + "..."
+        result_embed.add_field(name="最終總分", value=totals_text, inline=False)
 
         for child in self.children:
             child.disabled = True
@@ -1827,12 +1855,15 @@ class RevolverDuelView(View):
             await interaction.response.send_message("還沒輪到你！", ephemeral=True)
             return
 
+        boosted = shooter in self.damage_boost
+        if boosted:
+            self.damage_boost.discard(shooter)
+
         bullet_live = self.pull_bullet()
         damage = 0
         text: str
         if bullet_live:
-            damage = 2 if shooter in self.damage_boost else 1
-            self.damage_boost.discard(shooter)
+            damage = 2 if boosted else 1
             self.hp[target] = max(0, self.hp[target] - damage)
             text = (
                 f"<@{shooter}> 朝 {'自己' if self_shot else '<@'+str(target)+'>'} 扣下扳機，實彈！"
