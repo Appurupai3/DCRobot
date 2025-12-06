@@ -101,7 +101,58 @@ DEFAULT_PIRATE_WORDS = [
     "SAILOR",
     "BRIG",
     "RAID",
+    "DOUBLOON",
+    "HARBOR",
+    "PORT",
+    "CORSAIR",
+    "MAROON",
+    "SHIPMATE",
+    "STORM",
+    "LAGOON",
+    "WHARF",
+    "PLANK",
+    "CROW",
+    "MERMAID",
+    "SIREN",
+    "COCONUT",
 ]
+
+PIRATE_WORD_TRANSLATIONS: dict[str, str] = {
+    "TREASURE": "寶藏",
+    "GALLEON": "大型西班牙帆船",
+    "PARROT": "鸚鵡",
+    "ANCHOR": "錨",
+    "CUTLASS": "彎刀",
+    "BOTTLE": "酒瓶",
+    "RUM": "蘭姆酒",
+    "CANNON": "大砲",
+    "ISLAND": "島嶼",
+    "COMPASS": "指南針",
+    "PLUNDER": "掠奪",
+    "SEASHORE": "海岸",
+    "HORIZON": "地平線",
+    "NAVIGATE": "航行",
+    "BUCCANEER": "海盜",
+    "MAST": "桅杆",
+    "CABIN": "船艙",
+    "SAILOR": "水手",
+    "BRIG": "雙桅船 / 監禁室",
+    "RAID": "突襲",
+    "DOUBLOON": "達布隆金幣",
+    "HARBOR": "港灣",
+    "PORT": "港口",
+    "CORSAIR": "私掠船 / 海盜",
+    "MAROON": "棄置荒島",
+    "SHIPMATE": "船友",
+    "STORM": "暴風雨",
+    "LAGOON": "潟湖",
+    "WHARF": "碼頭",
+    "PLANK": "跳板",
+    "CROW": "烏鴉",
+    "MERMAID": "美人魚",
+    "SIREN": "海妖",
+    "COCONUT": "椰子",
+}
 
 WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
 
@@ -120,6 +171,11 @@ def load_pirate_word_bank() -> list[str]:
 
 
 PIRATE_WORDS = load_pirate_word_bank()
+
+
+def pirate_translation(word: str) -> str:
+    upper = word.upper()
+    return PIRATE_WORD_TRANSLATIONS.get(upper, "（暫無翻譯）")
 
 
 def normalize_game_key(game_input: str) -> str | None:
@@ -426,6 +482,7 @@ class PirateGuessView(View):
         self.resolved = False
         self.current_page = 0
         self.alphabet = list(string.ascii_uppercase)
+        self.struggle_flip = False
         self.build_letter_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -530,7 +587,7 @@ class PirateGuessView(View):
             users[uid]["wallet"] += self.bet_amount + reward
             save_data(users)
             status = (
-                f"🎉 你解開了 {self.secret_word}！返還下注 ${self.bet_amount} 並獲得 ${reward}"
+                f"🎉 你解開了 {self.secret_word}（{pirate_translation(self.secret_word)}）！返還下注 ${self.bet_amount} 並獲得 ${reward}"
                 f"（獎勵倍率 {reward_multiplier:.2f}x）。"
             )
             self.resolved = True
@@ -540,7 +597,10 @@ class PirateGuessView(View):
             penalty = int(self.bet_amount * 0.5)
             users[uid]["wallet"] = max(0, users[uid]["wallet"] - penalty)
             save_data(users)
-            status = f"💀 海盜落水了！額外被鯊魚咬走 ${penalty}。"
+            status = (
+                f"💀 海盜落水了！答案是 {self.secret_word}（{pirate_translation(self.secret_word)}），"
+                f"額外被鯊魚咬走 ${penalty}。"
+            )
             self.resolved = True
 
         if self.resolved:
@@ -584,6 +644,8 @@ class PirateLetterModal(Modal):
 
 
 def pirate_word_progress(view: PirateGuessView) -> str:
+    if view.resolved:
+        return " ".join(view.secret_word)
     return " ".join(letter if letter in view.guessed else "_" for letter in view.secret_word)
 
 
@@ -607,33 +669,47 @@ def pirate_stage_art(view: PirateGuessView) -> str:
         on_plank_index = len(plank_spots) - 1
 
     plank_len = plank_spots[-1] + 3
-    plank_line = f"🛳️{'━' * plank_len}🏴‍☠️"
+    plank_line = "╭" + "━" * plank_len + "╮"
+
+    head_label = f"O {head}"
 
     if stage >= view.max_wrong:
         fall_space = plank_spots[-1]
         lines = [
             plank_line,
-            " " * fall_space + "💦 (╯°□°）╯︵",  # splash
-            " " * (fall_space + 3) + head,
-            "🌊🌊🌊🦈🦈🦈",
+            " " * fall_space + f"💦 (╯O╰）{head}",
+            " " * fall_space + "    /\\",  # splash legs
+            "🌊" * 14 + "🦈🦈🦈",
         ]
         return "```\n" + "\n".join(lines) + "\n```"
 
     pos = plank_spots[on_plank_index]
     arms = " /|\\"
-    if stage == view.max_wrong - 1:
-        arms = " \\O/"  # struggle before falling
+    legs = ' / \\'
+
+    remaining = view.max_wrong - stage
+    if remaining <= 2:
+        view.struggle_flip = not view.struggle_flip
+        arms = " \\O/" if view.struggle_flip else " /O\\"
+        legs = ' / \\' if view.struggle_flip else ' /\\'
 
     lines = [
         plank_line,
-        " " * pos + f"({head})",
+        " " * pos + head_label,
         " " * pos + "  |",
         " " * pos + arms,
         " " * pos + "  |",
-        " " * pos + " / \\",
-        "🌊🌊🌊🦈🦈🦈",
+        " " * pos + legs,
+        "🌊" * 14 + "🦈🦈🦈",
     ]
     return "```\n" + "\n".join(lines) + "\n```"
+
+
+def pirate_answer_reveal(view: PirateGuessView) -> str:
+    if not view.resolved:
+        return "-"
+    translation = pirate_translation(view.secret_word)
+    return f"{view.secret_word}（{translation}）"
 
 
 def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Embed:
@@ -644,6 +720,7 @@ def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Em
     embed.add_field(name="目前題目", value=f"`{pirate_word_progress(view)}`", inline=False)
     embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
     embed.add_field(name="跳板狀態", value=pirate_stage_art(view), inline=False)
+    embed.add_field(name="答案揭曉", value=pirate_answer_reveal(view), inline=False)
     embed.set_footer(text=status_text)
     return embed
 
