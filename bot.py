@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import json
 import os
 import random
+import string
 import time
 
 from dotenv import load_dotenv
@@ -78,6 +79,44 @@ BATTLE_GAMES = {
     "sprint": {"name": "百米衝刺", "desc": "每人獲得起跑反應與衝刺力，計算終點時間，最短者贏。"},
     "space": {"name": "太空競賽", "desc": "火箭品質 50-100 與燃料 1-5 倍影響距離，最遠航程稱王。"},
 }
+
+WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
+
+
+def load_pirate_word_bank() -> tuple[list[str], dict[str, str]]:
+    words: list[str] = []
+    translations: dict[str, str] = {}
+
+    if os.path.exists(WORD_BANK_PATH):
+        with open(WORD_BANK_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                raw_line = line.strip()
+                if not raw_line:
+                    continue
+                if "|" in raw_line:
+                    word_part, translation_part = raw_line.split("|", 1)
+                    word = word_part.strip().upper()
+                    translation = translation_part.strip()
+                else:
+                    word = raw_line.upper()
+                    translation = ""
+                if word.isalpha():
+                    words.append(word)
+                    if translation:
+                        translations[word] = translation
+
+    if not words:
+        raise ValueError("pirate word bank is empty; please populate pirate_words.txt")
+
+    return words, translations
+
+
+PIRATE_WORDS, PIRATE_WORD_TRANSLATIONS = load_pirate_word_bank()
+
+
+def pirate_translation(word: str) -> str:
+    upper = word.upper()
+    return PIRATE_WORD_TRANSLATIONS.get(upper, "（暫無翻譯）")
 
 
 def normalize_game_key(game_input: str) -> str | None:
@@ -149,13 +188,13 @@ class EconomyMenu(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0)
+    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0, custom_id="economy_balance")
     async def bal_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         amt = load_data()[str(interaction.user.id)]["wallet"]
         await interaction.response.send_message(f"💰 錢包: ${amt}", ephemeral=True)
 
-    @discord.ui.button(label="工作", style=discord.ButtonStyle.blurple, emoji="🔨", row=0)
+    @discord.ui.button(label="工作", style=discord.ButtonStyle.blurple, emoji="🔨", row=0, custom_id="economy_work")
     async def work_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         users = load_data()
@@ -165,15 +204,20 @@ class EconomyMenu(View):
         save_data(users)
         await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt}", ephemeral=True)
 
-    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0)
+    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
 
-    @discord.ui.button(label="開啟遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
+    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=1, custom_id="economy_multiplayer")
+    async def open_battle(self, interaction: discord.Interaction, button: Button):
+        embed = build_multiplayer_lobby_embed()
+        await interaction.response.send_message(embed=embed, view=MultiBattleMenu())
+
+    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2, custom_id="economy_solo")
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_game_menu(interaction.user))
 
-    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2)
+    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2, custom_id="economy_ranking")
     async def ranking_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_ranking_message())
 
@@ -321,6 +365,320 @@ class CustomBetModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await process_custom_bet(interaction, self)
+
+
+class PirateTreasureModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="🏴‍☠️ 單人猜字 - 下注開始")
+        self.user = user
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的遊戲面板！請自行開啟。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= amount
+        save_data(users)
+
+        secret_word = random.choice(PIRATE_WORDS)
+        view = PirateGuessView(interaction.user, secret_word, amount)
+        embed = build_pirate_embed(view, status_text="選擇一個字母開始，最多錯 6 次！")
+
+        await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
+
+
+class PirateGuessView(View):
+    def __init__(self, user: discord.User, secret_word: str, bet_amount: int):
+        super().__init__(timeout=420)
+        self.author_id = user.id
+        self.player_name = user.display_name
+        self.secret_word = secret_word.upper()
+        self.unique_letters = set(self.secret_word)
+        self.guessed: set[str] = set()
+        self.wrong: set[str] = set()
+        self.bet_amount = bet_amount
+        self.max_wrong = 6
+        self.message: discord.Message | None = None
+        self.resolved = False
+        self.current_page = 0
+        self.alphabet = list(string.ascii_uppercase)
+        self.struggle_frame = 0
+        self.build_letter_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的跳板！請自行開啟遊戲。", ephemeral=True)
+            return False
+        return True
+
+    def build_letter_buttons(self):
+        self.clear_items()
+        page_size = 13
+        start = self.current_page * page_size
+        letters = self.alphabet[start : start + page_size]
+
+        for idx, letter in enumerate(letters):
+            row = idx // 5
+            button = Button(
+                label=letter,
+                style=discord.ButtonStyle.secondary,
+                disabled=self.is_letter_used(letter) or self.resolved,
+                row=row,
+            )
+
+            async def make_callback(interaction: discord.Interaction, picked=letter):
+                await self.handle_guess(interaction, picked)
+
+            button.callback = make_callback
+            self.add_item(button)
+
+        prev_btn = Button(
+            label="上一頁",
+            style=discord.ButtonStyle.primary,
+            disabled=self.current_page == 0 or self.resolved,
+            row=3,
+        )
+        next_btn = Button(
+            label="下一頁",
+            style=discord.ButtonStyle.primary,
+            disabled=(self.current_page + 1) * page_size >= len(self.alphabet) or self.resolved,
+            row=3,
+        )
+
+        async def switch_prev(interaction: discord.Interaction):
+            self.current_page = max(0, self.current_page - 1)
+            self.build_letter_buttons()
+            await interaction.response.edit_message(embed=build_pirate_embed(self, status_text="換一批字母繼續猜！"), view=self)
+
+        async def switch_next(interaction: discord.Interaction):
+            self.current_page += 1
+            self.build_letter_buttons()
+            await interaction.response.edit_message(embed=build_pirate_embed(self, status_text="換一批字母繼續猜！"), view=self)
+
+        prev_btn.callback = switch_prev
+        next_btn.callback = switch_next
+        self.add_item(prev_btn)
+        self.add_item(next_btn)
+
+        manual_input = Button(label="輸入字母", style=discord.ButtonStyle.success, row=4, disabled=self.resolved)
+
+        async def open_manual(interaction: discord.Interaction):
+            await interaction.response.send_modal(PirateLetterModal(self))
+
+        manual_input.callback = open_manual
+        self.add_item(manual_input)
+
+    def is_letter_used(self, letter: str) -> bool:
+        upper = letter.upper()
+        return upper in self.guessed or upper in self.wrong
+
+    async def handle_guess(self, interaction: discord.Interaction, letter: str):
+        if self.resolved:
+            await interaction.response.send_message("⚠️ 此局已結束。", ephemeral=True)
+            return
+
+        guess = letter.upper()
+        if len(guess) != 1 or guess not in string.ascii_uppercase:
+            await interaction.response.send_message("❌ 請輸入單一英文字母。", ephemeral=True)
+            return
+
+        if guess in self.guessed or guess in self.wrong:
+            await interaction.response.send_message("⚠️ 這個字母已經走過跳板了！", ephemeral=True)
+            return
+
+        status = ""
+        if guess in self.unique_letters:
+            self.guessed.add(guess)
+            revealed = pirate_word_progress(self)
+            status = f"✅ 命中！目前單字：{revealed}"
+        else:
+            self.wrong.add(guess)
+            steps_left = self.max_wrong - len(self.wrong)
+            status = f"❌ 踩空！還能再錯 {steps_left} 次。"
+
+        solved = self.unique_letters.issubset(self.guessed)
+        out_of_steps = len(self.wrong) >= self.max_wrong
+
+        if solved:
+            users = load_data()
+            uid = str(interaction.user.id)
+            reward_multiplier = 1.4 + (self.max_wrong - len(self.wrong)) * 0.12
+            reward = int(self.bet_amount * reward_multiplier)
+            users[uid]["wallet"] += self.bet_amount + reward
+            save_data(users)
+            status = (
+                f"🎉 你解開了 {self.secret_word}（{pirate_translation(self.secret_word)}）！返還下注 ${self.bet_amount} 並獲得 ${reward}"
+                f"（獎勵倍率 {reward_multiplier:.2f}x）。"
+            )
+            self.resolved = True
+        elif out_of_steps:
+            users = load_data()
+            uid = str(interaction.user.id)
+            penalty = int(self.bet_amount * 0.5)
+            users[uid]["wallet"] = max(0, users[uid]["wallet"] - penalty)
+            save_data(users)
+            status = (
+                f"💀 海盜落水了！答案是 {self.secret_word}（{pirate_translation(self.secret_word)}），"
+                f"額外被鯊魚咬走 ${penalty}。"
+            )
+            self.resolved = True
+
+        if self.resolved:
+            for child in self.children:
+                child.disabled = True
+
+        self.build_letter_buttons()
+        embed = build_pirate_embed(self, status_text=status)
+
+        try:
+            await interaction.response.edit_message(embed=embed, view=self)
+        except discord.InteractionResponded:
+            await interaction.followup.edit_message(message_id=self.message.id, embed=embed, view=self)
+
+        if self.resolved:
+            self.stop()
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            embed = build_pirate_embed(self, status_text="⏰ 時間到，此局結束。")
+            await self.message.edit(embed=embed, view=self)
+        self.stop()
+
+
+class PirateLetterModal(Modal):
+    def __init__(self, view: PirateGuessView):
+        super().__init__(title="🏴‍☠️ 輸入字母")
+        self.view_ref = view
+        self.letter_input = TextInput(label="猜一個字母", placeholder="A-Z", required=True, max_length=1)
+        self.add_item(self.letter_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.view_ref
+        if interaction.user.id != view.author_id:
+            await interaction.response.send_message("❌ 這不是你的跳板！請自行開啟。", ephemeral=True)
+            return
+
+        await view.handle_guess(interaction, self.letter_input.value)
+
+
+def pirate_word_progress(view: PirateGuessView) -> str:
+    if view.resolved:
+        return " ".join(view.secret_word)
+    return " ".join(letter if letter in view.guessed else "_" for letter in view.secret_word)
+
+
+def pirate_word_bank_hint(view: PirateGuessView) -> str:
+    guessed = ", ".join(sorted(view.guessed)) or "-"
+    missed = ", ".join(sorted(view.wrong)) or "-"
+    return f"命中：{guessed}\n失誤：{missed}"
+
+
+def pirate_stage_art(view: PirateGuessView) -> str:
+    stage = len(view.wrong)
+    head = view.player_name.strip() or "玩家"
+    max_head = 8
+    if len(head) > max_head:
+        head = head[:max_head] + "…"
+
+    plank_spots = [6, 9, 12, 15, 18, 21]
+    on_plank_index = min(stage, view.max_wrong)
+
+    if on_plank_index >= len(plank_spots):
+        on_plank_index = len(plank_spots) - 1
+
+    plank_len = plank_spots[-1] + 3
+    plank_line = "╭" + "━" * plank_len + "╮"
+
+    head_label = f"O {head}"
+
+    if stage >= view.max_wrong:
+        fall_space = plank_spots[-1]
+        lines = [
+            plank_line,
+            " " * fall_space + f"💦 (╯O╰）{head}",
+            " " * fall_space + "    /\\",  # splash legs
+            "🌊" * 14 + "🦈🦈🦈",
+        ]
+        return "```\n" + "\n".join(lines) + "\n```"
+
+    pos = plank_spots[on_plank_index]
+    arms = "/|\\"
+    legs = '/ \\'
+
+    remaining = view.max_wrong - stage
+    base_indent = pos + 1
+    rope_indent = base_indent
+    head_indent = base_indent
+    body_indent = base_indent
+    limb_indent = max(base_indent - 1, 0)
+
+    if remaining <= 2:
+        view.struggle_frame = (view.struggle_frame + 1) % 3
+        frame = view.struggle_frame
+        head_label = f"O {head}"
+        if frame == 0:
+            arms = "\\|/"
+            legs = '/ \\'
+        elif frame == 1:
+            arms = "/|\\"
+            legs = '/ \\'
+        else:
+            arms = "\\|/"
+            legs = '/ \\'
+
+    lines = [
+        plank_line,
+        " " * rope_indent + "|",
+        " " * head_indent + head_label,
+        " " * limb_indent + arms,
+        " " * body_indent + "|",
+        " " * limb_indent + legs,
+        "🌊" * 14 + "🦈🦈🦈",
+    ]
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def pirate_answer_reveal(view: PirateGuessView) -> str:
+    if not view.resolved:
+        return "-"
+    translation = pirate_translation(view.secret_word)
+    return f"{view.secret_word}（{translation}）"
+
+
+def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Embed:
+    embed = discord.Embed(title="🏴‍☠️ 單人猜字：海盜寶藏", color=discord.Color.dark_gold())
+    embed.description = "猜出隱藏的英文單字，錯 6 次海盜就會落水餵鯊魚！"
+    embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
+    embed.add_field(name="剩餘容錯", value=f"{view.max_wrong - len(view.wrong)} 次", inline=True)
+    embed.add_field(name="目前題目", value=f"`{pirate_word_progress(view)}`", inline=False)
+    embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
+    embed.add_field(name="跳板狀態", value=pirate_stage_art(view), inline=False)
+    embed.add_field(name="答案揭曉", value=pirate_answer_reveal(view), inline=False)
+    embed.set_footer(text=status_text)
+    return embed
 
 
 class BattleSetupModal(Modal):
@@ -2213,14 +2571,19 @@ class BattleLobbyView(View):
 
 class MultiBattleMenu(View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self._build_buttons()
 
     def _build_buttons(self):
         for idx, (key, info) in enumerate(BATTLE_GAMES.items()):
             style_cycle = [discord.ButtonStyle.primary, discord.ButtonStyle.secondary, discord.ButtonStyle.success]
             style = style_cycle[idx % len(style_cycle)]
-            button = Button(label=info.get("name", key), style=style, row=idx // 3)
+            button = Button(
+                label=info.get("name", key),
+                style=style,
+                row=idx // 3,
+                custom_id=f"battle_menu_{key}",
+            )
 
             async def make_callback(interaction: discord.Interaction, game_key=key):
                 await interaction.response.send_modal(BattleBetModal(game_key))
@@ -2284,27 +2647,9 @@ class GameMenu(View):
             resolve_func=resolve_dice_duel,
         )
 
-    @discord.ui.button(label="太空探險", style=discord.ButtonStyle.secondary, emoji="🚀", row=0)
-    async def space_adventure(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="太空探險",
-            reward_mult_range=(1.2, 2.0),
-            penalty_chance=0.3,
-            penalty_mult_range=(0.4, 1.0),
-            crit_chance=0.18,
-        )
-
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="海盜寶藏",
-            reward_mult_range=(1.3, 2.2),
-            penalty_chance=0.38,
-            penalty_mult_range=(0.5, 1.2),
-            crit_chance=0.22,
-        )
+        await interaction.response.send_modal(PirateTreasureModal(interaction.user))
 
     @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
     async def magic_trial(self, interaction: discord.Interaction, button: Button):
@@ -2313,17 +2658,6 @@ class GameMenu(View):
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(HorseRaceModal(interaction.user))
-
-    @discord.ui.button(label="卡丁車", style=discord.ButtonStyle.secondary, emoji="🏎️", row=1)
-    async def kart_race(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="卡丁車",
-            reward_mult_range=(1.1, 1.7),
-            penalty_chance=0.24,
-            penalty_mult_range=(0.25, 0.8),
-            crit_chance=0.15,
-        )
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
@@ -2344,22 +2678,6 @@ class GameMenu(View):
             crit_chance=0.1,
         )
 
-    @discord.ui.button(label="節奏挑戰", style=discord.ButtonStyle.secondary, emoji="🥁", row=2)
-    async def rhythm_game(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="節奏挑戰",
-            reward_mult_range=(1.12, 1.8),
-            penalty_chance=0.26,
-            penalty_mult_range=(0.3, 0.9),
-            crit_chance=0.18,
-        )
-
-    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
-    async def open_battle(self, interaction: discord.Interaction, button: Button):
-        embed = build_multiplayer_lobby_embed()
-        await interaction.response.send_message(embed=embed, view=MultiBattleMenu(), ephemeral=True)
-
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
@@ -2375,7 +2693,7 @@ def build_game_menu(user: discord.User):
         ),
         inline=False,
     )
-    return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
+    return {"embed": embed, "view": GameMenu(user), "ephemeral": False}
 
 
 def build_multiplayer_lobby_embed() -> discord.Embed:
@@ -2402,6 +2720,11 @@ def build_game_help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
+        name="🏴‍☠️ 單人猜字：海盜寶藏",
+        value="從題庫抽出英文單字，每次猜一個字母；錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
+        inline=False,
+    )
+    embed.add_field(
         name="🧩 解謎挑戰 (2A2B)",
         value="下注後獲得 4 位不重複密碼，共 8 次機會猜中；A 表示數字與位置正確，B 表示數字正確但位置錯，次數越高獎勵倍率逐步下降。",
         inline=False,
@@ -2423,6 +2746,20 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.set_footer(text="所有遊戲需先輸入下注金額，請確認錢包餘額充足！")
     return embed
+
+
+def build_economy_menu() -> dict:
+    embed = discord.Embed(
+        title="🎮 經濟遊戲 & 銀行系統",
+        description="點擊按鈕或使用指令操作",
+        color=discord.Color.dark_red(),
+    )
+    embed.add_field(
+        name="快速指令",
+        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜",
+        inline=False,
+    )
+    return {"embed": embed, "view": EconomyMenu(), "ephemeral": False}
 
 
 def build_ranking_message(limit: int = 10):
@@ -2450,6 +2787,9 @@ async def on_ready():
         await bot.tree.sync()
     except Exception as e:
         print(f"Slash command sync failed: {e}")
+    # Register persistent menus so any posted lobbies remain clickable for everyone
+    bot.add_view(EconomyMenu())
+    bot.add_view(MultiBattleMenu())
     print(f'已登入：{bot.user}')
 
 
@@ -2560,9 +2900,14 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
     match.message = sent
 
 
-@bot.tree.command(name="opengame", description="開啟遊戲 GUI")
+@bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
     await interaction.response.send_message(**build_game_menu(interaction.user))
+
+
+@bot.tree.command(name="openmenu", description="開啟經濟選單")
+async def openmenu_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**build_economy_menu())
 
 
 @bot.tree.command(name="ranking", description="展示經濟排行榜")
@@ -2577,9 +2922,8 @@ async def rankgame_command(interaction: discord.Interaction):
 
 @bot.command()
 async def openmenu(ctx):
-    embed = discord.Embed(title="🎮 經濟遊戲 & 銀行系統", description="點擊按鈕或使用指令操作", color=discord.Color.dark_red())
-    embed.add_field(name="快速指令", value="`/opengame` 開啟遊戲\n`/ranking` 查看排行榜", inline=False)
-    await ctx.send(embed=embed, view=EconomyMenu())
+    payload = build_economy_menu()
+    await ctx.send(embed=payload["embed"], view=payload["view"])
 
 if token:
     bot.run(token)
