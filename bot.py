@@ -697,16 +697,14 @@ def pirate_stage_art(view: PirateGuessView) -> str:
     if remaining <= 2:
         view.struggle_frame = (view.struggle_frame + 1) % 3
         frame = view.struggle_frame
+        head_label = f"O {head}"
         if frame == 0:
-            head_label = f"O {head}"
-            arms = "\\O/"
+            arms = "\\|/"
             legs = '/ \\'
         elif frame == 1:
-            head_label = f"O {head}"
-            arms = "/O\\"
+            arms = "/|\\"
             legs = '/\\'
         else:
-            head_label = f"| {head}"
             arms = "\\|/"
             legs = '/ \\'
 
@@ -715,7 +713,7 @@ def pirate_stage_art(view: PirateGuessView) -> str:
         " " * rope_indent + "|",
         " " * head_indent + head_label,
         " " * limb_indent + arms,
-        " " * body_indent + " |",
+        " " * body_indent + "|",
         " " * limb_indent + legs,
         "🌊" * 14 + "🦈🦈🦈",
     ]
