@@ -1,13 +1,12 @@
 # DCRobot
-# Discord Valorant & Economy Bot
+# Discord Economy Bot
 
-這是一個結合 **Valorant (特戰英豪) 戰績查詢** 與 **經濟博弈系統** (賽馬、骰子、駭客遊戲等) 的 Discord 機器人。
+這是一個專注於經濟與博弈小遊戲的 Discord 機器人，提供轉帳、工作賺錢、開啟多人對戰等功能。
 
 ## 📋 前置需求
 
 - **Python 3.8** 或以上版本
 - 一個 Discord 機器人帳號 (Token)
-- Riot Games API Key (用於查詢戰績)
 
 ## 🛠️ 安裝步驟
 
@@ -19,3 +18,13 @@
    ```bash
    pip install -r requirements.txt
    python bot.py
+   ```
+
+3. **設定環境變數**
+   建立 `.env` 檔案並填入你的 Discord Bot Token：
+   ```env
+   DISCORD_TOKEN=你的機器人 Token
+   ```
+
+4. **啟動機器人**
+   執行 `python bot.py` 後，將機器人邀請至伺服器即可開始使用經濟功能與遊戲。
