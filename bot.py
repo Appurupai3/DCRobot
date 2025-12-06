@@ -694,7 +694,7 @@ class SkillUseSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=self._build_options(),
-            row=2,
+            row=4,
         )
 
     def _build_options(self) -> list[discord.SelectOption]:
