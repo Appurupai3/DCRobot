@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 import json
@@ -83,6 +84,19 @@ BATTLE_GAMES = {
 WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
 
 
+# === 特戰棋盤設定 ===
+VALORANT_MAP_SIZE = 15
+VALORANT_ICONS = {
+    "EMPTY": "⬜",
+    "WALL": "⬛",
+    "PLAYER": "🟦",
+    "ENEMY": "🟥",
+    "SPIKE": "💠",
+    "SMOKE": "☁️",
+    "SLOW": "❄️",
+}
+
+
 def load_pirate_word_bank() -> tuple[list[str], dict[str, str]]:
     words: list[str] = []
     translations: dict[str, str] = {}
@@ -131,6 +145,416 @@ def normalize_game_key(game_input: str) -> str | None:
             return key
 
     return None
+
+
+class ValorantTacticsGame:
+    def __init__(self, skills: list[str]):
+        self.grid = [["EMPTY" for _ in range(VALORANT_MAP_SIZE)] for _ in range(VALORANT_MAP_SIZE)]
+        self.player_pos = [1, 1]
+        self.enemy_pos = [13, 13]
+        self.spike_pos = [7, 7]
+        self.player_hp = 3
+        self.enemy_hp = 3
+        self.turn = 1
+        self.enemy_blinded = 0
+        self.enemy_bound = 0
+        self.enemy_defuse_progress = 0
+        self.smoke_tiles: set[tuple[int, int]] = set()
+        self.slow_tiles: set[tuple[int, int]] = set()
+        self.skills = skills
+        self.skill_charges = {"smoke": 2, "flash": 2, "slow": 1, "bind": 1}
+        self.teleport_cooldown = 0
+        self.enemy_skill = random.choice(["molly", "recon"])
+        self.generate_map()
+
+    def generate_map(self):
+        self.grid[self.spike_pos[1]][self.spike_pos[0]] = "SPIKE"
+        wall_count = random.randint(20, 30)
+        forbidden = {tuple(self.player_pos), tuple(self.enemy_pos)}
+        for _ in range(wall_count):
+            rx, ry = random.randint(0, 14), random.randint(0, 14)
+            if (rx, ry) in forbidden:
+                continue
+            if abs(rx - self.spike_pos[0]) <= 2 and abs(ry - self.spike_pos[1]) <= 2:
+                continue
+            self.grid[ry][rx] = "WALL"
+
+    def within_bounds(self, x: int, y: int) -> bool:
+        return 0 <= x < VALORANT_MAP_SIZE and 0 <= y < VALORANT_MAP_SIZE
+
+    def render_map(self) -> str:
+        rows: list[str] = []
+        for y in range(VALORANT_MAP_SIZE):
+            row_icons = []
+            for x in range(VALORANT_MAP_SIZE):
+                if [x, y] == self.player_pos:
+                    row_icons.append(VALORANT_ICONS["PLAYER"])
+                    continue
+                if [x, y] == self.enemy_pos:
+                    row_icons.append(VALORANT_ICONS["ENEMY"])
+                    continue
+
+                tile = self.grid[y][x]
+                if (x, y) in self.smoke_tiles:
+                    row_icons.append(VALORANT_ICONS["SMOKE"])
+                elif (x, y) in self.slow_tiles:
+                    row_icons.append(VALORANT_ICONS["SLOW"])
+                else:
+                    row_icons.append(VALORANT_ICONS.get(tile, VALORANT_ICONS["EMPTY"]))
+            rows.append("".join(row_icons))
+        return "\n".join(rows)
+
+    def line_of_sight(self, start: list[int], end: list[int]) -> bool:
+        sx, sy = start
+        ex, ey = end
+        if sx != ex and sy != ey:
+            return False
+        dx = 0 if sx == ex else (1 if ex > sx else -1)
+        dy = 0 if sy == ey else (1 if ey > sy else -1)
+        cx, cy = sx + dx, sy + dy
+        while [cx, cy] != [ex, ey]:
+            if not self.within_bounds(cx, cy):
+                return False
+            tile = self.grid[cy][cx]
+            if tile == "WALL" or (cx, cy) in self.smoke_tiles:
+                return False
+            cx += dx
+            cy += dy
+        return True
+
+    def apply_damage(self, target: str, amount: int) -> str:
+        if target == "enemy":
+            self.enemy_hp = max(0, self.enemy_hp - amount)
+            return f"🟥 敵人受到 {amount} 傷害，剩餘 {self.enemy_hp} HP。"
+        self.player_hp = max(0, self.player_hp - amount)
+        return f"你受到 {amount} 傷害，剩餘 {self.player_hp} HP。"
+
+    def move_player(self, dx: int, dy: int) -> str:
+        nx, ny = self.player_pos[0] + dx, self.player_pos[1] + dy
+        if not self.within_bounds(nx, ny):
+            return "❌ 超出地圖邊界。"
+        if self.grid[ny][nx] == "WALL":
+            return "❌ 前方有掩體，無法前進。"
+        self.player_pos = [nx, ny]
+        return "👣 你移動了一步。"
+
+    def player_attack(self) -> str:
+        if not self.line_of_sight(self.player_pos, self.enemy_pos):
+            return "❌ 視線被牆壁或煙霧阻擋。"
+        damage_text = self.apply_damage("enemy", 1)
+        return f"🔫 你開火！{damage_text}"
+
+    def use_skill(self, name: str) -> str:
+        if name not in self.skills:
+            return "❌ 你未裝備此技能。"
+        if name != "teleport" and self.skill_charges.get(name, 0) <= 0:
+            return "❌ 技能已用盡。"
+
+        msg = ""
+        px, py = self.player_pos
+        if name == "smoke":
+            for dy in range(2):
+                for dx in range(2):
+                    tx, ty = px + dx, py + dy
+                    if self.within_bounds(tx, ty) and self.grid[ty][tx] != "WALL":
+                        self.smoke_tiles.add((tx, ty))
+            msg = "💨 已部署 2x2 煙霧，阻擋視線！"
+            self.skill_charges[name] -= 1
+        elif name == "flash":
+            self.enemy_blinded = max(self.enemy_blinded, 1)
+            msg = "💥 閃光命中！敵人下回合無法攻擊。"
+            self.skill_charges[name] -= 1
+        elif name == "slow":
+            for dy in range(-3, 3):
+                for dx in range(-3, 3):
+                    tx, ty = px + dx, py + dy
+                    if self.within_bounds(tx, ty) and self.grid[ty][tx] != "WALL":
+                        self.slow_tiles.add((tx, ty))
+            msg = "❄️ 已鋪設 6x6 緩速區域，敵人移速減半。"
+            self.skill_charges[name] -= 1
+        elif name == "bind":
+            self.enemy_bound = max(self.enemy_bound, 1)
+            msg = "⛓️ 束縛成功！敵人下回合無法移動。"
+            self.skill_charges[name] -= 1
+        elif name == "teleport":
+            if self.teleport_cooldown > 0:
+                return "❌ 傳送尚未冷卻。"
+            valid: list[list[int]] = []
+            for dy in range(-3, 4):
+                for dx in range(-3, 4):
+                    tx, ty = px + dx, py + dy
+                    if self.within_bounds(tx, ty) and self.grid[ty][tx] == "EMPTY" and (tx, ty) not in self.smoke_tiles:
+                        if [tx, ty] != self.enemy_pos:
+                            valid.append([tx, ty])
+            if not valid:
+                return "❌ 傳送失敗，範圍內沒有安全地面。"
+            self.player_pos = random.choice(valid)
+            self.teleport_cooldown = 3
+            msg = "🌀 你瞬移到新的位置！"
+        return msg
+
+    def enemy_can_see_player(self) -> bool:
+        return self.line_of_sight(self.enemy_pos, self.player_pos)
+
+    def _enemy_step_toward(self, target: list[int], steps: int) -> str:
+        if steps <= 0:
+            return "🟥 敵人原地觀望。"
+        queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque()
+        visited = set()
+        queue.append((self.enemy_pos[0], self.enemy_pos[1], []))
+        visited.add(tuple(self.enemy_pos))
+        found_path: list[tuple[int, int]] | None = None
+        while queue:
+            x, y, path = queue.popleft()
+            if [x, y] == target:
+                found_path = path
+                break
+            for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nx, ny = x + dx, y + dy
+                if not self.within_bounds(nx, ny):
+                    continue
+                if (nx, ny) in visited:
+                    continue
+                if self.grid[ny][nx] == "WALL":
+                    continue
+                visited.add((nx, ny))
+                queue.append((nx, ny, path + [(nx, ny)]))
+
+        if not found_path:
+            return "🟥 敵人被地形卡住了。"
+
+        path_taken = found_path[:steps]
+        if path_taken:
+            self.enemy_pos = list(path_taken[-1])
+        return "🟥 敵人向目標推進。"
+
+    def enemy_attack(self, log: list[str]):
+        if self.enemy_blinded > 0:
+            log.append("✨ 敵人被致盲，無法攻擊。")
+            return
+        if not self.enemy_can_see_player():
+            log.append("👀 敵人沒有找到你的身影。")
+            return
+        log.append(self.apply_damage("player", 1))
+
+    def enemy_special(self, log: list[str]):
+        if self.enemy_skill == "molly":
+            if self.enemy_pos == self.spike_pos:
+                log.append("🔥 敵人投擲燃燒彈守點，你不敢靠近中心。")
+                self.player_hp = max(0, self.player_hp - 1)
+                log.append("你被餘焰灼傷 -1 HP！")
+        elif self.enemy_skill == "recon":
+            if random.random() < 0.4:
+                log.append("📡 敵人啟動尋敵箭，暫時無視煙霧。")
+                self.smoke_tiles.clear()
+
+    def resolve_enemy_turn(self, log: list[str]):
+        on_spike = self.enemy_pos == self.spike_pos
+        if self.enemy_bound > 0:
+            log.append("⛓️ 敵人被束縛，無法移動。")
+            if on_spike:
+                self.enemy_defuse_progress += 1
+                log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
+        else:
+            steps = 2
+            if tuple(self.enemy_pos) in self.slow_tiles:
+                steps = 1
+            target = self.player_pos if self.enemy_can_see_player() else self.spike_pos
+            log.append(self._enemy_step_toward(target, steps))
+            if self.enemy_pos == self.spike_pos and target == self.spike_pos:
+                self.enemy_defuse_progress += 1
+                log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
+            else:
+                self.enemy_defuse_progress = 0
+
+        if self.enemy_pos != self.spike_pos:
+            self.enemy_defuse_progress = 0
+
+        self.enemy_attack(log)
+        if random.random() < 0.35:
+            self.enemy_special(log)
+        self.enemy_blinded = max(0, self.enemy_blinded - 1)
+        self.enemy_bound = max(0, self.enemy_bound - 1)
+        if self.teleport_cooldown > 0:
+            self.teleport_cooldown -= 1
+        self.turn += 1
+
+    def check_end(self) -> tuple[bool, str | None]:
+        if self.enemy_hp <= 0:
+            return True, "🎉 你擊敗敵人，成功保護爆能器！"
+        if self.player_hp <= 0:
+            return True, "💀 你倒下了，任務失敗。"
+        if self.turn > 10:
+            return True, "⏱️ 10 回合已到，爆能器引爆！你獲勝。"
+        if self.enemy_defuse_progress >= 2:
+            return True, "💥 敵人成功拆除爆能器，你輸了。"
+        return False, None
+
+    def process_player_action(self, action: str) -> tuple[str, bool, str | None]:
+        log: list[str] = []
+        if action.startswith("❌"):
+            return action, False, None
+        if action == "attack":
+            attack_text = self.player_attack()
+            log.append(attack_text)
+            if attack_text.startswith("❌"):
+                return attack_text, False, None
+        else:
+            log.append(action)
+
+        end, reason = self.check_end()
+        if end:
+            return "\n".join(log), end, reason
+
+        self.resolve_enemy_turn(log)
+        return "\n".join(log), *self.check_end()
+
+
+def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord.Embed:
+    embed = discord.Embed(title="🎯 特戰棋盤：1v1", color=discord.Color.teal())
+    embed.description = game.render_map()
+    embed.add_field(name="狀態", value=status_text or "--", inline=False)
+    skill_names = []
+    label_map = {
+        "smoke": "☁️ 煙霧",
+        "flash": "💥 閃光",
+        "slow": "❄️ 緩速",
+        "bind": "⛓️ 束縛",
+        "teleport": "🌀 傳送",
+    }
+    for skill in game.skills:
+        skill_names.append(label_map.get(skill, skill))
+    embed.add_field(
+        name="資訊",
+        value=(
+            f"你 {game.player_hp} HP｜敵人 {game.enemy_hp} HP\n"
+            f"回合 {game.turn}/10｜傳送冷卻 {game.teleport_cooldown} 回合\n"
+            f"裝備技能：{', '.join(skill_names)}"
+        ),
+        inline=False,
+    )
+    return embed
+
+
+class ValorantGameView(View):
+    def __init__(self, user: discord.User, game: ValorantTacticsGame):
+        super().__init__(timeout=420)
+        self.author_id = user.id
+        self.game = game
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲面板！", ephemeral=True)
+            return False
+        return True
+
+    async def finalize(self, interaction: discord.Interaction, reason: str):
+        for child in self.children:
+            child.disabled = True
+        embed = build_valorant_embed(self.game, reason)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def resolve_turn(self, interaction: discord.Interaction, status: str):
+        if self.game.player_hp <= 0 or self.game.enemy_hp <= 0:
+            await self.finalize(interaction, status)
+            return
+        status_text, ended, reason = self.game.process_player_action(status)
+        if ended:
+            await self.finalize(interaction, reason or status_text)
+            return
+        embed = build_valorant_embed(self.game, status_text)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="⬆️", style=discord.ButtonStyle.secondary, row=0)
+    async def move_up(self, interaction: discord.Interaction, button: Button):
+        status = self.game.move_player(0, -1)
+        await self.resolve_turn(interaction, status)
+
+    @discord.ui.button(label="⬇️", style=discord.ButtonStyle.secondary, row=0)
+    async def move_down(self, interaction: discord.Interaction, button: Button):
+        status = self.game.move_player(0, 1)
+        await self.resolve_turn(interaction, status)
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary, row=1)
+    async def move_left(self, interaction: discord.Interaction, button: Button):
+        status = self.game.move_player(-1, 0)
+        await self.resolve_turn(interaction, status)
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.secondary, row=1)
+    async def move_right(self, interaction: discord.Interaction, button: Button):
+        status = self.game.move_player(1, 0)
+        await self.resolve_turn(interaction, status)
+
+    @discord.ui.button(label="攻擊", style=discord.ButtonStyle.danger, row=2)
+    async def attack(self, interaction: discord.Interaction, button: Button):
+        await self.resolve_turn(interaction, "attack")
+
+    def _get_skill_label(self, idx: int) -> tuple[str, str]:
+        if idx >= len(self.game.skills):
+            return "--", ""
+        mapping = {
+            "smoke": "☁️ 下煙",
+            "flash": "💥 閃光",
+            "slow": "❄️ 緩速",
+            "bind": "⛓️ 束縛",
+            "teleport": "🌀 傳送",
+        }
+        skill = self.game.skills[idx]
+        return mapping.get(skill, skill), skill
+
+    def _build_skill_callback(self, skill_name: str):
+        async def callback(interaction: discord.Interaction):
+            result = self.game.use_skill(skill_name)
+            await self.resolve_turn(interaction, result)
+
+        return callback
+
+    def refresh_skill_buttons(self):
+        while len(self.children) < 8:
+            break
+
+    @classmethod
+    def build(cls, user: discord.User, game: ValorantTacticsGame):
+        view = cls(user, game)
+        for idx in range(len(game.skills)):
+            label, skill_name = view._get_skill_label(idx)
+            button = Button(label=label, style=discord.ButtonStyle.primary, row=2)
+            button.callback = view._build_skill_callback(skill_name)
+            view.add_item(button)
+        return view
+
+
+class ValorantSkillSelectView(View):
+    def __init__(self, user: discord.User):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 請不要操作別人的技能配置。", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.select(
+        placeholder="選擇 3 個戰術技能...",
+        min_values=3,
+        max_values=3,
+        options=[
+            discord.SelectOption(label="☁️ 煙霧彈", value="smoke", description="2x2 煙霧阻擋視線"),
+            discord.SelectOption(label="💥 閃光彈", value="flash", description="敵人下回合無法攻擊"),
+            discord.SelectOption(label="❄️ 緩速球", value="slow", description="6x6 區域移速 -50%"),
+            discord.SelectOption(label="⛓️ 束縛", value="bind", description="敵人下回合無法移動"),
+            discord.SelectOption(label="🌀 傳送", value="teleport", description="隨機傳送 6x6 範圍"),
+        ],
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        game = ValorantTacticsGame(list(select.values))
+        view = ValorantGameView.build(interaction.user, game)
+        embed = build_valorant_embed(game, "✅ 技能已配置，開始行動！")
+        await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
+
 
 
 @dataclass
@@ -2678,6 +3102,28 @@ class GameMenu(View):
             crit_chance=0.1,
         )
 
+    @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
+    async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
+        intro = discord.Embed(
+            title="🎯 特戰棋盤：1v1",
+            description=(
+                "15x15 戰術棋盤，選擇 3 個技能後與電腦對戰。\n"
+                "勝利條件：擊殺敵人或撐過 10 回合，失敗條件：陣亡或被拆包。"
+            ),
+            color=discord.Color.teal(),
+        )
+        intro.add_field(
+            name="圖例",
+            value="⬜ 地面｜⬛ 掩體｜🟦 你｜🟥 敵人｜💠 爆能器｜☁️ 煙霧｜❄️ 緩速",
+            inline=False,
+        )
+        intro.add_field(
+            name="技能",
+            value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可隨機位移（3 回合 CD）",
+            inline=False,
+        )
+        await interaction.response.send_message(embed=intro, view=ValorantSkillSelectView(interaction.user))
+
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
@@ -2737,6 +3183,11 @@ def build_game_help_embed() -> discord.Embed:
     embed.add_field(
         name="🪄 魔法試煉：虛空獻祭",
         value="普通詠唱 1d100：41-80 得 1.5 倍，81-99 得 2.5 倍，100 得 5 倍與稱號，其餘失敗；禁忌過載 1d100：61-90 得 4 倍，91-100 得 10 倍公告，1-60 會倒扣300% 並暫時禁言。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🎯 特戰棋盤：1v1",
+        value="15x15 棋盤式對戰，選 3 技能進場與電腦對決，保護爆能器撐過 10 回合或擊殺敵人即可獲勝。",
         inline=False,
     )
     embed.add_field(
