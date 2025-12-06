@@ -1522,14 +1522,16 @@ class GreedyDiceBattleView(View):
         else:
             payout_text = "所有玩家棄權，彩池沒收。"
 
-        breakdowns = []
-        for uid in self.match.participants:
-            logs = self.history[uid] or ["尚未擲骰"]
-            breakdowns.append(f"<@{uid}> 最終 {self.totals[uid]} 分\n" + "\n".join(logs))
-
         result_embed = discord.Embed(title="🎲 貪婪骰結果", color=discord.Color.blurple())
         result_embed.description = f"{detail_text}\n\n{payout_text}"
-        result_embed.add_field(name="紀錄", value="\n\n".join(breakdowns), inline=False)
+
+        for uid in self.match.participants:
+            logs = self.history[uid] or ["尚未擲骰"]
+            trimmed_logs = logs[-8:]
+            entry = f"最終 {self.totals[uid]} 分\n" + "\n".join(trimmed_logs)
+            if len(entry) > 1024:
+                entry = entry[:1000] + "..."
+            result_embed.add_field(name=f"玩家 <@{uid}>", value=entry, inline=False)
 
         for child in self.children:
             child.disabled = True
@@ -1655,8 +1657,9 @@ class RevolverDuelView(View):
         self.current_index = match.participants.index(random.choice(match.participants))
         self.damage_boost: set[int] = set()
         self.skip_next: set[int] = set()
-        self.current_item: dict[int, str | None] = {uid: None for uid in match.participants}
-        self.item_used: dict[int, bool] = {uid: False for uid in match.participants}
+        self.inventory: dict[int, list[str]] = {uid: [] for uid in match.participants}
+        self.turn_item_used: dict[int, bool] = {uid: False for uid in match.participants}
+        self.turn_counts: dict[int, int] = {uid: 0 for uid in match.participants}
         self.turn_log: list[str] = []
         self.message: Optional[discord.Message] = None
         self.initial_items_shared = False
@@ -1681,23 +1684,21 @@ class RevolverDuelView(View):
             self.reload_cylinder()
         return self.cylinder[0]
 
-    async def send_item_notice(self, uid: int, item: str, public: bool):
-        if public:
-            self.log_action(f"<@{uid}> 開局獲得 {self.item_name(item)}。")
-            return
-
-        try:
-            user = await bot.fetch_user(uid)
-            await user.send(f"🔫 你抽到：{self.item_name(item)}。道具資訊僅你可見。")
-        except Exception:
-            pass
+    def inventory_text(self, uid: int) -> str:
+        if not self.inventory.get(uid):
+            return "無"
+        counts: dict[str, int] = {}
+        for item in self.inventory.get(uid, []):
+            counts[item] = counts.get(item, 0) + 1
+        return "、".join(f"{self.item_name(name)}x{count}" for name, count in counts.items())
 
     async def deal_item(self, uid: int, reveal_public: bool = False):
         items = ["magnifier", "knife", "handcuff", "beer"]
         item = random.choice(items)
-        self.current_item[uid] = item
-        self.item_used[uid] = False
-        await self.send_item_notice(uid, item, public=reveal_public)
+        self.inventory.setdefault(uid, []).append(item)
+        self.turn_item_used[uid] = False
+        action_text = "開局獲得" if reveal_public else "獲得"
+        self.log_action(f"<@{uid}> {action_text} {self.item_name(item)}。")
 
     async def setup_initial_items(self):
         if self.initial_items_shared:
@@ -1727,6 +1728,15 @@ class RevolverDuelView(View):
     def living_players(self) -> list[int]:
         return [uid for uid, hp in self.hp.items() if hp > 0]
 
+    async def begin_turn(self, uid: int, extra_turn: bool = False):
+        self.turn_counts[uid] = self.turn_counts.get(uid, 0) + 1
+        self.turn_item_used[uid] = False
+        if self.turn_counts[uid] % 2 == 0:
+            await self.deal_item(uid)
+        if extra_turn:
+            self.log_action(f"<@{uid}> 自射空包彈，獲得加行動。")
+        await self.update_status()
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id not in self.match.participants:
             await interaction.response.send_message("❌ 你未加入此戰局。", ephemeral=True)
@@ -1755,20 +1765,17 @@ class RevolverDuelView(View):
     def build_status_embed(self) -> discord.Embed:
         desc = (
             "3 實 2 空的彈巢，輪流選擇對方或自己開槍；自己中空包彈可多一回合。\n"
-            "每回合隨機獲得一個道具：🔍 看子彈、🔪 下一發傷害加倍、⛓️ 讓對方跳過、🍺 退掉當前子彈。開局公開道具，之後的道具僅持有人知道（會私訊通知）。"
+            "每 2 回合自動抽一個道具（可累積）：🔍 看子彈、🔪 下一發傷害加倍、⛓️ 讓對方跳過、🍺 退掉當前子彈。"
         )
         embed = discord.Embed(title="🔫 命運左輪：死之交涉", description=desc, color=discord.Color.dark_red())
         status_lines = [
-            f"<@{uid}> 血量 {self.hp_bar(self.hp[uid])} ({self.hp[uid]})"
+            f"<@{uid}> 血量 {self.hp_bar(self.hp[uid])} ({self.hp[uid]})｜道具：{self.inventory_text(uid)}"
             for uid in self.match.participants
         ]
         embed.add_field(name="狀態", value="\n".join(status_lines), inline=False)
         embed.add_field(
             name="輪到",
-            value=(
-                f"<@{self.current_player}> 的回合｜手上道具：僅本人可見（已私訊提醒）\n"
-                f"彈巢剩餘 {len(self.cylinder)} 發 (含當前)"
-            ),
+            value=f"<@{self.current_player}> 的回合｜彈巢剩餘 {len(self.cylinder)} 發 (含當前)",
             inline=False,
         )
         if self.turn_log:
@@ -1812,7 +1819,7 @@ class RevolverDuelView(View):
                 turns += 1
                 continue
             break
-        await self.deal_item(self.current_player)
+        await self.begin_turn(self.current_player)
 
     async def handle_shot(self, interaction: discord.Interaction, target: int, self_shot: bool = False):
         shooter = interaction.user.id
@@ -1845,8 +1852,7 @@ class RevolverDuelView(View):
             return
 
         if self_shot and not bullet_live:
-            await self.deal_item(shooter)
-            await self.update_status()
+            await self.begin_turn(shooter, extra_turn=True)
             return
 
         await self.advance_turn()
@@ -1857,42 +1863,73 @@ class RevolverDuelView(View):
         if uid != self.current_player:
             await interaction.response.send_message("還沒輪到你。", ephemeral=True)
             return
-        if self.item_used.get(uid):
+        if self.turn_item_used.get(uid):
             await interaction.response.send_message("本回合道具已用過。", ephemeral=True)
             return
-
-        item = self.current_item.get(uid)
-        if not item:
+        inventory = self.inventory.get(uid, [])
+        if not inventory:
             await interaction.response.send_message("沒有可用道具。", ephemeral=True)
             return
+
+        select = discord.ui.Select(
+            placeholder="選擇要使用的道具",
+            options=[
+                discord.SelectOption(label=self.item_name(item), value=item, description=f"持有 {inventory.count(item)} 個")
+                for item in dict.fromkeys(inventory)
+            ],
+        )
+
+        async def select_callback(select_interaction: discord.Interaction):
+            await self.apply_item(select_interaction, select.values[0])
+
+        select.callback = select_callback
+        view = discord.ui.View()
+        view.add_item(select)
+        await interaction.response.send_message(
+            f"你的道具：{self.inventory_text(uid)}\n請選擇要使用的道具。",
+            view=view,
+            ephemeral=True,
+        )
+
+    async def apply_item(self, interaction: discord.Interaction, item: str):
+        uid = interaction.user.id
+        if uid != self.current_player:
+            await interaction.response.send_message("已換對手回合，無法使用道具。", ephemeral=True)
+            return
+        if self.turn_item_used.get(uid):
+            await interaction.response.send_message("本回合道具已用過。", ephemeral=True)
+            return
+        if item not in self.inventory.get(uid, []):
+            await interaction.response.send_message("沒有該道具可用。", ephemeral=True)
+            return
+
+        self.turn_item_used[uid] = True
+        self.inventory[uid].remove(item)
+
         opponent = next(p for p in self.match.participants if p != uid)
-        self.item_used[uid] = True
-        self.current_item[uid] = None
 
         if item == "magnifier":
             bullet_live = self.peek_bullet()
             msg = "🔍 當前子彈：實彈" if bullet_live else "🔍 當前子彈：空包彈"
             self.log_action(f"<@{uid}> 使用放大鏡查看子彈。")
             await interaction.response.send_message(msg, ephemeral=True)
-            await self.update_status()
         elif item == "knife":
             self.damage_boost.add(uid)
             self.log_action(f"<@{uid}> 用小刀鋸短槍管，下一發傷害加倍！")
             await interaction.response.send_message("下一發傷害加倍！", ephemeral=True)
-            await self.update_status()
         elif item == "handcuff":
             self.skip_next.add(opponent)
             self.log_action(f"<@{uid}> 用手銬鎖住 <@{opponent}>，對方下回合將被跳過。")
             await interaction.response.send_message("對方將被迫跳過一回合。", ephemeral=True)
             await self.advance_turn()
-            await self.update_status()
         elif item == "beer":
             discarded_live = self.pull_bullet()
             status = "實彈" if discarded_live else "空包彈"
             self.log_action(f"<@{uid}> 開啟啤酒，丟棄一發 {status}。")
             await interaction.response.send_message(f"丟棄當前子彈：{status}。", ephemeral=True)
             await self.advance_turn()
-            await self.update_status()
+
+        await self.update_status()
 
     @discord.ui.button(label="射擊對手", style=discord.ButtonStyle.danger, emoji="💥")
     async def shoot_enemy(self, interaction: discord.Interaction, button: Button):
@@ -2092,6 +2129,7 @@ class BattleLobbyView(View):
             prompt = duel_view.build_status_embed()
             duel_message = await interaction.followup.send(embed=prompt, view=duel_view)
             duel_view.message = duel_message
+            await duel_view.begin_turn(duel_view.current_player)
         else:
             winners, detail_text = resolve_random_contest(match)
             payout_text = distribute_winnings(match, winners)
