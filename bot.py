@@ -168,8 +168,7 @@ class ValorantTacticsGame:
         self.smoke_tiles: set[tuple[int, int]] = set()
         self.slow_tiles: set[tuple[int, int]] = set()
         self.skills = skills
-        self.skill_charges = {"smoke": 2, "flash": 2, "slow": 1, "bind": 1}
-        self.teleport_cooldown = 0
+        self.skill_charges = {name: 1 for name in ["smoke", "flash", "slow", "bind", "teleport"]}
         self.enemy_skill = random.choice(["molly", "recon"])
         self.generate_map()
         self.start_player_turn()
@@ -221,6 +220,23 @@ class ValorantTacticsGame:
                 self.grid[ty][tx] = "WALL"
                 rocks += 1
 
+            # carve at least one entrance so planting zones are never fully sealed
+            edge_tiles = [t for t in tiles if t[0] in {x0, x0 + 4} or t[1] in {y0, y0 + 4}]
+            random.shuffle(edge_tiles)
+            for tx, ty in edge_tiles:
+                outside_neighbors = [
+                    (tx + dx, ty + dy)
+                    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    if self.within_bounds(tx + dx, ty + dy) and (tx + dx, ty + dy) not in tiles
+                ]
+                if not outside_neighbors:
+                    continue
+                ox, oy = random.choice(outside_neighbors)
+                self.grid[ty][tx] = "SITE"
+                if self.grid[oy][ox] == "WALL":
+                    self.grid[oy][ox] = "EMPTY"
+                break
+
     def render_map(self) -> str:
         rows: list[str] = []
         for y in range(VALORANT_MAP_SIZE):
@@ -251,19 +267,23 @@ class ValorantTacticsGame:
     def line_of_sight(self, start: list[int], end: list[int]) -> bool:
         sx, sy = start
         ex, ey = end
-        if sx != ex and sy != ey:
+        dx = ex - sx
+        dy = ey - sy
+        if dx == 0 and dy == 0:
+            return True
+        step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
+        step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
+        if step_x != 0 and step_y != 0 and abs(dx) != abs(dy):
             return False
-        dx = 0 if sx == ex else (1 if ex > sx else -1)
-        dy = 0 if sy == ey else (1 if ey > sy else -1)
-        cx, cy = sx + dx, sy + dy
+        cx, cy = sx + step_x, sy + step_y
         while [cx, cy] != [ex, ey]:
             if not self.within_bounds(cx, cy):
                 return False
             tile = self.grid[cy][cx]
             if tile == "WALL" or (cx, cy) in self.smoke_tiles:
                 return False
-            cx += dx
-            cy += dy
+            cx += step_x
+            cy += step_y
         return True
 
     def apply_damage(self, target: str, amount: int) -> str:
@@ -289,10 +309,12 @@ class ValorantTacticsGame:
     def player_attack(self) -> str:
         if self.attack_used:
             return "❌ 本回合已經攻擊過了。"
-        if not self.line_of_sight(self.player_pos, self.enemy_pos):
-            return "❌ 視線被牆壁或煙霧阻擋。"
+        adjacent = max(abs(self.player_pos[0] - self.enemy_pos[0]), abs(self.player_pos[1] - self.enemy_pos[1])) == 1
+        if not (adjacent or self.line_of_sight(self.player_pos, self.enemy_pos)):
+            return "❌ 視線被掩體或煙霧阻擋。"
         self.attack_used = True
         self.moves_left = 0
+        self.enemy_defuse_progress = 0
         damage_text = self.apply_damage("enemy", 1)
         return f"🔫 你開火！{damage_text}"
 
@@ -300,7 +322,13 @@ class ValorantTacticsGame:
         if self.spike_planted:
             return False
         x, y = self.player_pos
-        return any((x, y) in site for site in self.plant_sites) and self.grid[y][x] != "WALL"
+        if not (any((x, y) in site for site in self.plant_sites) and self.grid[y][x] != "WALL"):
+            return False
+        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nx, ny = x + dx, y + dy
+            if self.within_bounds(nx, ny) and self.grid[ny][nx] != "WALL":
+                return True
+        return False
 
     def plant_spike(self) -> str:
         if self.spike_planted:
@@ -319,29 +347,35 @@ class ValorantTacticsGame:
     def use_skill(self, name: str, target: tuple[int, int] | None = None) -> str:
         if name not in self.skills:
             return "❌ 你未裝備此技能。"
-        if name != "teleport" and self.skill_charges.get(name, 0) <= 0:
+        if self.skill_charges.get(name, 0) <= 0:
             return "❌ 技能已用盡。"
 
         msg = ""
         px, py = self.player_pos
         if name == "smoke":
-            for dy in range(2):
-                for dx in range(2):
-                    tx, ty = px + dx, py + dy
-                    if self.within_bounds(tx, ty) and self.grid[ty][tx] != "WALL":
-                        self.smoke_tiles.add((tx, ty))
-            msg = "💨 已部署 2x2 煙霧，阻擋視線！"
+            if target is None:
+                return "❌ 請選擇煙霧中心座標。"
+            tx, ty = target
+            for dy in range(-1, 2):
+                for dx in range(-1, 2):
+                    gx, gy = tx + dx, ty + dy
+                    if self.within_bounds(gx, gy) and self.grid[gy][gx] != "WALL":
+                        self.smoke_tiles.add((gx, gy))
+            msg = "💨 已部署 3x3 煙霧，阻擋視線！"
             self.skill_charges[name] -= 1
         elif name == "flash":
             self.enemy_blinded = max(self.enemy_blinded, 1)
             msg = "💥 閃光命中！敵人下回合無法攻擊。"
             self.skill_charges[name] -= 1
         elif name == "slow":
-            for dy in range(-3, 3):
-                for dx in range(-3, 3):
-                    tx, ty = px + dx, py + dy
-                    if self.within_bounds(tx, ty) and self.grid[ty][tx] != "WALL":
-                        self.slow_tiles.add((tx, ty))
+            if target is None:
+                return "❌ 請選擇緩速中心座標。"
+            tx, ty = target
+            for dy in range(-2, 4):
+                for dx in range(-2, 4):
+                    gx, gy = tx + dx, ty + dy
+                    if self.within_bounds(gx, gy) and self.grid[gy][gx] != "WALL":
+                        self.slow_tiles.add((gx, gy))
             msg = "❄️ 已鋪設 6x6 緩速區域，敵人移速減半。"
             self.skill_charges[name] -= 1
         elif name == "bind":
@@ -349,8 +383,6 @@ class ValorantTacticsGame:
             msg = "⛓️ 束縛成功！敵人下回合無法移動。"
             self.skill_charges[name] -= 1
         elif name == "teleport":
-            if self.teleport_cooldown > 0:
-                return "❌ 傳送尚未冷卻。"
             if target is None:
                 return "❌ 請先選擇傳送目標格。"
             tx, ty = target
@@ -361,7 +393,7 @@ class ValorantTacticsGame:
             if self.grid[ty][tx] == "WALL" or self.grid[ty][tx] == "SPIKE" or (tx, ty) in self.smoke_tiles or [tx, ty] == self.enemy_pos:
                 return "❌ 目標格不可用。"
             self.player_pos = [tx, ty]
-            self.teleport_cooldown = 3
+            self.skill_charges[name] -= 1
             msg = "🌀 你選擇位置完成瞬移！"
         return msg
 
@@ -404,9 +436,11 @@ class ValorantTacticsGame:
         if self.enemy_blinded > 0:
             log.append("✨ 敵人被致盲，無法攻擊。")
             return
-        if not self.enemy_can_see_player():
+        adjacent = max(abs(self.enemy_pos[0] - self.player_pos[0]), abs(self.enemy_pos[1] - self.player_pos[1])) == 1
+        if not (adjacent or self.enemy_can_see_player()):
             log.append("👀 敵人沒有找到你的身影。")
             return
+        self.enemy_defuse_progress = 0
         log.append(self.apply_damage("player", 1))
 
     def enemy_special(self, log: list[str]):
@@ -438,7 +472,7 @@ class ValorantTacticsGame:
             else:
                 target = self.player_pos
             log.append(self._enemy_step_toward(target, steps))
-            if self.spike_planted and self.enemy_pos == self.spike_pos:
+            if self.spike_planted and self.enemy_pos == self.spike_pos and not self.enemy_can_see_player():
                 self.enemy_defuse_progress += 1
                 log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
             else:
@@ -452,8 +486,6 @@ class ValorantTacticsGame:
             self.enemy_special(log)
         self.enemy_blinded = max(0, self.enemy_blinded - 1)
         self.enemy_bound = max(0, self.enemy_bound - 1)
-        if self.teleport_cooldown > 0:
-            self.teleport_cooldown -= 1
         self.turn += 1
 
     def start_player_turn(self):
@@ -507,8 +539,9 @@ def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord
         name="資訊",
         value=(
             f"你 {game.player_hp} HP｜敵人 {game.enemy_hp} HP｜移動力 {game.moves_left} / 3\n"
-            f"回合 {game.turn}｜{plant_status}｜傳送冷卻 {game.teleport_cooldown} 回合\n"
-            f"裝備技能：{', '.join(skill_names)}"
+            f"回合 {game.turn}｜{plant_status}｜技能一次性使用\n"
+            f"裝備技能：{', '.join(skill_names)}\n"
+            f"視野：{'可直接攻擊' if game.line_of_sight(game.player_pos, game.enemy_pos) or max(abs(game.player_pos[0]-game.enemy_pos[0]), abs(game.player_pos[1]-game.enemy_pos[1]))==1 else '暫時看不到敵人'}"
         ),
         inline=False,
     )
@@ -533,6 +566,8 @@ class ValorantGameView(View):
         self.author_id = user.id
         self.game = game
         self.message: discord.Message | None = None
+        self.skill_select = SkillUseSelect(self)
+        self.add_item(self.skill_select)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -554,6 +589,13 @@ class ValorantGameView(View):
         status_preview = "\n".join(log)
         if status_preview.startswith("❌"):
             consume_turn = False
+        else:
+            adjacent = max(
+                abs(self.game.player_pos[0] - self.game.enemy_pos[0]),
+                abs(self.game.player_pos[1] - self.game.enemy_pos[1]),
+            ) == 1
+            if adjacent or self.game.line_of_sight(self.game.player_pos, self.game.enemy_pos):
+                log.append("🎯 你已鎖定敵人，隨時可以攻擊！")
         if consume_turn:
             status_text, ended, reason = self.game.complete_turn(log)
         else:
@@ -607,50 +649,23 @@ class ValorantGameView(View):
         self.game.moves_left = 0
         self.game.attack_used = True
         await self.resolve_action(interaction, [status], True)
-
-    def _get_skill_label(self, idx: int) -> tuple[str, str]:
-        if idx >= len(self.game.skills):
-            return "--", ""
-        mapping = {
-            "smoke": "☁️ 下煙",
-            "flash": "💥 閃光",
-            "slow": "❄️ 緩速",
-            "bind": "⛓️ 束縛",
-            "teleport": "🌀 傳送",
-        }
-        skill = self.game.skills[idx]
-        return mapping.get(skill, skill), skill
-
-    def _build_skill_callback(self, skill_name: str):
-        async def callback(interaction: discord.Interaction):
-            if skill_name == "teleport":
-                await interaction.response.send_modal(TeleportModal(self))
-                return
-            result = self.game.use_skill(skill_name)
-            await self.resolve_action(interaction, [result], False)
-
-        return callback
-
-    def refresh_skill_buttons(self):
-        while len(self.children) < 8:
-            break
-
     @classmethod
     def build(cls, user: discord.User, game: ValorantTacticsGame):
-        view = cls(user, game)
-        for idx in range(len(game.skills)):
-            label, skill_name = view._get_skill_label(idx)
-            button = Button(label=label, style=discord.ButtonStyle.primary, row=2)
-            button.callback = view._build_skill_callback(skill_name)
-            view.add_item(button)
-        return view
+        return cls(user, game)
 
 
-class TeleportModal(Modal):
-    def __init__(self, view: ValorantGameView):
-        super().__init__(title="🌀 選擇傳送座標 (x,y)")
+class AreaSkillModal(Modal):
+    def __init__(self, view: ValorantGameView, skill_name: str):
+        title_map = {
+            "teleport": "🌀 選擇傳送座標 (x,y)",
+            "smoke": "☁️ 煙霧中心座標 (x,y)",
+            "slow": "❄️ 緩速中心座標 (x,y)",
+        }
+        super().__init__(title=title_map.get(skill_name, "技能座標"))
         self.view_ref = view
-        self.coord = TextInput(label="目標座標", placeholder="例如：8,7 (使用 1-15 座標)", required=True, max_length=8)
+        self.skill_name = skill_name
+        placeholder = "例如：8,7 (使用 1-15 座標)"
+        self.coord = TextInput(label="目標座標", placeholder=placeholder, required=True, max_length=12)
         self.add_item(self.coord)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -666,8 +681,62 @@ class TeleportModal(Modal):
             await interaction.response.send_message("❌ 請輸入有效的 x,y。", ephemeral=True)
             return
 
-        status = view.game.use_skill("teleport", (tx, ty))
+        status = view.game.use_skill(self.skill_name, (tx, ty))
+        view.skill_select.refresh()
         await view.resolve_action(interaction, [status], False)
+
+
+class SkillUseSelect(discord.ui.Select):
+    def __init__(self, view: ValorantGameView):
+        self.view_ref = view
+        super().__init__(
+            placeholder="🎒 使用道具/技能",
+            min_values=1,
+            max_values=1,
+            options=self._build_options(),
+            row=2,
+        )
+
+    def _build_options(self) -> list[discord.SelectOption]:
+        mapping = {
+            "smoke": ("☁️ 煙霧", "任意 3x3 阻擋視線"),
+            "flash": ("💥 閃光", "敵人下回合無法攻擊"),
+            "slow": ("❄️ 緩速", "任意 6x6 減速"),
+            "bind": ("⛓️ 束縛", "敵人下回合無法移動"),
+            "teleport": ("🌀 傳送", "6x6 範圍選點")
+        }
+        options: list[discord.SelectOption] = []
+        for skill in self.view_ref.game.skills:
+            emoji, desc = mapping.get(skill, (skill, ""))
+            charges = self.view_ref.game.skill_charges.get(skill, 0)
+            options.append(
+                discord.SelectOption(
+                    label=f"{emoji} (剩 {charges})",
+                    value=skill,
+                    description=desc,
+                    emoji=emoji[0] if emoji and emoji[0] != skill else None,
+                )
+            )
+        return options
+
+    def refresh(self):
+        self.options = self._build_options()
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view_ref
+        if interaction.user.id != view.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲。", ephemeral=True)
+            return
+        skill_name = self.values[0]
+        if view.game.skill_charges.get(skill_name, 0) <= 0:
+            await interaction.response.send_message("❌ 此技能已用完。", ephemeral=True)
+            return
+        if skill_name in {"teleport", "smoke", "slow"}:
+            await interaction.response.send_modal(AreaSkillModal(view, skill_name))
+            return
+        result = view.game.use_skill(skill_name)
+        self.refresh()
+        await view.resolve_action(interaction, [result], False)
 
 
 class ValorantSkillSelectView(View):
@@ -686,9 +755,9 @@ class ValorantSkillSelectView(View):
         min_values=3,
         max_values=3,
         options=[
-            discord.SelectOption(label="☁️ 煙霧彈", value="smoke", description="2x2 煙霧阻擋視線"),
+            discord.SelectOption(label="☁️ 煙霧彈", value="smoke", description="任意位置 3x3 阻擋視線"),
             discord.SelectOption(label="💥 閃光彈", value="flash", description="敵人下回合無法攻擊"),
-            discord.SelectOption(label="❄️ 緩速球", value="slow", description="6x6 區域移速 -50%"),
+            discord.SelectOption(label="❄️ 緩速球", value="slow", description="任意位置 6x6 區域減速"),
             discord.SelectOption(label="⛓️ 束縛", value="bind", description="敵人下回合無法移動"),
             discord.SelectOption(label="🌀 傳送", value="teleport", description="選點傳送 6x6 範圍"),
         ],
