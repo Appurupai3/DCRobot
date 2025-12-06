@@ -693,13 +693,18 @@ def pirate_stage_art(view: PirateGuessView) -> str:
         arms = "\\O/" if view.struggle_flip else "/O\\"
         legs = '/ \\' if view.struggle_flip else '/\\'
 
+    rope_indent = pos + 1
+    head_indent = pos
+    body_indent = pos
+    limb_indent = max(pos - 1, 0)
+
     lines = [
         plank_line,
-        " " * pos + head_label,
-        " " * pos + " |",
-        " " * pos + arms,
-        " " * pos + " |",
-        " " * pos + legs,
+        " " * rope_indent + "|",
+        " " * head_indent + head_label,
+        " " * limb_indent + arms,
+        " " * body_indent + " |",
+        " " * limb_indent + legs,
         "🌊" * 14 + "🦈🦈🦈",
     ]
     return "```\n" + "\n".join(lines) + "\n```"
