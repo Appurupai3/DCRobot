@@ -13,6 +13,7 @@ import os
 import random
 import string
 import time
+import math
 
 from dotenv import load_dotenv
 
@@ -85,7 +86,8 @@ WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
 
 
 # === 特戰棋盤設定 ===
-VALORANT_MAP_SIZE = 15
+VALORANT_WIDTH = 15
+VALORANT_HEIGHT = 13
 VALORANT_ICONS = {
     "EMPTY": "⬜",
     "WALL": "⬛",
@@ -148,11 +150,97 @@ def normalize_game_key(game_input: str) -> str | None:
     return None
 
 
+class VisibilityUtils:
+    def __init__(self, grid, smoke_tiles: set[tuple[int, int]], width: int, height: int):
+        self.grid = grid
+        self.smoke_tiles = smoke_tiles
+        self.width = width
+        self.height = height
+
+    def within_bounds(self, x: int, y: int) -> bool:
+        return 0 <= x < self.width and 0 <= y < self.height
+
+    def get_distance(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+    def get_line_points(self, p1, p2):
+        x1, y1 = p1
+        x2, y2 = p2
+        points = []
+
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+
+        while True:
+            points.append((x1, y1))
+            if x1 == x2 and y1 == y2:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x1 += sx
+            if e2 < dx:
+                err += dx
+                y1 += sy
+
+        return points
+
+    def has_los(self, start, end):
+        line_points = self.get_line_points(start, end)
+        if len(line_points) > 2:
+            for px, py in line_points[1:-1]:
+                if not self.within_bounds(px, py):
+                    return False
+                if self.grid[py][px] == "WALL" or (px, py) in self.smoke_tiles:
+                    return False
+        return True
+
+    def is_in_cone(self, player_pos, target_pos, facing_dir, cone_angle=90, max_radius=8):
+        px, py = player_pos
+        tx, ty = target_pos
+
+        dist = self.get_distance(player_pos, target_pos)
+        if dist <= 1.5:
+            return True
+        if dist > max_radius:
+            return False
+
+        dir_vec = facing_dir
+        target_vec = (tx - px, ty - py)
+
+        dot_prod = dir_vec[0] * target_vec[0] + dir_vec[1] * target_vec[1]
+        mag_target = math.sqrt(target_vec[0] ** 2 + target_vec[1] ** 2)
+        mag_dir = math.sqrt(dir_vec[0] ** 2 + dir_vec[1] ** 2)
+
+        if mag_target * mag_dir == 0:
+            return False
+
+        cos_angle = dot_prod / (mag_target * mag_dir)
+        cos_angle = max(-1.0, min(1.0, cos_angle))
+        angle_rad = math.acos(cos_angle)
+        angle_deg = math.degrees(angle_rad)
+
+        return angle_deg <= (cone_angle / 2)
+
+    def check_attack_eligibility(self, player_pos, enemy_pos, facing_vector):
+        in_sector = self.is_in_cone(player_pos, enemy_pos, facing_vector)
+
+        if in_sector:
+            return self.has_los(player_pos, enemy_pos)
+
+        return False
+
+
 class ValorantTacticsGame:
     def __init__(self, skills: list[str]):
-        self.grid = [["EMPTY" for _ in range(VALORANT_MAP_SIZE)] for _ in range(VALORANT_MAP_SIZE)]
+        self.grid = [["EMPTY" for _ in range(VALORANT_WIDTH)] for _ in range(VALORANT_HEIGHT)]
         self.player_pos = [1, 1]
-        self.enemy_pos = [13, 13]
+        self.enemy_pos = [13, 11]
+        self.player_facing = (1, 0)
+        self.enemy_facing = (-1, 0)
         self.spike_pos: list[int] | None = None
         self.spike_planted = False
         self.plant_turn: int | None = None
@@ -178,17 +266,17 @@ class ValorantTacticsGame:
         wall_count = random.randint(20, 30)
         forbidden = {tuple(self.player_pos), tuple(self.enemy_pos)}
         for _ in range(wall_count):
-            rx, ry = random.randint(0, 14), random.randint(0, 14)
+            rx, ry = random.randint(0, VALORANT_WIDTH - 1), random.randint(0, VALORANT_HEIGHT - 1)
             if (rx, ry) in forbidden:
                 continue
             self.grid[ry][rx] = "WALL"
 
     def within_bounds(self, x: int, y: int) -> bool:
-        return 0 <= x < VALORANT_MAP_SIZE and 0 <= y < VALORANT_MAP_SIZE
+        return 0 <= x < VALORANT_WIDTH and 0 <= y < VALORANT_HEIGHT
 
     def generate_plant_sites(self):
         def random_site() -> tuple[int, int]:
-            return random.randint(0, VALORANT_MAP_SIZE - 5), random.randint(0, VALORANT_MAP_SIZE - 5)
+            return random.randint(0, VALORANT_WIDTH - 5), random.randint(0, VALORANT_HEIGHT - 5)
 
         first = random_site()
         while True:
@@ -239,9 +327,9 @@ class ValorantTacticsGame:
 
     def render_map(self) -> str:
         rows: list[str] = []
-        for y in range(VALORANT_MAP_SIZE):
+        for y in range(VALORANT_HEIGHT):
             row_icons = []
-            for x in range(VALORANT_MAP_SIZE):
+            for x in range(VALORANT_WIDTH):
                 if [x, y] == self.player_pos:
                     row_icons.append(VALORANT_ICONS["PLAYER"])
                     continue
@@ -264,27 +352,19 @@ class ValorantTacticsGame:
             rows.append("".join(row_icons))
         return "\n".join(rows)
 
-    def line_of_sight(self, start: list[int], end: list[int]) -> bool:
-        sx, sy = start
-        ex, ey = end
-        dx = ex - sx
-        dy = ey - sy
-        if dx == 0 and dy == 0:
-            return True
-        step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
-        step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
-        if step_x != 0 and step_y != 0 and abs(dx) != abs(dy):
-            return False
-        cx, cy = sx + step_x, sy + step_y
-        while [cx, cy] != [ex, ey]:
-            if not self.within_bounds(cx, cy):
-                return False
-            tile = self.grid[cy][cx]
-            if tile == "WALL" or (cx, cy) in self.smoke_tiles:
-                return False
-            cx += step_x
-            cy += step_y
-        return True
+    def visibility(self) -> VisibilityUtils:
+        return VisibilityUtils(self.grid, self.smoke_tiles, VALORANT_WIDTH, VALORANT_HEIGHT)
+
+    def player_can_attack(self) -> bool:
+        utils = self.visibility()
+        return utils.check_attack_eligibility(self.player_pos, self.enemy_pos, self.player_facing)
+
+    def enemy_has_line_on_player(self) -> bool:
+        return self.visibility().has_los(tuple(self.enemy_pos), tuple(self.player_pos))
+
+    def enemy_can_attack(self) -> bool:
+        utils = self.visibility()
+        return utils.check_attack_eligibility(self.enemy_pos, self.player_pos, self.enemy_facing)
 
     def apply_damage(self, target: str, amount: int) -> str:
         if target == "enemy":
@@ -302,6 +382,8 @@ class ValorantTacticsGame:
         if self.grid[ny][nx] == "WALL":
             return "❌ 前方有掩體，無法前進。", False
         self.player_pos = [nx, ny]
+        if dx or dy:
+            self.player_facing = (dx, dy)
         self.moves_left -= 1
         status = "👣 你移動了一步。"
         return status, self.moves_left == 0
@@ -309,8 +391,8 @@ class ValorantTacticsGame:
     def player_attack(self) -> str:
         if self.attack_used:
             return "❌ 本回合已經攻擊過了。"
-        adjacent = max(abs(self.player_pos[0] - self.enemy_pos[0]), abs(self.player_pos[1] - self.enemy_pos[1])) == 1
-        if not (adjacent or self.line_of_sight(self.player_pos, self.enemy_pos)):
+        utils = self.visibility()
+        if not utils.check_attack_eligibility(self.player_pos, self.enemy_pos, self.player_facing):
             return "❌ 視線被掩體或煙霧阻擋。"
         self.attack_used = True
         self.moves_left = 0
@@ -398,7 +480,7 @@ class ValorantTacticsGame:
         return msg
 
     def enemy_can_see_player(self) -> bool:
-        return self.line_of_sight(self.enemy_pos, self.player_pos)
+        return self.enemy_has_line_on_player()
 
     def _enemy_step_toward(self, target: list[int], steps: int) -> str:
         if steps <= 0:
@@ -429,6 +511,10 @@ class ValorantTacticsGame:
 
         path_taken = found_path[:steps]
         if path_taken:
+            dx = path_taken[0][0] - self.enemy_pos[0]
+            dy = path_taken[0][1] - self.enemy_pos[1]
+            if dx or dy:
+                self.enemy_facing = (dx, dy)
             self.enemy_pos = list(path_taken[-1])
         return "🟥 敵人向目標推進。"
 
@@ -436,8 +522,7 @@ class ValorantTacticsGame:
         if self.enemy_blinded > 0:
             log.append("✨ 敵人被致盲，無法攻擊。")
             return
-        adjacent = max(abs(self.enemy_pos[0] - self.player_pos[0]), abs(self.enemy_pos[1] - self.player_pos[1])) == 1
-        if not (adjacent or self.enemy_can_see_player()):
+        if not self.enemy_can_attack():
             log.append("👀 敵人沒有找到你的身影。")
             return
         self.enemy_defuse_progress = 0
@@ -541,7 +626,7 @@ def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord
             f"你 {game.player_hp} HP｜敵人 {game.enemy_hp} HP｜移動力 {game.moves_left} / 3\n"
             f"回合 {game.turn}｜{plant_status}｜技能一次性使用\n"
             f"裝備技能：{', '.join(skill_names)}\n"
-            f"視野：{'可直接攻擊' if game.line_of_sight(game.player_pos, game.enemy_pos) or max(abs(game.player_pos[0]-game.enemy_pos[0]), abs(game.player_pos[1]-game.enemy_pos[1]))==1 else '暫時看不到敵人'}"
+            f"視野：{'可直接攻擊' if game.player_can_attack() else '暫時看不到敵人'}"
         ),
         inline=False,
     )
@@ -590,11 +675,7 @@ class ValorantGameView(View):
         if status_preview.startswith("❌"):
             consume_turn = False
         else:
-            adjacent = max(
-                abs(self.game.player_pos[0] - self.game.enemy_pos[0]),
-                abs(self.game.player_pos[1] - self.game.enemy_pos[1]),
-            ) == 1
-            if adjacent or self.game.line_of_sight(self.game.player_pos, self.game.enemy_pos):
+            if self.game.player_can_attack():
                 log.append("🎯 你已鎖定敵人，隨時可以攻擊！")
         if consume_turn:
             status_text, ended, reason = self.game.complete_turn(log)
@@ -664,7 +745,7 @@ class AreaSkillModal(Modal):
         super().__init__(title=title_map.get(skill_name, "技能座標"))
         self.view_ref = view
         self.skill_name = skill_name
-        placeholder = "例如：8,7 (使用 1-15 座標)"
+        placeholder = "例如：8,7 (x=1-15, y=1-13)"
         self.coord = TextInput(label="目標座標", placeholder=placeholder, required=True, max_length=12)
         self.add_item(self.coord)
 
@@ -3321,7 +3402,7 @@ class GameMenu(View):
         intro = discord.Embed(
             title="🎯 特戰棋盤：1v1",
             description=(
-                "15x15 戰術棋盤，選擇 3 個技能後與電腦對戰。\n"
+                "15x13 戰術棋盤，選擇 3 個技能後與電腦對戰。\n"
                 "勝利條件：擊殺敵人或撐過 10 回合，失敗條件：陣亡或被拆包。"
             ),
             color=discord.Color.teal(),
@@ -3333,7 +3414,7 @@ class GameMenu(View):
         )
         intro.add_field(
             name="技能",
-            value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可隨機位移（3 回合 CD）",
+            value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可在 6x6 內選點位移（技能一次性）",
             inline=False,
         )
         await interaction.response.send_message(embed=intro, view=ValorantSkillSelectView(interaction.user))
@@ -3401,7 +3482,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🎯 特戰棋盤：1v1",
-        value="15x15 棋盤式對戰，選 3 技能進場與電腦對決，保護爆能器撐過 10 回合或擊殺敵人即可獲勝。",
+        value="15x13 棋盤式對戰，選 3 技能進場與電腦對決，保護爆能器撐過 10 回合或擊殺敵人即可獲勝。",
         inline=False,
     )
     embed.add_field(
