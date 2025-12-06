@@ -139,10 +139,11 @@ class EconomyMenu(View):
     async def work_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         users = load_data()
-        earnings = random.randrange(10, 50)
+        earnings = random.randrange(10, 200)
         users[str(interaction.user.id)]["wallet"] += earnings
+        amt = load_data()[str(interaction.user.id)]["wallet"]
         save_data(users)
-        await interaction.response.send_message(f"🔨 賺了 ${earnings}", ephemeral=True)
+        await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt}", ephemeral=True)
 
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0)
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
@@ -406,7 +407,7 @@ class VoidRitualModal(Modal):
                 )
         else:
             if 1 <= roll <= 60:
-                extra_penalty = int(amount * 0.5)
+                extra_penalty = int(amount * 3)
                 payout_change = -extra_penalty
                 result_text = (
                     f"☠️ 靈魂崩潰！過載擲出 {roll}，不僅失去觸媒，還倒扣 ${extra_penalty}。"
@@ -2392,7 +2393,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🪄 魔法試煉：虛空獻祭",
-        value="普通詠唱 1d100：41-80 得 1.5 倍，81-99 得 2.5 倍，100 得 5 倍與稱號，其餘失敗；禁忌過載 1d100：61-90 得 4 倍，91-100 得 10 倍公告，1-60 會倒扣 50% 並暫時禁言。",
+        value="普通詠唱 1d100：41-80 得 1.5 倍，81-99 得 2.5 倍，100 得 5 倍與稱號，其餘失敗；禁忌過載 1d100：61-90 得 4 倍，91-100 得 10 倍公告，1-60 會倒扣300% 並暫時禁言。",
         inline=False,
     )
     embed.add_field(
