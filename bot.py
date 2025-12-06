@@ -115,9 +115,27 @@ DEFAULT_PIRATE_WORDS = [
     "MERMAID",
     "SIREN",
     "COCONUT",
+    "SHIP",
+    "GOLD",
+    "MAP",
+    "CREW",
+    "SWORD",
+    "FLAG",
+    "BOAT",
+    "COIN",
+    "WAVE",
+    "REEF",
+    "SHARK",
+    "CHEST",
+    "CAPTAIN",
+    "SAIL",
+    "RIVER",
+    "BAY",
+    "ROPE",
+    "MATEY",
 ]
 
-PIRATE_WORD_TRANSLATIONS: dict[str, str] = {
+DEFAULT_PIRATE_WORD_TRANSLATIONS: dict[str, str] = {
     "TREASURE": "寶藏",
     "GALLEON": "大型西班牙帆船",
     "PARROT": "鸚鵡",
@@ -152,25 +170,62 @@ PIRATE_WORD_TRANSLATIONS: dict[str, str] = {
     "MERMAID": "美人魚",
     "SIREN": "海妖",
     "COCONUT": "椰子",
+    "SHIP": "船",
+    "GOLD": "黃金",
+    "MAP": "地圖",
+    "CREW": "船員",
+    "SWORD": "劍",
+    "FLAG": "旗幟",
+    "BOAT": "小船",
+    "COIN": "金幣",
+    "WAVE": "海浪",
+    "REEF": "礁石",
+    "SHARK": "鯊魚",
+    "CHEST": "寶箱",
+    "CAPTAIN": "船長",
+    "SAIL": "帆",
+    "RIVER": "河流",
+    "BAY": "海灣",
+    "ROPE": "繩索",
+    "MATEY": "夥伴",
 }
 
 WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
 
 
-def load_pirate_word_bank() -> list[str]:
+def load_pirate_word_bank() -> tuple[list[str], dict[str, str]]:
+    words: list[str] = []
+    translations: dict[str, str] = {}
+
     if os.path.exists(WORD_BANK_PATH):
-        words: list[str] = []
         with open(WORD_BANK_PATH, "r", encoding="utf-8") as f:
             for line in f:
-                word = line.strip().upper()
-                if word and word.isalpha():
+                raw_line = line.strip()
+                if not raw_line:
+                    continue
+                if "|" in raw_line:
+                    word_part, translation_part = raw_line.split("|", 1)
+                    word = word_part.strip().upper()
+                    translation = translation_part.strip()
+                else:
+                    word = raw_line.upper()
+                    translation = ""
+                if word.isalpha():
                     words.append(word)
-        if words:
-            return words
-    return list(DEFAULT_PIRATE_WORDS)
+                    if translation:
+                        translations[word] = translation
+
+    if not words:
+        return list(DEFAULT_PIRATE_WORDS), dict(DEFAULT_PIRATE_WORD_TRANSLATIONS)
+
+    for word in words:
+        if word not in translations and word in DEFAULT_PIRATE_WORD_TRANSLATIONS:
+            translations[word] = DEFAULT_PIRATE_WORD_TRANSLATIONS[word]
+
+    return words, translations
 
 
-PIRATE_WORDS = load_pirate_word_bank()
+PIRATE_WORDS, PIRATE_WORD_TRANSLATIONS = load_pirate_word_bank()
 
 
 def pirate_translation(word: str) -> str:
