@@ -671,7 +671,7 @@ def pirate_stage_art(view: PirateGuessView) -> str:
     plank_len = plank_spots[-1] + 3
     plank_line = "╭" + "━" * plank_len + "╮"
 
-    head_label = f"O {head}"
+    head_label = f" O {head}"
 
     if stage >= view.max_wrong:
         fall_space = plank_spots[-1]
@@ -684,21 +684,21 @@ def pirate_stage_art(view: PirateGuessView) -> str:
         return "```\n" + "\n".join(lines) + "\n```"
 
     pos = plank_spots[on_plank_index]
-    arms = " /|\\"
-    legs = ' / \\'
+    arms = "/|\\"
+    legs = '/ \\'
 
     remaining = view.max_wrong - stage
     if remaining <= 2:
         view.struggle_flip = not view.struggle_flip
-        arms = " \\O/" if view.struggle_flip else " /O\\"
-        legs = ' / \\' if view.struggle_flip else ' /\\'
+        arms = "\\O/" if view.struggle_flip else "/O\\"
+        legs = '/ \\' if view.struggle_flip else '/\\'
 
     lines = [
         plank_line,
         " " * pos + head_label,
-        " " * pos + "  |",
+        " " * pos + " |",
         " " * pos + arms,
-        " " * pos + "  |",
+        " " * pos + " |",
         " " * pos + legs,
         "🌊" * 14 + "🦈🦈🦈",
     ]
