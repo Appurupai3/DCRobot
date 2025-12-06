@@ -2581,17 +2581,6 @@ class GameMenu(View):
             resolve_func=resolve_dice_duel,
         )
 
-    @discord.ui.button(label="太空探險", style=discord.ButtonStyle.secondary, emoji="🚀", row=0)
-    async def space_adventure(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="太空探險",
-            reward_mult_range=(1.2, 2.0),
-            penalty_chance=0.3,
-            penalty_mult_range=(0.4, 1.0),
-            crit_chance=0.18,
-        )
-
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PirateTreasureModal(interaction.user))
@@ -2603,17 +2592,6 @@ class GameMenu(View):
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(HorseRaceModal(interaction.user))
-
-    @discord.ui.button(label="卡丁車", style=discord.ButtonStyle.secondary, emoji="🏎️", row=1)
-    async def kart_race(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="卡丁車",
-            reward_mult_range=(1.1, 1.7),
-            penalty_chance=0.24,
-            penalty_mult_range=(0.25, 0.8),
-            crit_chance=0.15,
-        )
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
@@ -2632,17 +2610,6 @@ class GameMenu(View):
             penalty_chance=0.16,
             penalty_mult_range=(0.15, 0.55),
             crit_chance=0.1,
-        )
-
-    @discord.ui.button(label="節奏挑戰", style=discord.ButtonStyle.secondary, emoji="🥁", row=2)
-    async def rhythm_game(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="節奏挑戰",
-            reward_mult_range=(1.12, 1.8),
-            penalty_chance=0.26,
-            penalty_mult_range=(0.3, 0.9),
-            crit_chance=0.18,
         )
 
     @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
