@@ -482,7 +482,7 @@ class PirateGuessView(View):
         self.resolved = False
         self.current_page = 0
         self.alphabet = list(string.ascii_uppercase)
-        self.struggle_flip = False
+        self.struggle_frame = 0
         self.build_letter_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -671,7 +671,7 @@ def pirate_stage_art(view: PirateGuessView) -> str:
     plank_len = plank_spots[-1] + 3
     plank_line = "╭" + "━" * plank_len + "╮"
 
-    head_label = f" O {head}"
+    head_label = f"O {head}"
 
     if stage >= view.max_wrong:
         fall_space = plank_spots[-1]
@@ -688,15 +688,27 @@ def pirate_stage_art(view: PirateGuessView) -> str:
     legs = '/ \\'
 
     remaining = view.max_wrong - stage
-    if remaining <= 2:
-        view.struggle_flip = not view.struggle_flip
-        arms = "\\O/" if view.struggle_flip else "/O\\"
-        legs = '/ \\' if view.struggle_flip else '/\\'
+    base_indent = pos + 1
+    rope_indent = base_indent
+    head_indent = base_indent
+    body_indent = base_indent
+    limb_indent = max(base_indent - 1, 0)
 
-    rope_indent = pos + 1
-    head_indent = pos
-    body_indent = pos
-    limb_indent = max(pos - 1, 0)
+    if remaining <= 2:
+        view.struggle_frame = (view.struggle_frame + 1) % 3
+        frame = view.struggle_frame
+        if frame == 0:
+            head_label = f"O {head}"
+            arms = "\\O/"
+            legs = '/ \\'
+        elif frame == 1:
+            head_label = f"O {head}"
+            arms = "/O\\"
+            legs = '/\\'
+        else:
+            head_label = f"| {head}"
+            arms = "\\|/"
+            legs = '/ \\'
 
     lines = [
         plank_line,
