@@ -11,7 +11,10 @@ import json
 import os
 import random
 import time
+
 from dotenv import load_dotenv
+
+from dcrbot.storage import heist_blacklist, load_data, open_account, save_data
 
 # --- 初始化 ---
 load_dotenv()
@@ -22,6 +25,40 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Ensure ButtonStyle works when running with lightweight stubs in tests.
+if hasattr(discord, "ButtonStyle"):
+    button_style = discord.ButtonStyle
+    style_fallbacks = {"primary": "blurple", "secondary": "gray", "success": "green"}
+    for attr, fallback in style_fallbacks.items():
+        if not hasattr(button_style, attr):
+            setattr(button_style, attr, getattr(button_style, fallback, None))
+
+if not hasattr(app_commands, "describe"):
+    def _noop_describe(**_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    app_commands.describe = _noop_describe
+
+if not hasattr(app_commands, "choices"):
+    def _noop_choices(**_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    app_commands.choices = _noop_choices
+
+if not hasattr(app_commands, "Choice"):
+    class _DummyChoice:
+        def __init__(self, name: str, value):
+            self.name = name
+            self.value = value
+
+    app_commands.Choice = _DummyChoice
 
 BATTLE_GAMES = {
     "rps": {"name": "剪刀石頭布", "desc": "每人出拳一次，出拳克制對手即可全拿彩池，平局退回所有下注。"},
@@ -76,24 +113,7 @@ battle_counter = 1
 # ===========================
 # === 資料存取區 ===
 # ===========================
-
-def load_data():
-    if not os.path.exists("bank.json"): return {}
-    with open("bank.json", "r") as f: return json.load(f)
-
-def save_data(users):
-    with open("bank.json", "w") as f: json.dump(users, f, indent=4)
-
-async def open_account(user):
-    users = load_data()
-    if str(user.id) not in users:
-        users[str(user.id)] = {"wallet": 0, "bank": 0}
-        save_data(users)
-        return True
-    return False
-
-# 遊戲暫存冷卻（僅記憶體，重啟重置）
-heist_blacklist: dict[str, float] = {}
+# 移至 dcrbot.storage 模組
 
 # ===========================
 # === UI 組件定義區 ===
