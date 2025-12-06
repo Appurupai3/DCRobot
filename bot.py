@@ -80,7 +80,7 @@ BATTLE_GAMES = {
     "space": {"name": "太空競賽", "desc": "火箭品質 50-100 與燃料 1-5 倍影響距離，最遠航程稱王。"},
 }
 
-PIRATE_WORDS = [
+DEFAULT_PIRATE_WORDS = [
     "TREASURE",
     "GALLEON",
     "PARROT",
@@ -103,43 +103,23 @@ PIRATE_WORDS = [
     "RAID",
 ]
 
-PLANK_STATES = [
-    """```
-🛳️━━━🧭━━━━━━━━🏴‍☠️
-      🧑‍☠️
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━🧑‍☠️━━━━━━🏴‍☠️
-            
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━━━🧑‍☠️━━━━🏴‍☠️
-            
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━━━━━🧑‍☠️━━🏴‍☠️
-            
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━━━━━━━🧑‍☠️🏴‍☠️
-            
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━━━━━━━💦    
-            🧑‍☠️
-🌊🌊🌊🦈🦈🦈
-```""",
-    """```
-🛳️━━🧭━━━━━━━━━━━━
-             💦🧑‍☠️💦
-🌊🌊🌊🦈🦈🦈
-```""",
-]
+WORD_BANK_PATH = os.path.join(os.path.dirname(__file__), "pirate_words.txt")
+
+
+def load_pirate_word_bank() -> list[str]:
+    if os.path.exists(WORD_BANK_PATH):
+        words: list[str] = []
+        with open(WORD_BANK_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                word = line.strip().upper()
+                if word and word.isalpha():
+                    words.append(word)
+        if words:
+            return words
+    return list(DEFAULT_PIRATE_WORDS)
+
+
+PIRATE_WORDS = load_pirate_word_bank()
 
 
 def normalize_game_key(game_input: str) -> str | None:
@@ -231,7 +211,12 @@ class EconomyMenu(View):
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
 
-    @discord.ui.button(label="開啟遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
+    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=1)
+    async def open_battle(self, interaction: discord.Interaction, button: Button):
+        embed = build_multiplayer_lobby_embed()
+        await interaction.response.send_message(embed=embed, view=MultiBattleMenu())
+
+    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_game_menu(interaction.user))
 
@@ -422,7 +407,7 @@ class PirateTreasureModal(Modal):
         view = PirateGuessView(interaction.user, secret_word, amount)
         embed = build_pirate_embed(view, status_text="選擇一個字母開始，最多錯 6 次！")
 
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view)
         view.message = await interaction.original_response()
 
 
@@ -430,6 +415,7 @@ class PirateGuessView(View):
     def __init__(self, user: discord.User, secret_word: str, bet_amount: int):
         super().__init__(timeout=420)
         self.author_id = user.id
+        self.player_name = user.display_name
         self.secret_word = secret_word.upper()
         self.unique_letters = set(self.secret_word)
         self.guessed: set[str] = set()
@@ -607,15 +593,57 @@ def pirate_word_bank_hint(view: PirateGuessView) -> str:
     return f"命中：{guessed}\n失誤：{missed}"
 
 
+def pirate_stage_art(view: PirateGuessView) -> str:
+    stage = len(view.wrong)
+    head = view.player_name.strip() or "玩家"
+    max_head = 8
+    if len(head) > max_head:
+        head = head[:max_head] + "…"
+
+    plank_spots = [6, 9, 12, 15, 18, 21]
+    on_plank_index = min(stage, view.max_wrong)
+
+    if on_plank_index >= len(plank_spots):
+        on_plank_index = len(plank_spots) - 1
+
+    plank_len = plank_spots[-1] + 3
+    plank_line = f"🛳️{'━' * plank_len}🏴‍☠️"
+
+    if stage >= view.max_wrong:
+        fall_space = plank_spots[-1]
+        lines = [
+            plank_line,
+            " " * fall_space + "💦 (╯°□°）╯︵",  # splash
+            " " * (fall_space + 3) + head,
+            "🌊🌊🌊🦈🦈🦈",
+        ]
+        return "```\n" + "\n".join(lines) + "\n```"
+
+    pos = plank_spots[on_plank_index]
+    arms = " /|\\"
+    if stage == view.max_wrong - 1:
+        arms = " \\O/"  # struggle before falling
+
+    lines = [
+        plank_line,
+        " " * pos + f"({head})",
+        " " * pos + "  |",
+        " " * pos + arms,
+        " " * pos + "  |",
+        " " * pos + " / \\",
+        "🌊🌊🌊🦈🦈🦈",
+    ]
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
 def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Embed:
-    stage = min(len(view.wrong), len(PLANK_STATES) - 1)
     embed = discord.Embed(title="🏴‍☠️ 單人猜字：海盜寶藏", color=discord.Color.dark_gold())
     embed.description = "猜出隱藏的英文單字，錯 6 次海盜就會落水餵鯊魚！"
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
     embed.add_field(name="剩餘容錯", value=f"{view.max_wrong - len(view.wrong)} 次", inline=True)
-    embed.add_field(name="目前題目", value=pirate_word_progress(view), inline=False)
+    embed.add_field(name="目前題目", value=f"`{pirate_word_progress(view)}`", inline=False)
     embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
-    embed.add_field(name="跳板狀態", value=PLANK_STATES[stage], inline=False)
+    embed.add_field(name="跳板狀態", value=pirate_stage_art(view), inline=False)
     embed.set_footer(text=status_text)
     return embed
 
@@ -2612,11 +2640,6 @@ class GameMenu(View):
             crit_chance=0.1,
         )
 
-    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=3)
-    async def open_battle(self, interaction: discord.Interaction, button: Button):
-        embed = build_multiplayer_lobby_embed()
-        await interaction.response.send_message(embed=embed, view=MultiBattleMenu(), ephemeral=True)
-
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
@@ -2632,7 +2655,7 @@ def build_game_menu(user: discord.User):
         ),
         inline=False,
     )
-    return {"embed": embed, "view": GameMenu(user), "ephemeral": True}
+    return {"embed": embed, "view": GameMenu(user), "ephemeral": False}
 
 
 def build_multiplayer_lobby_embed() -> discord.Embed:
@@ -2685,6 +2708,20 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.set_footer(text="所有遊戲需先輸入下注金額，請確認錢包餘額充足！")
     return embed
+
+
+def build_economy_menu() -> dict:
+    embed = discord.Embed(
+        title="🎮 經濟遊戲 & 銀行系統",
+        description="點擊按鈕或使用指令操作",
+        color=discord.Color.dark_red(),
+    )
+    embed.add_field(
+        name="快速指令",
+        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜",
+        inline=False,
+    )
+    return {"embed": embed, "view": EconomyMenu(), "ephemeral": False}
 
 
 def build_ranking_message(limit: int = 10):
@@ -2822,9 +2859,14 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
     match.message = sent
 
 
-@bot.tree.command(name="opengame", description="開啟遊戲 GUI")
+@bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
     await interaction.response.send_message(**build_game_menu(interaction.user))
+
+
+@bot.tree.command(name="openmenu", description="開啟經濟選單")
+async def openmenu_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**build_economy_menu())
 
 
 @bot.tree.command(name="ranking", description="展示經濟排行榜")
@@ -2839,9 +2881,8 @@ async def rankgame_command(interaction: discord.Interaction):
 
 @bot.command()
 async def openmenu(ctx):
-    embed = discord.Embed(title="🎮 經濟遊戲 & 銀行系統", description="點擊按鈕或使用指令操作", color=discord.Color.dark_red())
-    embed.add_field(name="快速指令", value="`/opengame` 開啟遊戲\n`/ranking` 查看排行榜", inline=False)
-    await ctx.send(embed=embed, view=EconomyMenu())
+    payload = build_economy_menu()
+    await ctx.send(embed=payload["embed"], view=payload["view"])
 
 if token:
     bot.run(token)
