@@ -644,7 +644,7 @@ def pirate_stage_art(view: PirateGuessView) -> str:
             legs = '/ \\'
         elif frame == 1:
             arms = "/|\\"
-            legs = '/\\'
+            legs = '/ \\'
         else:
             arms = "\\|/"
             legs = '/ \\'
