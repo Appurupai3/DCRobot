@@ -18,3 +18,4 @@
    開啟終端機 (Terminal / CMD)，進入專案資料夾，執行以下指令：
    ```bash
    pip install -r requirements.txt
+   python bot.py
