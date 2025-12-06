@@ -188,13 +188,13 @@ class EconomyMenu(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0)
+    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0, custom_id="economy_balance")
     async def bal_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         amt = load_data()[str(interaction.user.id)]["wallet"]
         await interaction.response.send_message(f"💰 錢包: ${amt}", ephemeral=True)
 
-    @discord.ui.button(label="工作", style=discord.ButtonStyle.blurple, emoji="🔨", row=0)
+    @discord.ui.button(label="工作", style=discord.ButtonStyle.blurple, emoji="🔨", row=0, custom_id="economy_work")
     async def work_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         users = load_data()
@@ -204,20 +204,20 @@ class EconomyMenu(View):
         save_data(users)
         await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt}", ephemeral=True)
 
-    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0)
+    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
 
-    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=1)
+    @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=1, custom_id="economy_multiplayer")
     async def open_battle(self, interaction: discord.Interaction, button: Button):
         embed = build_multiplayer_lobby_embed()
         await interaction.response.send_message(embed=embed, view=MultiBattleMenu())
 
-    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2)
+    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2, custom_id="economy_solo")
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_game_menu(interaction.user))
 
-    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2)
+    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2, custom_id="economy_ranking")
     async def ranking_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_ranking_message())
 
@@ -2571,14 +2571,19 @@ class BattleLobbyView(View):
 
 class MultiBattleMenu(View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self._build_buttons()
 
     def _build_buttons(self):
         for idx, (key, info) in enumerate(BATTLE_GAMES.items()):
             style_cycle = [discord.ButtonStyle.primary, discord.ButtonStyle.secondary, discord.ButtonStyle.success]
             style = style_cycle[idx % len(style_cycle)]
-            button = Button(label=info.get("name", key), style=style, row=idx // 3)
+            button = Button(
+                label=info.get("name", key),
+                style=style,
+                row=idx // 3,
+                custom_id=f"battle_menu_{key}",
+            )
 
             async def make_callback(interaction: discord.Interaction, game_key=key):
                 await interaction.response.send_modal(BattleBetModal(game_key))
@@ -2782,6 +2787,9 @@ async def on_ready():
         await bot.tree.sync()
     except Exception as e:
         print(f"Slash command sync failed: {e}")
+    # Register persistent menus so any posted lobbies remain clickable for everyone
+    bot.add_view(EconomyMenu())
+    bot.add_view(MultiBattleMenu())
     print(f'已登入：{bot.user}')
 
 
