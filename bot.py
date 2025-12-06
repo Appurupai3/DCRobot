@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import json
 import os
 import random
+import string
 import time
 
 from dotenv import load_dotenv
@@ -78,6 +79,67 @@ BATTLE_GAMES = {
     "sprint": {"name": "百米衝刺", "desc": "每人獲得起跑反應與衝刺力，計算終點時間，最短者贏。"},
     "space": {"name": "太空競賽", "desc": "火箭品質 50-100 與燃料 1-5 倍影響距離，最遠航程稱王。"},
 }
+
+PIRATE_WORDS = [
+    "TREASURE",
+    "GALLEON",
+    "PARROT",
+    "ANCHOR",
+    "CUTLASS",
+    "BOTTLE",
+    "RUM",
+    "CANNON",
+    "ISLAND",
+    "COMPASS",
+    "PLUNDER",
+    "SEASHORE",
+    "HORIZON",
+    "NAVIGATE",
+    "BUCCANEER",
+    "MAST",
+    "CABIN",
+    "SAILOR",
+    "BRIG",
+    "RAID",
+]
+
+PLANK_STATES = [
+    """```
+🛳️━━━🧭━━━━━━━━🏴‍☠️
+      🧑‍☠️
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━🧑‍☠️━━━━━━🏴‍☠️
+            
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━━━🧑‍☠️━━━━🏴‍☠️
+            
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━━━━━🧑‍☠️━━🏴‍☠️
+            
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━━━━━━━🧑‍☠️🏴‍☠️
+            
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━━━━━━━💦    
+            🧑‍☠️
+🌊🌊🌊🦈🦈🦈
+```""",
+    """```
+🛳️━━🧭━━━━━━━━━━━━
+             💦🧑‍☠️💦
+🌊🌊🌊🦈🦈🦈
+```""",
+]
 
 
 def normalize_game_key(game_input: str) -> str | None:
@@ -321,6 +383,241 @@ class CustomBetModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await process_custom_bet(interaction, self)
+
+
+class PirateTreasureModal(Modal):
+    def __init__(self, user: discord.User):
+        super().__init__(title="🏴‍☠️ 單人猜字 - 下注開始")
+        self.user = user
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
+        self.add_item(self.bet_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的遊戲面板！請自行開啟。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+            return
+
+        if users[uid]["wallet"] < amount:
+            await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= amount
+        save_data(users)
+
+        secret_word = random.choice(PIRATE_WORDS)
+        view = PirateGuessView(interaction.user, secret_word, amount)
+        embed = build_pirate_embed(view, status_text="選擇一個字母開始，最多錯 6 次！")
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+
+class PirateGuessView(View):
+    def __init__(self, user: discord.User, secret_word: str, bet_amount: int):
+        super().__init__(timeout=420)
+        self.author_id = user.id
+        self.secret_word = secret_word.upper()
+        self.unique_letters = set(self.secret_word)
+        self.guessed: set[str] = set()
+        self.wrong: set[str] = set()
+        self.bet_amount = bet_amount
+        self.max_wrong = 6
+        self.message: discord.Message | None = None
+        self.resolved = False
+        self.current_page = 0
+        self.alphabet = list(string.ascii_uppercase)
+        self.build_letter_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的跳板！請自行開啟遊戲。", ephemeral=True)
+            return False
+        return True
+
+    def build_letter_buttons(self):
+        self.clear_items()
+        page_size = 13
+        start = self.current_page * page_size
+        letters = self.alphabet[start : start + page_size]
+
+        for idx, letter in enumerate(letters):
+            row = idx // 5
+            button = Button(
+                label=letter,
+                style=discord.ButtonStyle.secondary,
+                disabled=self.is_letter_used(letter) or self.resolved,
+                row=row,
+            )
+
+            async def make_callback(interaction: discord.Interaction, picked=letter):
+                await self.handle_guess(interaction, picked)
+
+            button.callback = make_callback
+            self.add_item(button)
+
+        prev_btn = Button(
+            label="上一頁",
+            style=discord.ButtonStyle.primary,
+            disabled=self.current_page == 0 or self.resolved,
+            row=3,
+        )
+        next_btn = Button(
+            label="下一頁",
+            style=discord.ButtonStyle.primary,
+            disabled=(self.current_page + 1) * page_size >= len(self.alphabet) or self.resolved,
+            row=3,
+        )
+
+        async def switch_prev(interaction: discord.Interaction):
+            self.current_page = max(0, self.current_page - 1)
+            self.build_letter_buttons()
+            await interaction.response.edit_message(embed=build_pirate_embed(self, status_text="換一批字母繼續猜！"), view=self)
+
+        async def switch_next(interaction: discord.Interaction):
+            self.current_page += 1
+            self.build_letter_buttons()
+            await interaction.response.edit_message(embed=build_pirate_embed(self, status_text="換一批字母繼續猜！"), view=self)
+
+        prev_btn.callback = switch_prev
+        next_btn.callback = switch_next
+        self.add_item(prev_btn)
+        self.add_item(next_btn)
+
+        manual_input = Button(label="輸入字母", style=discord.ButtonStyle.success, row=4, disabled=self.resolved)
+
+        async def open_manual(interaction: discord.Interaction):
+            await interaction.response.send_modal(PirateLetterModal(self))
+
+        manual_input.callback = open_manual
+        self.add_item(manual_input)
+
+    def is_letter_used(self, letter: str) -> bool:
+        upper = letter.upper()
+        return upper in self.guessed or upper in self.wrong
+
+    async def handle_guess(self, interaction: discord.Interaction, letter: str):
+        if self.resolved:
+            await interaction.response.send_message("⚠️ 此局已結束。", ephemeral=True)
+            return
+
+        guess = letter.upper()
+        if len(guess) != 1 or guess not in string.ascii_uppercase:
+            await interaction.response.send_message("❌ 請輸入單一英文字母。", ephemeral=True)
+            return
+
+        if guess in self.guessed or guess in self.wrong:
+            await interaction.response.send_message("⚠️ 這個字母已經走過跳板了！", ephemeral=True)
+            return
+
+        status = ""
+        if guess in self.unique_letters:
+            self.guessed.add(guess)
+            revealed = pirate_word_progress(self)
+            status = f"✅ 命中！目前單字：{revealed}"
+        else:
+            self.wrong.add(guess)
+            steps_left = self.max_wrong - len(self.wrong)
+            status = f"❌ 踩空！還能再錯 {steps_left} 次。"
+
+        solved = self.unique_letters.issubset(self.guessed)
+        out_of_steps = len(self.wrong) >= self.max_wrong
+
+        if solved:
+            users = load_data()
+            uid = str(interaction.user.id)
+            reward_multiplier = 1.4 + (self.max_wrong - len(self.wrong)) * 0.12
+            reward = int(self.bet_amount * reward_multiplier)
+            users[uid]["wallet"] += self.bet_amount + reward
+            save_data(users)
+            status = (
+                f"🎉 你解開了 {self.secret_word}！返還下注 ${self.bet_amount} 並獲得 ${reward}"
+                f"（獎勵倍率 {reward_multiplier:.2f}x）。"
+            )
+            self.resolved = True
+        elif out_of_steps:
+            users = load_data()
+            uid = str(interaction.user.id)
+            penalty = int(self.bet_amount * 0.5)
+            users[uid]["wallet"] = max(0, users[uid]["wallet"] - penalty)
+            save_data(users)
+            status = f"💀 海盜落水了！額外被鯊魚咬走 ${penalty}。"
+            self.resolved = True
+
+        if self.resolved:
+            for child in self.children:
+                child.disabled = True
+
+        self.build_letter_buttons()
+        embed = build_pirate_embed(self, status_text=status)
+
+        try:
+            await interaction.response.edit_message(embed=embed, view=self)
+        except discord.InteractionResponded:
+            await interaction.followup.edit_message(message_id=self.message.id, embed=embed, view=self)
+
+        if self.resolved:
+            self.stop()
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            embed = build_pirate_embed(self, status_text="⏰ 時間到，此局結束。")
+            await self.message.edit(embed=embed, view=self)
+        self.stop()
+
+
+class PirateLetterModal(Modal):
+    def __init__(self, view: PirateGuessView):
+        super().__init__(title="🏴‍☠️ 輸入字母")
+        self.view_ref = view
+        self.letter_input = TextInput(label="猜一個字母", placeholder="A-Z", required=True, max_length=1)
+        self.add_item(self.letter_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.view_ref
+        if interaction.user.id != view.author_id:
+            await interaction.response.send_message("❌ 這不是你的跳板！請自行開啟。", ephemeral=True)
+            return
+
+        await view.handle_guess(interaction, self.letter_input.value)
+
+
+def pirate_word_progress(view: PirateGuessView) -> str:
+    return " ".join(letter if letter in view.guessed else "_" for letter in view.secret_word)
+
+
+def pirate_word_bank_hint(view: PirateGuessView) -> str:
+    guessed = ", ".join(sorted(view.guessed)) or "-"
+    missed = ", ".join(sorted(view.wrong)) or "-"
+    return f"命中：{guessed}\n失誤：{missed}"
+
+
+def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Embed:
+    stage = min(len(view.wrong), len(PLANK_STATES) - 1)
+    embed = discord.Embed(title="🏴‍☠️ 單人猜字：海盜寶藏", color=discord.Color.dark_gold())
+    embed.description = "猜出隱藏的英文單字，錯 6 次海盜就會落水餵鯊魚！"
+    embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
+    embed.add_field(name="剩餘容錯", value=f"{view.max_wrong - len(view.wrong)} 次", inline=True)
+    embed.add_field(name="目前題目", value=pirate_word_progress(view), inline=False)
+    embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
+    embed.add_field(name="跳板狀態", value=PLANK_STATES[stage], inline=False)
+    embed.set_footer(text=status_text)
+    return embed
 
 
 class BattleSetupModal(Modal):
@@ -2297,14 +2594,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="海盜寶藏",
-            reward_mult_range=(1.3, 2.2),
-            penalty_chance=0.38,
-            penalty_mult_range=(0.5, 1.2),
-            crit_chance=0.22,
-        )
+        await interaction.response.send_modal(PirateTreasureModal(interaction.user))
 
     @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
     async def magic_trial(self, interaction: discord.Interaction, button: Button):
@@ -2399,6 +2689,11 @@ def build_game_help_embed() -> discord.Embed:
     embed.add_field(
         name="🎲 骰子決鬥",
         value="玩家與敵方各擲兩顆骰子，20 倍特例：你的 12 打敗對手 2 可拿 50 倍，反之受 10 倍懲罰；其餘依差值×0.5 決定收益或損失，平手退回本金。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🏴‍☠️ 單人猜字：海盜寶藏",
+        value="從題庫抽出英文單字，每次猜一個字母；錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
         inline=False,
     )
     embed.add_field(
