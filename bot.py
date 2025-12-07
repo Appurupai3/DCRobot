@@ -664,7 +664,7 @@ class ValorantTacticsGame:
             return True, "💥 敵人成功拆除爆能器，你輸了。"
         return False, None
 
-    def complete_turn(self, log: list[str]) -> tuple[str, bool, str | None]:
+    async def complete_turn(self, log: list[str]) -> tuple[str, bool, str | None]:
         end, reason = self.check_end()
         if end:
             return "\n".join(log), end, reason
@@ -676,6 +676,7 @@ class ValorantTacticsGame:
             while not end and safety_steps < 15:
                 if not any(enemy["hp"] > 0 for enemy in self.enemies):
                     break
+                await asyncio.sleep(5)
                 self.resolve_enemy_turn(log)
                 self.turn += 1
                 end, reason = self.check_end()
@@ -768,7 +769,7 @@ class ValorantGameView(View):
             if self.game.player_can_attack():
                 log.append("🎯 你已鎖定敵人，隨時可以攻擊！")
         if consume_turn:
-            status_text, ended, reason = self.game.complete_turn(log)
+            status_text, ended, reason = await self.game.complete_turn(log)
         else:
             status_text = "\n".join(log)
             ended, reason = self.game.check_end()
