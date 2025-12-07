@@ -671,6 +671,8 @@ class ValorantTacticsGame:
         if not end and self.player_hp <= 0 and self.spike_planted:
             safety_steps = 0
             while not end and safety_steps < 15:
+                if not any(enemy["hp"] > 0 for enemy in self.enemies):
+                    break
                 self.resolve_enemy_turn(log)
                 self.turn += 1
                 end, reason = self.check_end()
