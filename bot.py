@@ -559,6 +559,8 @@ class ValorantTacticsGame:
         return "🟥 敵人向目標推進。"
 
     def enemy_attack(self, log: list[str]):
+        if self.player_hp <= 0:
+            return
         attacked = False
         for idx, enemy in enumerate(self.enemies):
             if enemy["hp"] <= 0:
