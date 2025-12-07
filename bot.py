@@ -7,7 +7,7 @@ from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 import json
 import os
 import random
@@ -664,11 +664,15 @@ class ValorantTacticsGame:
             return True, "💥 敵人成功拆除爆能器，你輸了。"
         return False, None
 
-    async def complete_turn(self, log: list[str]) -> tuple[str, bool, str | None]:
+    async def complete_turn(
+        self, log: list[str], update_cb: Callable[[str], Awaitable[None]] | None = None
+    ) -> tuple[str, bool, str | None]:
         end, reason = self.check_end()
         if end:
             return "\n".join(log), end, reason
         self.resolve_enemy_turn(log)
+        if update_cb:
+            await update_cb("\n".join(log))
         self.turn += 1
         end, reason = self.check_end()
         if not end and self.player_hp <= 0 and self.spike_planted:
@@ -678,6 +682,8 @@ class ValorantTacticsGame:
                     break
                 await asyncio.sleep(5)
                 self.resolve_enemy_turn(log)
+                if update_cb:
+                    await update_cb("\n".join(log))
                 self.turn += 1
                 end, reason = self.check_end()
                 safety_steps += 1
@@ -769,7 +775,7 @@ class ValorantGameView(View):
             if self.game.player_can_attack():
                 log.append("🎯 你已鎖定敵人，隨時可以攻擊！")
         if consume_turn:
-            status_text, ended, reason = await self.game.complete_turn(log)
+            status_text, ended, reason = await self.game.complete_turn(log, self.live_refresh)
         else:
             status_text = "\n".join(log)
             ended, reason = self.game.check_end()
@@ -784,6 +790,11 @@ class ValorantGameView(View):
                 await interaction.followup.edit_message(message_id=self.message.id, embed=embed, view=self)
         else:
             await interaction.response.edit_message(embed=embed, view=self)
+
+    async def live_refresh(self, status_text: str):
+        embed = build_valorant_embed(self.game, status_text)
+        if self.message:
+            await self.message.edit(embed=embed, view=self)
 
     @discord.ui.button(label="⬆️", style=discord.ButtonStyle.secondary, row=0)
     async def move_up(self, interaction: discord.Interaction, button: Button):
