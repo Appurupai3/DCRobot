@@ -628,9 +628,6 @@ class ValorantTacticsGame:
                     if self.defusing_enemy == idx:
                         self.defusing_enemy = None
 
-            enemy["blinded"] = max(0, enemy["blinded"] - 1)
-            enemy["bound"] = max(0, enemy["bound"] - 1)
-
         if self.spike_planted and not contact:
             self.enemy_defuse_progress = 0
             self.defusing_enemy = None
@@ -638,6 +635,12 @@ class ValorantTacticsGame:
         self.enemy_attack(log)
         if random.random() < 0.35:
             self.enemy_special(log)
+
+        for enemy in self.enemies:
+            if enemy["hp"] <= 0:
+                continue
+            enemy["blinded"] = max(0, enemy["blinded"] - 1)
+            enemy["bound"] = max(0, enemy["bound"] - 1)
 
     def start_player_turn(self):
         if self.player_hp <= 0:
