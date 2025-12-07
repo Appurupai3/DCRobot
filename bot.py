@@ -569,6 +569,19 @@ class ValorantTacticsGame:
             self.enemy_defuse_progress = 0
             self.defusing_enemy = None
 
+        # 保證未下包時至少有一名敵人積極追擊玩家
+        chaser_idx: int | None = None
+        if not self.spike_planted:
+            for idx, enemy in enumerate(self.enemies):
+                if enemy["hp"] > 0 and enemy["role"] == "rotator":
+                    chaser_idx = idx
+                    break
+            if chaser_idx is None:
+                for idx, enemy in enumerate(self.enemies):
+                    if enemy["hp"] > 0:
+                        chaser_idx = idx
+                        break
+
         contact = False
         for idx, enemy in enumerate(self.enemies):
             if enemy["hp"] <= 0:
@@ -588,9 +601,11 @@ class ValorantTacticsGame:
                 steps = 2
                 if tuple(enemy["pos"]) in self.slow_tiles:
                     steps = 1
-                target = []
+                target: list[int] = []
                 if self.spike_planted and self.spike_pos:
                     target = self.spike_pos
+                elif idx == chaser_idx:
+                    target = list(self.player_pos)
                 elif enemy["role"].startswith("site"):
                     if any(enemy["pos"] == pos for pos in self.plant_sites[int(enemy["role"].split("-")[-1])]):
                         target = enemy["pos"]
@@ -623,7 +638,6 @@ class ValorantTacticsGame:
         self.enemy_attack(log)
         if random.random() < 0.35:
             self.enemy_special(log)
-        self.turn += 1
 
     def start_player_turn(self):
         if self.player_hp <= 0:
@@ -652,11 +666,13 @@ class ValorantTacticsGame:
         if end:
             return "\n".join(log), end, reason
         self.resolve_enemy_turn(log)
+        self.turn += 1
         end, reason = self.check_end()
         if not end and self.player_hp <= 0 and self.spike_planted:
             safety_steps = 0
             while not end and safety_steps < 15:
                 self.resolve_enemy_turn(log)
+                self.turn += 1
                 end, reason = self.check_end()
                 safety_steps += 1
         if not end:
