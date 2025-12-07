@@ -7,7 +7,7 @@ from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 import json
 import os
 import random
@@ -198,61 +198,30 @@ class VisibilityUtils:
                     return False
         return True
 
-    def is_in_cone(self, player_pos, target_pos, facing_dir, cone_angle=90, max_radius=8):
-        px, py = player_pos
-        tx, ty = target_pos
-
-        dist = self.get_distance(player_pos, target_pos)
+    def check_attack_eligibility(self, attacker_pos, target_pos):
+        dist = self.get_distance(attacker_pos, target_pos)
         if dist <= 1.5:
             return True
-        if dist > max_radius:
-            return False
-
-        dir_vec = facing_dir
-        target_vec = (tx - px, ty - py)
-
-        dot_prod = dir_vec[0] * target_vec[0] + dir_vec[1] * target_vec[1]
-        mag_target = math.sqrt(target_vec[0] ** 2 + target_vec[1] ** 2)
-        mag_dir = math.sqrt(dir_vec[0] ** 2 + dir_vec[1] ** 2)
-
-        if mag_target * mag_dir == 0:
-            return False
-
-        cos_angle = dot_prod / (mag_target * mag_dir)
-        cos_angle = max(-1.0, min(1.0, cos_angle))
-        angle_rad = math.acos(cos_angle)
-        angle_deg = math.degrees(angle_rad)
-
-        return angle_deg <= (cone_angle / 2)
-
-    def check_attack_eligibility(self, player_pos, enemy_pos, facing_vector):
-        in_sector = self.is_in_cone(player_pos, enemy_pos, facing_vector)
-
-        if in_sector:
-            return self.has_los(player_pos, enemy_pos)
-
-        return False
+        return self.has_los(attacker_pos, target_pos)
 
 
 class ValorantTacticsGame:
     def __init__(self, skills: list[str]):
         self.grid = [["EMPTY" for _ in range(VALORANT_WIDTH)] for _ in range(VALORANT_HEIGHT)]
         self.player_pos = [1, 1]
-        self.enemy_pos = [13, 11]
         self.player_facing = (1, 0)
-        self.enemy_facing = (-1, 0)
         self.spike_pos: list[int] | None = None
         self.spike_planted = False
         self.plant_turn: int | None = None
         self.plant_sites: list[list[tuple[int, int]]] = []
-        self.player_hp = 3
-        self.enemy_hp = 3
+        self.site_centers: list[tuple[int, int]] = []
+        self.player_hp = 4
+        self.enemies: list[dict[str, Any]] = []
         self.turn = 1
         self.moves_left = 3
         self.attack_used = False
-        self.enemy_blinded = 0
-        self.enemy_bound = 0
         self.enemy_defuse_progress = 0
+        self.defusing_enemy: int | None = None
         self.smoke_tiles: set[tuple[int, int]] = set()
         self.slow_tiles: set[tuple[int, int]] = set()
         self.skills = skills
@@ -263,8 +232,9 @@ class ValorantTacticsGame:
 
     def generate_map(self):
         self.generate_plant_sites()
+        self.spawn_enemies()
         wall_count = random.randint(20, 30)
-        forbidden = {tuple(self.player_pos), tuple(self.enemy_pos)}
+        forbidden = {tuple(self.player_pos)} | {tuple(e["pos"]) for e in self.enemies}
         for _ in range(wall_count):
             rx, ry = random.randint(0, VALORANT_WIDTH - 1), random.randint(0, VALORANT_HEIGHT - 1)
             if (rx, ry) in forbidden:
@@ -284,7 +254,7 @@ class ValorantTacticsGame:
             if abs((first[0] + 2) - (second[0] + 2)) + abs((first[1] + 2) - (second[1] + 2)) >= 5:
                 break
 
-        for top_left in [first, second]:
+        for idx, top_left in enumerate([first, second]):
             tiles: list[tuple[int, int]] = []
             x0, y0 = top_left
             for dy in range(5):
@@ -292,8 +262,9 @@ class ValorantTacticsGame:
                     tx, ty = x0 + dx, y0 + dy
                     tiles.append((tx, ty))
             self.plant_sites.append(list(tiles))
+            self.site_centers.append((x0 + 2, y0 + 2))
             for tx, ty in tiles:
-                if (tx, ty) not in {tuple(self.player_pos), tuple(self.enemy_pos)}:
+                if (tx, ty) != tuple(self.player_pos):
                     self.grid[ty][tx] = "SITE"
 
             rock_count = random.randint(6, 14)
@@ -303,7 +274,7 @@ class ValorantTacticsGame:
             for tx, ty in tiles_copy:
                 if rocks >= rock_count:
                     break
-                if (tx, ty) in {tuple(self.player_pos), tuple(self.enemy_pos)}:
+                if (tx, ty) == tuple(self.player_pos):
                     continue
                 self.grid[ty][tx] = "WALL"
                 rocks += 1
@@ -325,6 +296,22 @@ class ValorantTacticsGame:
                     self.grid[oy][ox] = "EMPTY"
                 break
 
+    def spawn_enemies(self):
+        self.enemies = []
+        for site_idx, site_tiles in enumerate(self.plant_sites):
+            open_tiles = [pos for pos in site_tiles if self.grid[pos[1]][pos[0]] != "WALL"]
+            target = open_tiles[0] if open_tiles else site_tiles[0]
+            self.enemies.append(
+                {"pos": list(target), "hp": 3, "facing": (0, -1), "blinded": 0, "bound": 0, "role": f"site-{site_idx}"}
+            )
+
+        corner_pos = [VALORANT_WIDTH - 2, VALORANT_HEIGHT - 2]
+        if self.grid[corner_pos[1]][corner_pos[0]] == "WALL":
+            self.grid[corner_pos[1]][corner_pos[0]] = "EMPTY"
+        self.enemies.append(
+            {"pos": corner_pos, "hp": 3, "facing": (-1, 0), "blinded": 0, "bound": 0, "role": "rotator"}
+        )
+
     def render_map(self) -> str:
         rows: list[str] = []
         for y in range(VALORANT_HEIGHT):
@@ -333,7 +320,7 @@ class ValorantTacticsGame:
                 if [x, y] == self.player_pos:
                     row_icons.append(VALORANT_ICONS["PLAYER"])
                     continue
-                if [x, y] == self.enemy_pos:
+                if any(enemy["hp"] > 0 and enemy["pos"] == [x, y] for enemy in self.enemies):
                     row_icons.append(VALORANT_ICONS["ENEMY"])
                     continue
 
@@ -355,23 +342,35 @@ class ValorantTacticsGame:
     def visibility(self) -> VisibilityUtils:
         return VisibilityUtils(self.grid, self.smoke_tiles, VALORANT_WIDTH, VALORANT_HEIGHT)
 
-    def player_can_attack(self) -> bool:
+    def _enemies_in_range(self) -> list[int]:
         utils = self.visibility()
-        return utils.check_attack_eligibility(self.player_pos, self.enemy_pos, self.player_facing)
+        indices: list[int] = []
+        for idx, enemy in enumerate(self.enemies):
+            if enemy["hp"] <= 0:
+                continue
+            if utils.check_attack_eligibility(self.player_pos, enemy["pos"]):
+                indices.append(idx)
+        return indices
+
+    def player_can_attack(self) -> bool:
+        return bool(self._enemies_in_range())
 
     def enemy_has_line_on_player(self) -> bool:
-        return self.visibility().has_los(tuple(self.enemy_pos), tuple(self.player_pos))
-
-    def enemy_can_attack(self) -> bool:
         utils = self.visibility()
-        return utils.check_attack_eligibility(self.enemy_pos, self.player_pos, self.enemy_facing)
+        return any(utils.has_los(tuple(enemy["pos"]), tuple(self.player_pos)) for enemy in self.enemies if enemy["hp"] > 0)
 
-    def apply_damage(self, target: str, amount: int) -> str:
-        if target == "enemy":
-            self.enemy_hp = max(0, self.enemy_hp - amount)
-            return f"🟥 敵人受到 {amount} 傷害，剩餘 {self.enemy_hp} HP。"
-        self.player_hp = max(0, self.player_hp - amount)
-        return f"你受到 {amount} 傷害，剩餘 {self.player_hp} HP。"
+    def enemy_can_attack(self, enemy: dict[str, Any]) -> bool:
+        utils = self.visibility()
+        return utils.check_attack_eligibility(enemy["pos"], self.player_pos)
+
+    def apply_damage(self, target: str | int, amount: int) -> str:
+        if target == "player":
+            self.player_hp = max(0, self.player_hp - amount)
+            return f"你受到 {amount} 傷害，剩餘 {self.player_hp} HP。"
+        if isinstance(target, int) and 0 <= target < len(self.enemies):
+            self.enemies[target]["hp"] = max(0, self.enemies[target]["hp"] - amount)
+            return f"🟥 敵人 {target + 1} 受到 {amount} 傷害，剩餘 {self.enemies[target]['hp']} HP。"
+        return ""
 
     def move_player(self, dx: int, dy: int) -> tuple[str, bool]:
         if self.moves_left <= 0:
@@ -391,13 +390,14 @@ class ValorantTacticsGame:
     def player_attack(self) -> str:
         if self.attack_used:
             return "❌ 本回合已經攻擊過了。"
-        utils = self.visibility()
-        if not utils.check_attack_eligibility(self.player_pos, self.enemy_pos, self.player_facing):
+        targets = self._enemies_in_range()
+        if not targets:
             return "❌ 視線被掩體或煙霧阻擋。"
+        target_idx = targets[0]
         self.attack_used = True
         self.moves_left = 0
         self.enemy_defuse_progress = 0
-        damage_text = self.apply_damage("enemy", 1)
+        damage_text = self.apply_damage(target_idx, 2)
         return f"🔫 你開火！{damage_text}"
 
     def can_plant_here(self) -> bool:
@@ -446,7 +446,9 @@ class ValorantTacticsGame:
             msg = "💨 已部署 3x3 煙霧，阻擋視線！"
             self.skill_charges[name] -= 1
         elif name == "flash":
-            self.enemy_blinded = max(self.enemy_blinded, 1)
+            for enemy in self.enemies:
+                if enemy["hp"] > 0:
+                    enemy["blinded"] = max(enemy["blinded"], 1)
             msg = "💥 閃光命中！敵人下回合無法攻擊。"
             self.skill_charges[name] -= 1
         elif name == "slow":
@@ -461,7 +463,9 @@ class ValorantTacticsGame:
             msg = "❄️ 已鋪設 6x6 緩速區域，敵人移速減半。"
             self.skill_charges[name] -= 1
         elif name == "bind":
-            self.enemy_bound = max(self.enemy_bound, 1)
+            for enemy in self.enemies:
+                if enemy["hp"] > 0:
+                    enemy["bound"] = max(enemy["bound"], 1)
             msg = "⛓️ 束縛成功！敵人下回合無法移動。"
             self.skill_charges[name] -= 1
         elif name == "teleport":
@@ -472,7 +476,8 @@ class ValorantTacticsGame:
                 return "❌ 傳送目標超出地圖。"
             if abs(tx - px) > 3 or abs(ty - py) > 3:
                 return "❌ 目標需位於 6x6 範圍內。"
-            if self.grid[ty][tx] == "WALL" or self.grid[ty][tx] == "SPIKE" or (tx, ty) in self.smoke_tiles or [tx, ty] == self.enemy_pos:
+            occupied = any(enemy["hp"] > 0 and enemy["pos"] == [tx, ty] for enemy in self.enemies)
+            if self.grid[ty][tx] == "WALL" or self.grid[ty][tx] == "SPIKE" or (tx, ty) in self.smoke_tiles or occupied:
                 return "❌ 目標格不可用。"
             self.player_pos = [tx, ty]
             self.skill_charges[name] -= 1
@@ -482,13 +487,16 @@ class ValorantTacticsGame:
     def enemy_can_see_player(self) -> bool:
         return self.enemy_has_line_on_player()
 
-    def _enemy_step_toward(self, target: list[int], steps: int) -> str:
+    def _enemy_step_toward(self, enemy_idx: int, target: list[int], steps: int) -> str:
+        enemy = self.enemies[enemy_idx]
+        if enemy["hp"] <= 0:
+            return "🟥 敵人已被擊倒。"
         if steps <= 0:
             return "🟥 敵人原地觀望。"
         queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque()
         visited = set()
-        queue.append((self.enemy_pos[0], self.enemy_pos[1], []))
-        visited.add(tuple(self.enemy_pos))
+        queue.append((enemy["pos"][0], enemy["pos"][1], []))
+        visited.add(tuple(enemy["pos"]))
         found_path: list[tuple[int, int]] | None = None
         while queue:
             x, y, path = queue.popleft()
@@ -511,26 +519,37 @@ class ValorantTacticsGame:
 
         path_taken = found_path[:steps]
         if path_taken:
-            dx = path_taken[0][0] - self.enemy_pos[0]
-            dy = path_taken[0][1] - self.enemy_pos[1]
+            dx = path_taken[0][0] - enemy["pos"][0]
+            dy = path_taken[0][1] - enemy["pos"][1]
             if dx or dy:
-                self.enemy_facing = (dx, dy)
-            self.enemy_pos = list(path_taken[-1])
+                enemy["facing"] = (dx, dy)
+            self.enemies[enemy_idx]["pos"] = list(path_taken[-1])
         return "🟥 敵人向目標推進。"
 
     def enemy_attack(self, log: list[str]):
-        if self.enemy_blinded > 0:
-            log.append("✨ 敵人被致盲，無法攻擊。")
-            return
-        if not self.enemy_can_attack():
+        attacked = False
+        for idx, enemy in enumerate(self.enemies):
+            if enemy["hp"] <= 0:
+                continue
+            if enemy["blinded"] > 0:
+                continue
+            if not self.enemy_can_attack(enemy):
+                continue
+            attacked = True
+            self.enemy_defuse_progress = 0
+            self.defusing_enemy = None
+            log.append(f"🟥 敵人 {idx + 1} 對你開火！")
+            log.append(self.apply_damage("player", 1))
+        if not attacked:
             log.append("👀 敵人沒有找到你的身影。")
-            return
-        self.enemy_defuse_progress = 0
-        log.append(self.apply_damage("player", 1))
 
     def enemy_special(self, log: list[str]):
+        alive = [e for e in self.enemies if e["hp"] > 0]
+        if not alive:
+            return
+        caster = alive[0]
         if self.enemy_skill == "molly":
-            if self.enemy_pos == self.spike_pos:
+            if self.spike_pos and caster["pos"] == self.spike_pos:
                 log.append("🔥 敵人投擲燃燒彈守點，你不敢靠近中心。")
                 self.player_hp = max(0, self.player_hp - 1)
                 log.append("你被餘焰灼傷 -1 HP！")
@@ -539,48 +558,86 @@ class ValorantTacticsGame:
                 log.append("📡 敵人啟動尋敵箭，暫時無視煙霧。")
                 self.smoke_tiles.clear()
 
+    def _site_guard_target(self, enemy: dict[str, Any]) -> list[int]:
+        if enemy["role"].startswith("site"):
+            idx = int(enemy["role"].split("-")[-1])
+            return list(self.site_centers[idx])
+        return list(self.site_centers[0] if self.site_centers else [0, 0])
+
     def resolve_enemy_turn(self, log: list[str]):
         if not self.spike_planted:
             self.enemy_defuse_progress = 0
-        on_spike = self.spike_planted and self.enemy_pos == self.spike_pos
-        if self.enemy_bound > 0:
-            log.append("⛓️ 敵人被束縛，無法移動。")
-            if on_spike:
-                self.enemy_defuse_progress += 1
-                log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
-        else:
-            steps = 2
-            if tuple(self.enemy_pos) in self.slow_tiles:
-                steps = 1
-            if self.spike_planted:
-                target = self.spike_pos if self.spike_pos else self.player_pos
-            else:
-                target = self.player_pos
-            log.append(self._enemy_step_toward(target, steps))
-            if self.spike_planted and self.enemy_pos == self.spike_pos and not self.enemy_can_see_player():
-                self.enemy_defuse_progress += 1
-                log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
-            else:
-                self.enemy_defuse_progress = 0
+            self.defusing_enemy = None
 
-        if self.spike_planted and self.enemy_pos != self.spike_pos:
+        contact = False
+        for idx, enemy in enumerate(self.enemies):
+            if enemy["hp"] <= 0:
+                continue
+            on_spike = self.spike_planted and self.spike_pos and enemy["pos"] == self.spike_pos
+            if enemy["bound"] > 0:
+                log.append(f"⛓️ 敵人 {idx + 1} 被束縛，無法移動。")
+                if on_spike and enemy["blinded"] <= 0:
+                    if self.enemy_defuse_progress and self.defusing_enemy == idx:
+                        self.enemy_defuse_progress += 1
+                    else:
+                        self.enemy_defuse_progress = 1
+                        self.defusing_enemy = idx
+                    contact = True
+                    log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
+            else:
+                steps = 2
+                if tuple(enemy["pos"]) in self.slow_tiles:
+                    steps = 1
+                target = []
+                if self.spike_planted and self.spike_pos:
+                    target = self.spike_pos
+                elif enemy["role"].startswith("site"):
+                    if any(enemy["pos"] == pos for pos in self.plant_sites[int(enemy["role"].split("-")[-1])]):
+                        target = enemy["pos"]
+                    else:
+                        target = self._site_guard_target(enemy)
+                else:
+                    target = self._site_guard_target(enemy)
+
+                log.append(self._enemy_step_toward(idx, target, steps))
+                on_spike = self.spike_planted and self.spike_pos and enemy["pos"] == self.spike_pos
+                if on_spike and enemy["blinded"] <= 0:
+                    if self.enemy_defuse_progress and self.defusing_enemy == idx:
+                        self.enemy_defuse_progress += 1
+                    else:
+                        self.enemy_defuse_progress = 1
+                        self.defusing_enemy = idx
+                    contact = True
+                    log.append(f"💠 敵人正在拆包（{self.enemy_defuse_progress}/2）！")
+                else:
+                    if self.defusing_enemy == idx:
+                        self.defusing_enemy = None
+
+            enemy["blinded"] = max(0, enemy["blinded"] - 1)
+            enemy["bound"] = max(0, enemy["bound"] - 1)
+
+        if self.spike_planted and not contact:
             self.enemy_defuse_progress = 0
+            self.defusing_enemy = None
 
         self.enemy_attack(log)
         if random.random() < 0.35:
             self.enemy_special(log)
-        self.enemy_blinded = max(0, self.enemy_blinded - 1)
-        self.enemy_bound = max(0, self.enemy_bound - 1)
         self.turn += 1
 
     def start_player_turn(self):
-        self.moves_left = 3
-        self.attack_used = False
+        if self.player_hp <= 0:
+            self.moves_left = 0
+            self.attack_used = True
+        else:
+            self.moves_left = 3
+            self.attack_used = False
 
     def check_end(self) -> tuple[bool, str | None]:
-        if self.enemy_hp <= 0:
+        alive_enemies = [e for e in self.enemies if e["hp"] > 0]
+        if not alive_enemies:
             return True, "🎉 你擊敗敵人，成功保護爆能器！"
-        if self.player_hp <= 0:
+        if self.player_hp <= 0 and not self.spike_planted:
             return True, "💀 你倒下了，任務失敗。"
         if not self.spike_planted and self.turn > 20:
             return True, "⏰ 20 回合內未下包，任務失敗。"
@@ -596,13 +653,19 @@ class ValorantTacticsGame:
             return "\n".join(log), end, reason
         self.resolve_enemy_turn(log)
         end, reason = self.check_end()
+        if not end and self.player_hp <= 0 and self.spike_planted:
+            safety_steps = 0
+            while not end and safety_steps < 15:
+                self.resolve_enemy_turn(log)
+                end, reason = self.check_end()
+                safety_steps += 1
         if not end:
             self.start_player_turn()
         return "\n".join(log), end, reason
 
 
 def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord.Embed:
-    embed = discord.Embed(title="🎯 特戰棋盤：1v1", color=discord.Color.teal())
+    embed = discord.Embed(title="🎯 特戰棋盤：1v3", color=discord.Color.teal())
     embed.description = game.render_map()
     embed.add_field(name="狀態", value=status_text or "--", inline=False)
     plant_status = "未下包"
@@ -620,10 +683,13 @@ def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord
     }
     for skill in game.skills:
         skill_names.append(label_map.get(skill, skill))
+    enemy_hp_line = "、".join(
+        [f"{idx + 1}:{max(0, enemy['hp'])}HP" for idx, enemy in enumerate(game.enemies)]
+    )
     embed.add_field(
         name="資訊",
         value=(
-            f"你 {game.player_hp} HP｜敵人 {game.enemy_hp} HP｜移動力 {game.moves_left} / 3\n"
+            f"你 {game.player_hp} HP｜敵人存活 {len([e for e in game.enemies if e['hp']>0])}/{len(game.enemies)} ({enemy_hp_line})｜移動力 {game.moves_left} / 3\n"
             f"回合 {game.turn}｜{plant_status}｜技能一次性使用\n"
             f"裝備技能：{', '.join(skill_names)}\n"
             f"視野：{'可直接攻擊' if game.player_can_attack() else '暫時看不到敵人'}"
@@ -657,6 +723,9 @@ class ValorantGameView(View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("❌ 這不是你的遊戲面板！", ephemeral=True)
+            return False
+        if self.game.player_hp <= 0:
+            await interaction.response.send_message("💀 你已倒下，無法再行動，只能等待爆能器結果。", ephemeral=True)
             return False
         return True
 
@@ -3400,10 +3469,11 @@ class GameMenu(View):
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
         intro = discord.Embed(
-            title="🎯 特戰棋盤：1v1",
+            title="🎯 特戰棋盤：1v3",
             description=(
-                "15x13 戰術棋盤，選擇 3 個技能後與電腦對戰。\n"
-                "勝利條件：擊殺敵人或撐過 10 回合，失敗條件：陣亡或被拆包。"
+                "15x13 戰術棋盤，選擇 3 個技能後與三名電腦對戰。\n"
+                "兩名敵人防守兩個下包點，右下還有一名支援。勝利：擊殺全部或下包後撐 10 回合；"
+                "失敗：未下包超過 20 回合或爆能器遭拆除（你倒下後仍可等待爆炸/拆除結果）。"
             ),
             color=discord.Color.teal(),
         )
@@ -3481,8 +3551,8 @@ def build_game_help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="🎯 特戰棋盤：1v1",
-        value="15x13 棋盤式對戰，選 3 技能進場與電腦對決，保護爆能器撐過 10 回合或擊殺敵人即可獲勝。",
+        name="🎯 特戰棋盤：1v3",
+        value="15x13 棋盤式對戰，選 3 技能對抗三名 AI，兩名守點、一名右下支援；下包後撐過 10 回合或擊殺敵人即可獲勝。",
         inline=False,
     )
     embed.add_field(
