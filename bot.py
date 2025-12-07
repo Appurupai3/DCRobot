@@ -100,6 +100,21 @@ VALORANT_ICONS = {
 }
 
 
+def clip_status(log_lines: list[str], max_lines: int = 14, max_chars: int = 950) -> str:
+    """Clamp status output to Discord embed field limits."""
+    recent = log_lines[-max_lines:]
+    text = "\n".join(recent)
+    if len(text) <= max_chars:
+        return text
+    # truncate from the front while preserving newest entries
+    while len(recent) > 1 and len("\n".join(recent)) > max_chars:
+        recent = recent[1:]
+    text = "\n".join(recent)
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
 def load_pirate_word_bank() -> tuple[list[str], dict[str, str]]:
     words: list[str] = []
     translations: dict[str, str] = {}
@@ -686,10 +701,12 @@ class ValorantTacticsGame:
     ) -> tuple[str, bool, str | None]:
         end, reason = self.check_end()
         if end:
-            return "\n".join(log), end, reason
+            return clip_status(log), end, reason
         self.resolve_enemy_turn(log)
         if update_cb:
-            await update_cb("\n".join(log))
+            clipped = clip_status(log)
+            await update_cb(clipped)
+            log[:] = clipped.split("\n")
         self.turn += 1
         end, reason = self.check_end()
         if not end and self.player_hp <= 0 and self.spike_planted:
@@ -700,16 +717,19 @@ class ValorantTacticsGame:
                 await asyncio.sleep(5)
                 self.resolve_enemy_turn(log)
                 if update_cb:
-                    await update_cb("\n".join(log))
+                    clipped = clip_status(log)
+                    await update_cb(clipped)
+                    log[:] = clipped.split("\n")
                 self.turn += 1
                 end, reason = self.check_end()
                 safety_steps += 1
         if not end:
             self.start_player_turn()
-        return "\n".join(log), end, reason
+        return clip_status(log), end, reason
 
 
 def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord.Embed:
+    status_text = clip_status(status_text.split("\n"))
     embed = discord.Embed(title="🎯 特戰棋盤：1v3", color=discord.Color.teal())
     embed.description = game.render_map()
     embed.add_field(name="狀態", value=status_text or "--", inline=False)
@@ -794,7 +814,7 @@ class ValorantGameView(View):
         if consume_turn:
             status_text, ended, reason = await self.game.complete_turn(log, self.live_refresh)
         else:
-            status_text = "\n".join(log)
+            status_text = clip_status(log)
             ended, reason = self.game.check_end()
 
         if ended:
