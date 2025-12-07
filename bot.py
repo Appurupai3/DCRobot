@@ -400,6 +400,23 @@ class ValorantTacticsGame:
         damage_text = self.apply_damage(target_idx, 2)
         return f"🔫 你開火！{damage_text}"
 
+    def player_attack_target(self, target_idx: int) -> str:
+        if self.attack_used:
+            return "❌ 本回合已經攻擊過了。"
+        if target_idx < 0 or target_idx >= len(self.enemies):
+            return "❌ 目標不存在。"
+        enemy = self.enemies[target_idx]
+        if enemy["hp"] <= 0:
+            return "❌ 目標已經倒下。"
+        if target_idx not in self._enemies_in_range():
+            return "❌ 視線被掩體或煙霧阻擋。"
+
+        self.attack_used = True
+        self.moves_left = 0
+        self.enemy_defuse_progress = 0
+        damage_text = self.apply_damage(target_idx, 2)
+        return f"🔫 你開火！{damage_text}"
+
     def can_plant_here(self) -> bool:
         if self.spike_planted:
             return False
@@ -818,8 +835,12 @@ class ValorantGameView(View):
 
     @discord.ui.button(label="攻擊", style=discord.ButtonStyle.danger, row=2)
     async def attack(self, interaction: discord.Interaction, button: Button):
-        status = self.game.player_attack()
-        await self.resolve_action(interaction, [status], not status.startswith("❌"))
+        targets = self.game._enemies_in_range()
+        if not targets:
+            await interaction.response.send_message("❌ 視線被掩體或煙霧阻擋，沒有可攻擊的敵人。", ephemeral=True)
+            return
+        picker = AttackTargetPicker(self, targets)
+        await interaction.response.send_message("🎯 選擇要攻擊的敵人 (x,y)", view=picker, ephemeral=True)
 
     @discord.ui.button(label="💠 下包", style=discord.ButtonStyle.success, row=2)
     async def plant(self, interaction: discord.Interaction, button: Button):
@@ -835,6 +856,58 @@ class ValorantGameView(View):
     @classmethod
     def build(cls, user: discord.User, game: ValorantTacticsGame):
         return cls(user, game)
+
+
+class AttackTargetPicker(View):
+    def __init__(self, parent: ValorantGameView, targets: list[int]):
+        super().__init__(timeout=20)
+        self.parent_view = parent
+        self.author_id = parent.author_id
+        self.add_item(AttackTargetSelect(self, targets))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲。", ephemeral=True)
+            return False
+        if self.parent_view.game.player_hp <= 0:
+            await interaction.response.send_message("💀 你已倒下，無法攻擊。", ephemeral=True)
+            return False
+        return True
+
+    async def handle_selection(self, interaction: discord.Interaction, target_idx: int):
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        status = self.parent_view.game.player_attack_target(target_idx)
+        await self.parent_view.resolve_action(interaction, [status], not status.startswith("❌"))
+
+        for child in self.children:
+            child.disabled = True
+        if interaction.message:
+            await interaction.followup.edit_message(
+                message_id=interaction.message.id,
+                content="✅ 攻擊目標已選擇。",
+                view=self,
+            )
+        self.stop()
+
+
+class AttackTargetSelect(discord.ui.Select):
+    def __init__(self, picker: AttackTargetPicker, targets: list[int]):
+        self.picker = picker
+        options: list[discord.SelectOption] = []
+        for idx in targets:
+            enemy = picker.parent_view.game.enemies[idx]
+            ex, ey = enemy["pos"]
+            options.append(
+                discord.SelectOption(
+                    label=f"敵人 {idx + 1}",
+                    description=f"座標 ({ex + 1}, {ey + 1})",
+                    value=str(idx),
+                )
+            )
+        super().__init__(placeholder="選擇攻擊目標", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.picker.handle_selection(interaction, int(self.values[0]))
 
 
 class AreaSkillModal(Modal):
