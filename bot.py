@@ -256,6 +256,52 @@ class ValorantTacticsGame:
                 continue
             self.grid[ry][rx] = "WALL"
 
+        self.ensure_paths()
+
+    def ensure_paths(self):
+        def is_walkable(x: int, y: int) -> bool:
+            return self.grid[y][x] != "WALL"
+
+        def reachable() -> set[tuple[int, int]]:
+            seen: set[tuple[int, int]] = set()
+            q = [tuple(self.player_pos)]
+            seen.add(tuple(self.player_pos))
+            while q:
+                cx, cy = q.pop(0)
+                for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                    nx, ny = cx + dx, cy + dy
+                    if not self.within_bounds(nx, ny):
+                        continue
+                    if (nx, ny) in seen or not is_walkable(nx, ny):
+                        continue
+                    seen.add((nx, ny))
+                    q.append((nx, ny))
+            return seen
+
+        targets = list(self.site_centers)
+        attempts = 0
+        while attempts < 300:
+            seen = reachable()
+            missing = [t for t in targets if t not in seen]
+            if not missing:
+                break
+
+            # Pick walls adjacent to the reachable blob and open a corridor toward the closest missing target
+            frontier: list[tuple[int, int]] = []
+            for cx, cy in seen:
+                for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                    nx, ny = cx + dx, cy + dy
+                    if self.within_bounds(nx, ny) and self.grid[ny][nx] == "WALL":
+                        frontier.append((nx, ny))
+
+            if not frontier:
+                break
+
+            target = random.choice(missing)
+            best = min(frontier, key=lambda p: abs(p[0] - target[0]) + abs(p[1] - target[1]))
+            self.grid[best[1]][best[0]] = "EMPTY"
+            attempts += 1
+
     def within_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < VALORANT_WIDTH and 0 <= y < VALORANT_HEIGHT
 
@@ -807,6 +853,9 @@ class ValorantGameView(View):
             await interaction.response.edit_message(embed=embed, view=self)
 
     async def resolve_action(self, interaction: discord.Interaction, log: list[str], consume_turn: bool):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         status_preview = "\n".join(log)
         if status_preview.startswith("❌"):
             consume_turn = False
