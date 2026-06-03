@@ -19,7 +19,7 @@ from dcrbot.data_heist import DataHeistModal
 from dcrbot.pirate_game import PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
-from dcrbot.solo_games import HorseRaceModal, VoidRitualModal, resolve_dice_duel
+from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
 from dcrbot.valorant import ValorantSkillSelectView
 from dcrbot.storage import load_data, open_account, save_data
 
@@ -1608,9 +1608,9 @@ class GameMenu(View):
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PirateTreasureModal(interaction.user))
 
-    @discord.ui.button(label="魔法試煉", style=discord.ButtonStyle.danger, emoji="🪄", row=0)
-    async def magic_trial(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(VoidRitualModal(interaction.user))
+    @discord.ui.button(label="打氣球", style=discord.ButtonStyle.danger, emoji="🎈", row=0)
+    async def balloon_pump(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(BalloonPumpModal(interaction.user))
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
@@ -1715,8 +1715,8 @@ def build_game_help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="🪄 魔法試煉：虛空獻祭",
-        value="普通詠唱 1d100：41-80 得 1.5 倍，81-99 得 2.5 倍，100 得 5 倍與稱號，其餘失敗；禁忌過載 1d100：61-90 得 4 倍，91-100 得 10 倍公告，1-60 會倒扣300% 並暫時禁言。",
+        name="🎈 打氣球挑戰",
+        value="下注後用「打氣」按鈕讓 Pillow 產生的頭像氣球越變越大；每次打氣都有遞增爆炸機率，可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 100 倍獎金。",
         inline=False,
     )
     embed.add_field(
