@@ -20,6 +20,7 @@ from dcrbot.pirate_game import PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
+from dcrbot.turing_machine import TuringMachineBetModal
 from dcrbot.valorant import ValorantSkillSelectView
 from dcrbot.storage import load_data, open_account, save_data
 
@@ -1624,16 +1625,9 @@ class GameMenu(View):
     async def coin_flip_challenge(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(CoinFlipChallengeModal(interaction.user, build_game_menu))
 
-    @discord.ui.button(label="料理競賽", style=discord.ButtonStyle.primary, emoji="🍳", row=2)
-    async def cooking_battle(self, interaction: discord.Interaction, button: Button):
-        await self.start_game(
-            interaction,
-            game_name="料理競賽",
-            reward_mult_range=(1.05, 1.55),
-            penalty_chance=0.16,
-            penalty_mult_range=(0.15, 0.55),
-            crit_chance=0.1,
-        )
+    @discord.ui.button(label="數字搜尋者", style=discord.ButtonStyle.primary, emoji="🔢", row=2)
+    async def turing_machine(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(TuringMachineBetModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
@@ -1717,6 +1711,11 @@ def build_game_help_embed() -> discord.Embed:
     embed.add_field(
         name="🎈 打氣球挑戰",
         value="下注後用「打氣」按鈕讓 Pillow 產生的頭像越變越大；爆炸機率從 15% 慢慢增加到 33%，爆炸會追加從 0 倍指數上升到 10 倍的醫藥費；可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 500 倍獎金。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🔢 數字搜尋者（圖靈機）",
+        value="下注後啟動 1~5 的三位秘密密碼。每回合輸入測試密碼並選 1~3 個驗證器，Pillow 會畫出復古穿孔卡片儀表板記錄 ✔/❌ 歷史；用越少提問猜中，獎金倍率越高。",
         inline=False,
     )
     embed.add_field(
