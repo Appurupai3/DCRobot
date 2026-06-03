@@ -13,7 +13,7 @@ from dcrbot.storage import load_data, open_account, save_data
 
 COIN_FACE_LABELS = {"H": "正面", "T": "反面"}
 COIN_FACE_EMOJIS = {"H": "🪙", "T": "🌙"}
-COIN_WIN_MULTIPLIER = 2
+COIN_WIN_MULTIPLIER = 3
 SEQUENCE_LENGTH = 3
 AI_FIRST_CHANCE = 0.75
 
@@ -59,7 +59,7 @@ class CoinFlipChallengeModal(Modal):
         super().__init__(title="🪙 拋硬幣挑戰 - 下注")
         self.user = user
         self.menu_builder = menu_builder
-        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，猜中 3 連硬幣先出現可拿 2 倍", required=True)
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，猜中 3 連硬幣先出現可拿 3 倍", required=True)
         self.add_item(self.bet_amount)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -135,7 +135,7 @@ class CoinFlipChallengeView(View):
     def build_embed(self, status_text: str) -> discord.Embed:
         embed = discord.Embed(title="🪙 拋硬幣挑戰", description=status_text, color=discord.Color.gold())
         embed.add_field(name="下注", value=f"${self.bet_amount}", inline=True)
-        embed.add_field(name="先選方", value="AI（75%）" if self.ai_first else "玩家（25%）", inline=True)
+        embed.add_field(name="先選方", value="AI" if self.ai_first else "玩家", inline=True)
         embed.add_field(name="玩家組合", value=format_coin_sequence(self.player_sequence), inline=False)
         ai_value = format_coin_sequence(self.ai_sequence) if self.ai_sequence else "等待玩家選完後由 AI 反制"
         embed.add_field(name="AI 組合", value=ai_value, inline=False)
@@ -147,7 +147,7 @@ class CoinFlipChallengeView(View):
             embed.add_field(name=f"投擲紀錄（共 {len(self.tosses)} 次）", value=toss_text, inline=False)
 
         embed.add_field(name="規則", value=self.current_status(), inline=False)
-        embed.set_footer(text="哪個 3 連組合先在連續投擲中出現，該方獲勝；玩家勝利可拿回 2 倍下注。")
+        embed.set_footer(text="哪個 3 連組合先在連續投擲中出現，該方獲勝；玩家勝利可拿回 3 倍下注。")
         return embed
 
     async def resolve_game(self, interaction: discord.Interaction) -> None:
