@@ -17,6 +17,114 @@ from dcrbot.storage import load_data, open_account, save_data
 BALLOON_MULTIPLIERS = [1.2, 1.5, 2, 3, 5, 8, 12, 20, 35, 60, 100]
 BALLOON_BURST_CHANCE = 0.20
 
+CJK_FONT_IDS: set[int] = set()
+CJK_FONT_PATHS = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "C:/Windows/Fonts/msjh.ttc",
+    "C:/Windows/Fonts/mingliu.ttc",
+)
+
+
+def load_display_font(size: int) -> ImageFont.ImageFont:
+    for font_path in CJK_FONT_PATHS:
+        try:
+            font = ImageFont.truetype(font_path, size)
+            CJK_FONT_IDS.add(id(font))
+            return font
+        except OSError:
+            continue
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", size)
+    except OSError:
+        font = ImageFont.load_default()
+    return font
+
+
+def text_supported(font: ImageFont.ImageFont, text: str) -> bool:
+    if any(ord(char) > 127 for char in text) and id(font) not in CJK_FONT_IDS:
+        return False
+    try:
+        return all(font.getmask(char).getbbox() is not None for char in text if not char.isspace())
+    except UnicodeEncodeError:
+        return False
+
+
+def draw_centered_text(
+    draw: ImageDraw.ImageDraw,
+    center: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    x = center[0] - (bbox[2] - bbox[0]) // 2
+    y = center[1] - (bbox[3] - bbox[1]) // 2
+    draw.text((x, y), text, fill=fill, font=font)
+
+
+async def fetch_avatar_image(user: discord.User, size: int) -> Image.Image:
+    try:
+        avatar_bytes = await user.display_avatar.replace(size=256, static_format="png").read()
+        return Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((size, size), Image.LANCZOS)
+    except (discord.HTTPException, OSError):
+        avatar = Image.new("RGBA", (size, size), (255, 210, 120, 255))
+        avatar_draw = ImageDraw.Draw(avatar)
+        avatar_draw.ellipse((0, 0, size - 1, size - 1), fill=(255, 210, 120, 255), outline=(180, 90, 30, 255), width=6)
+        draw_centered_text(
+            avatar_draw,
+            (size // 2, size // 2),
+            "DC",
+            font=load_display_font(max(18, size // 5)),
+            fill=(110, 55, 20, 255),
+        )
+        return avatar
+
+
+def paste_avatar_shards(background: Image.Image, avatar: Image.Image, center: tuple[int, int], seed: int) -> None:
+    rng = random.Random(seed)
+    shard_count = 16
+    size = avatar.size[0]
+    local_center = (size // 2, size // 2)
+
+    for index in range(shard_count):
+        start_angle = index * 360 / shard_count + rng.uniform(-8, 8)
+        end_angle = (index + 1) * 360 / shard_count + rng.uniform(-8, 8)
+        mid_angle = math.radians((start_angle + end_angle) / 2)
+        radius = size * 0.62
+        p1 = (
+            local_center[0] + radius * math.cos(math.radians(start_angle)),
+            local_center[1] + radius * math.sin(math.radians(start_angle)),
+        )
+        p2 = (
+            local_center[0] + radius * math.cos(math.radians(end_angle)),
+            local_center[1] + radius * math.sin(math.radians(end_angle)),
+        )
+        mask = Image.new("L", avatar.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.polygon([local_center, p1, p2], fill=255)
+        bbox = mask.getbbox()
+        if bbox is None:
+            continue
+
+        shard = Image.new("RGBA", (bbox[2] - bbox[0], bbox[3] - bbox[1]), (0, 0, 0, 0))
+        shard.paste(avatar.crop(bbox), (0, 0), mask.crop(bbox))
+        shard = shard.rotate(rng.uniform(-34, 34), expand=True, resample=Image.BICUBIC)
+
+        distance = rng.randint(48, 122)
+        dx = int(math.cos(mid_angle) * distance)
+        dy = int(math.sin(mid_angle) * distance)
+        target = (center[0] + dx - shard.size[0] // 2, center[1] + dy - shard.size[1] // 2)
+        background.alpha_composite(shard, target)
+
+
 
 class BalloonPumpModal(Modal):
     def __init__(self, user: discord.User):
@@ -202,25 +310,45 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
     canvas_size = (640, 420)
     background = Image.new("RGBA", canvas_size, (255, 247, 230, 255))
     draw = ImageDraw.Draw(background)
+    title_font = load_display_font(20)
+    counter_font = load_display_font(22)
+    boom_font = load_display_font(40)
 
     for y in range(0, canvas_size[1], 12):
         shade = 247 + (y % 48)
         draw.line([(0, y), (canvas_size[0], y)], fill=(255, min(shade, 255), 230, 255), width=6)
 
     draw.rounded_rectangle((28, 28, 612, 392), radius=28, outline=(241, 136, 55, 255), width=5, fill=(255, 250, 238, 210))
-    draw.text((46, 42), "Pump the Avatar Balloon!", fill=(180, 74, 28, 255))
+    draw.text((46, 42), "Pump the Avatar Balloon!", fill=(180, 74, 28, 255), font=title_font)
 
     if burst:
-        center = (320, 220)
-        points = []
-        for index in range(28):
-            angle = index * 360 / 28
-            radius = 48 if index % 2 else 178
-            x = center[0] + radius * math.cos(math.radians(angle))
-            y = center[1] + radius * math.sin(math.radians(angle))
-            points.append((x, y))
-        draw.polygon(points, fill=(255, 87, 87, 255), outline=(140, 20, 20, 255))
-        draw.text((250, 195), "BOOM!", fill=(255, 255, 255, 255), font=ImageFont.load_default())
+        center = (320, 214)
+        rng = random.Random(2024 + pumps)
+        avatar = await fetch_avatar_image(user, 188)
+        paste_avatar_shards(background, avatar, center, 9000 + pumps)
+
+        for index in range(18):
+            angle = math.radians(index * 360 / 18 + rng.uniform(-7, 7))
+            inner = rng.randint(24, 58)
+            outer = rng.randint(110, 178)
+            start = (center[0] + int(math.cos(angle) * inner), center[1] + int(math.sin(angle) * inner))
+            end = (center[0] + int(math.cos(angle) * outer), center[1] + int(math.sin(angle) * outer))
+            draw.line([start, end], fill=(125, 15, 20, 230), width=rng.randint(2, 5))
+
+        for _ in range(26):
+            angle = math.radians(rng.uniform(0, 360))
+            distance = rng.randint(72, 174)
+            shard_center = (center[0] + int(math.cos(angle) * distance), center[1] + int(math.sin(angle) * distance))
+            shard_radius = rng.randint(14, 32)
+            points = []
+            for vertex in range(rng.randint(3, 5)):
+                vertex_angle = angle + math.radians(vertex * 360 / 4 + rng.uniform(-22, 22))
+                radius = shard_radius * rng.uniform(0.55, 1.15)
+                points.append((shard_center[0] + radius * math.cos(vertex_angle), shard_center[1] + radius * math.sin(vertex_angle)))
+            draw.polygon(points, fill=(255, rng.randint(70, 125), rng.randint(80, 125), 220), outline=(150, 20, 28, 240))
+
+        draw.ellipse((274, 168, 366, 260), outline=(110, 20, 24, 180), width=4)
+        draw_centered_text(draw, (320, 210), "BOOM!", font=boom_font, fill=(255, 255, 255, 255))
     else:
         size = min(92 + pumps * 20, 312)
         left = (canvas_size[0] - size) // 2
@@ -242,21 +370,17 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
         ]
         draw.line(string_points, fill=(125, 84, 55, 255), width=3)
 
-        try:
-            avatar_bytes = await user.display_avatar.replace(size=256, static_format="png").read()
-            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((size, size), Image.LANCZOS)
-        except (discord.HTTPException, OSError):
-            avatar = Image.new("RGBA", (size, size), (255, 210, 120, 255))
-            avatar_draw = ImageDraw.Draw(avatar)
-            avatar_draw.ellipse((0, 0, size - 1, size - 1), fill=(255, 210, 120, 255), outline=(180, 90, 30, 255), width=6)
-            avatar_draw.text((size * 0.32, size * 0.42), "DC", fill=(110, 55, 20, 255), font=ImageFont.load_default())
+        avatar = await fetch_avatar_image(user, size)
         mask = Image.new("L", (size, size), 0)
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.ellipse((0, 0, size - 1, size - 1), fill=255)
         background.paste(avatar, (left, top), mask)
 
+    counter_text = f"打氣次數：{pumps}/11"
+    if not text_supported(counter_font, counter_text):
+        counter_text = f"Pumps: {pumps}/11"
     draw.rounded_rectangle((224, 358, 416, 386), radius=14, fill=(255, 226, 160, 255), outline=(190, 119, 32, 255), width=2)
-    draw.text((250, 366), f"打氣次數：{pumps}/11", fill=(118, 69, 15, 255))
+    draw_centered_text(draw, (320, 372), counter_text, font=counter_font, fill=(118, 69, 15, 255))
 
     output = io.BytesIO()
     background.convert("RGB").save(output, format="PNG")
