@@ -1610,7 +1610,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="打氣球", style=discord.ButtonStyle.danger, emoji="🎈", row=0)
     async def balloon_pump(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(BalloonPumpModal(interaction.user))
+        await interaction.response.send_modal(BalloonPumpModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):

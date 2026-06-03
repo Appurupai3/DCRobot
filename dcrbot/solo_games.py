@@ -149,9 +149,10 @@ def paste_avatar_shards(background: Image.Image, avatar: Image.Image, center: tu
 
 
 class BalloonPumpModal(Modal):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder=None):
         super().__init__(title="🎈 打氣球挑戰 - 下注")
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，最多打氣 11 次可贏 500 倍", required=True)
         self.add_item(self.bet_amount)
 
@@ -181,21 +182,23 @@ class BalloonPumpModal(Modal):
         users[uid]["wallet"] -= amount
         save_data(users)
 
-        view = BalloonPumpView(interaction.user, amount)
+        view = BalloonPumpView(interaction.user, amount, self.menu_builder)
         embed, file = await view.build_message("按下「打氣」讓頭像越變越大；覺得危險就按「結束打氣」領獎！")
         await interaction.response.send_message(embed=embed, file=file, view=view)
         view.message = await interaction.original_response()
 
 
 class BalloonPumpView(View):
-    def __init__(self, user: discord.User, bet_amount: int):
+    def __init__(self, user: discord.User, bet_amount: int, menu_builder=None):
         super().__init__(timeout=180)
         self.user = user
         self.bet_amount = bet_amount
+        self.menu_builder = menu_builder
         self.pumps = 0
         self.ended = False
         self.burst = False
         self.message: discord.Message | None = None
+        self.set_post_game_buttons(enabled=False)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user.id:
@@ -217,9 +220,15 @@ class BalloonPumpView(View):
         fee_index = min(self.pumps, len(BALLOON_MEDICAL_FEE_MULTIPLIERS) - 1)
         return BALLOON_MEDICAL_FEE_MULTIPLIERS[fee_index]
 
-    def disable_all_buttons(self) -> None:
+    def set_post_game_buttons(self, *, enabled: bool) -> None:
         for child in self.children:
-            child.disabled = True
+            if child.label in {"打氣", "結束打氣"}:
+                child.disabled = enabled
+            elif child.label in {"再玩一次", "返回遊戲畫面"}:
+                child.disabled = not enabled
+
+    def show_post_game_buttons(self) -> None:
+        self.set_post_game_buttons(enabled=True)
 
     async def build_message(self, status: str, *, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
         multiplier = 0 if self.burst else self.current_multiplier()
@@ -259,10 +268,9 @@ class BalloonPumpView(View):
         balance = users[uid]["wallet"]
 
         self.ended = True
-        self.disable_all_buttons()
+        self.show_post_game_buttons()
         embed, file = await self.build_message(f"{status}\n目前錢包餘額：${balance}", color=color)
         await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
-        self.stop()
 
     @discord.ui.button(label="打氣", style=discord.ButtonStyle.danger, emoji="🎈")
     async def pump(self, interaction: discord.Interaction, button: Button):
@@ -278,7 +286,7 @@ class BalloonPumpView(View):
         if random.random() < (self.next_burst_chance() or 0):
             self.ended = True
             self.burst = True
-            self.disable_all_buttons()
+            self.show_post_game_buttons()
             embed, file = await self.build_message(
                 f"💥 頭像炸裂！第 {self.pumps + 1} 次打氣失敗，失去下注金 ${self.bet_amount}，並追加醫藥費。",
                 color=discord.Color.dark_red(),
@@ -292,7 +300,6 @@ class BalloonPumpView(View):
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
-            self.stop()
             return
 
         self.pumps += 1
@@ -321,6 +328,49 @@ class BalloonPumpView(View):
             discord.Color.green(),
         )
 
+    @discord.ui.button(label="再玩一次", style=discord.ButtonStyle.primary, emoji="🔁", row=1)
+    async def replay(self, interaction: discord.Interaction, button: Button):
+        if not self.ended:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再玩一次。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+        if users[uid]["wallet"] < self.bet_amount:
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再玩一次。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= self.bet_amount
+        save_data(users)
+
+        new_view = BalloonPumpView(self.user, self.bet_amount, self.menu_builder)
+        embed, file = await new_view.build_message(
+            f"🔁 使用相同下注 ${self.bet_amount} 再玩一次！按下「打氣」讓頭像越變越大。",
+            color=discord.Color.red(),
+        )
+        await interaction.response.edit_message(embed=embed, attachments=[file], view=new_view)
+        new_view.message = interaction.message
+        self.stop()
+
+    @discord.ui.button(label="返回遊戲畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
+    async def return_to_game_menu(self, interaction: discord.Interaction, button: Button):
+        if not self.ended:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回遊戲畫面。", ephemeral=True)
+            return
+
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回遊戲畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(self.user)
+        await interaction.response.edit_message(
+            embed=menu_payload.get("embed"),
+            attachments=[],
+            view=menu_payload.get("view"),
+        )
+        self.stop()
+
     async def on_timeout(self) -> None:
         if self.ended:
             return
@@ -333,7 +383,7 @@ class BalloonPumpView(View):
         balance = users[uid]["wallet"]
 
         self.ended = True
-        self.disable_all_buttons()
+        self.show_post_game_buttons()
         if self.message is not None:
             embed, file = await self.build_message(
                 f"⌛ 打氣球挑戰逾時，自動結束打氣並領回 ${payout}。\n目前錢包餘額：${balance}",
