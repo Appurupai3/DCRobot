@@ -4018,4 +4018,4 @@ async def birthfire_prefix(ctx, *, name: str = None):
 if token:
     bot.run(token)
 else:
-    print("錯誤：請檢查 .env 檔案")
+    print("請先前往.env輸入你的DCToken")
