@@ -15,7 +15,7 @@ from dcrbot.storage import load_data, open_account, save_data
 
 
 BALLOON_MULTIPLIERS = [1.2, 1.5, 2, 3, 5, 8, 12, 20, 35, 60, 100]
-BALLOON_BURST_CHANCES = [0.04, 0.06, 0.08, 0.11, 0.14, 0.17, 0.20, 0.23, 0.26, 0.30, 0.35]
+BALLOON_BURST_CHANCE = 0.20
 
 
 class BalloonPumpModal(Modal):
@@ -84,7 +84,7 @@ class BalloonPumpView(View):
 
     async def build_message(self, status: str, *, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
         multiplier = 0 if self.burst else self.current_multiplier()
-        next_chance = None if self.burst or self.pumps >= len(BALLOON_BURST_CHANCES) else BALLOON_BURST_CHANCES[self.pumps]
+        next_chance = None if self.burst or self.pumps >= len(BALLOON_MULTIPLIERS) else BALLOON_BURST_CHANCE
         next_reward = None if self.burst or self.pumps >= len(BALLOON_MULTIPLIERS) else BALLOON_MULTIPLIERS[self.pumps]
 
         embed = discord.Embed(
@@ -98,7 +98,7 @@ class BalloonPumpView(View):
         if next_chance is not None and next_reward is not None:
             embed.add_field(
                 name="下一次打氣",
-                value=f"爆炸機率 {next_chance * 100:.0f}%｜成功升到 {next_reward:g} 倍",
+                value=f"固定爆炸機率 {next_chance * 100:.0f}%｜成功升到 {next_reward:g} 倍",
                 inline=False,
             )
         elif self.burst:
@@ -136,8 +136,7 @@ class BalloonPumpView(View):
             await self.settle(interaction, f"🏆 已達打氣上限，獲得 100 倍獎金 ${payout}！", payout, discord.Color.gold())
             return
 
-        burst_chance = BALLOON_BURST_CHANCES[self.pumps]
-        if random.random() < burst_chance:
+        if random.random() < BALLOON_BURST_CHANCE:
             self.ended = True
             self.burst = True
             self.disable_all_buttons()
@@ -234,7 +233,14 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
             fill=(210, 56, 56, 255),
             outline=(150, 30, 30, 255),
         )
-        draw.line([(320, top + size + 35), (320, 366)], fill=(125, 84, 55, 255), width=3)
+        string_start = (320, top + size + 35)
+        string_points = [
+            string_start,
+            (string_start[0] + 24, string_start[1] + 42),
+            (string_start[0] + 12, string_start[1] + 84),
+            (string_start[0] + 36, 366),
+        ]
+        draw.line(string_points, fill=(125, 84, 55, 255), width=3)
 
         try:
             avatar_bytes = await user.display_avatar.replace(size=256, static_format="png").read()
