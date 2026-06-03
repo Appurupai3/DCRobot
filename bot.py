@@ -17,9 +17,22 @@ import math
 
 from dotenv import load_dotenv
 
-from dcrbot.storage import heist_blacklist, load_data, open_account, save_data
+from dcrbot.storage import ensure_bank_data_file, heist_blacklist, load_data, open_account, save_data
+
+
+def ensure_env_file() -> None:
+    """Create a local .env template on first startup if it is missing."""
+
+    if os.path.exists(".env"):
+        return
+
+    with open(".env", "w", encoding="utf-8") as f:
+        f.write("# Add your Discord bot token here\nDISCORD_TOKEN=\n")
+
 
 # --- 初始化 ---
+ensure_env_file()
+ensure_bank_data_file()
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 
