@@ -15,7 +15,7 @@ from dcrbot.battle import (
     prepare_battle_lobby,
 )
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
-from dcrbot.data_heist import DataHeistModal
+from dcrbot.data_heist import CoinFlipChallengeModal
 from dcrbot.pirate_game import PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
@@ -1620,9 +1620,9 @@ class GameMenu(View):
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PuzzleBetModal(interaction.user))
 
-    @discord.ui.button(label="賽博駭客", style=discord.ButtonStyle.danger, emoji="💻", row=1)
-    async def cyber_hack(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(DataHeistModal(interaction.user))
+    @discord.ui.button(label="拋硬幣挑戰", style=discord.ButtonStyle.danger, emoji="🪙", row=1)
+    async def coin_flip_challenge(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(CoinFlipChallengeModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="料理競賽", style=discord.ButtonStyle.primary, emoji="🍳", row=2)
     async def cooking_battle(self, interaction: discord.Interaction, button: Button):
@@ -1725,8 +1725,8 @@ def build_game_help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="🛰️ 資料神經駭入",
-        value="每回合 1d10 決定臨時積分與警報值，警報 <30% 安全，30-99% 可隨時斷線帶走積分，>=100% 積分歸零並進入冷卻；高風險時可用一次幽靈協議 1d6 嘗試翻盤。",
+        name="🪙 拋硬幣挑戰",
+        value="下注後選 3 個正反面組合。75% 機率 AI 先隨機選組合，25% 機率玩家先選；玩家先選時 AI 會把玩家第 2 枚反轉放第 1 枚，再接玩家第 1、2 枚。系統會連續投硬幣，誰的 3 連組合先出現誰獲勝。",
         inline=False,
     )
     embed.set_footer(text="所有遊戲需先輸入下注金額，請確認錢包餘額充足！")
