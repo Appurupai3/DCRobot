@@ -179,6 +179,51 @@ def build_color_clues(code: tuple[int, int, int], colors: tuple[str, str, str]) 
     ]
 
 
+class PendingClueChoiceView(View):
+    def __init__(self, parent: "NumberSearcherView", choices: list[Clue], cost: int):
+        super().__init__(timeout=60)
+        self.parent = parent
+        self.choices = choices
+        self.cost = cost
+        for index, clue in enumerate(choices, start=1):
+            button = Button(
+                label=f"{index}. {clue.title}",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"number_searcher_clue_{index}",
+            )
+
+            async def callback(interaction: discord.Interaction, selected=clue):
+                await self.choose_clue(interaction, selected)
+
+            button.callback = callback
+            self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.user.id:
+            await interaction.response.send_message("❌ 這不是你的線索選擇。", ephemeral=True)
+            return False
+        return True
+
+    async def choose_clue(self, interaction: discord.Interaction, clue: Clue) -> None:
+        if self.parent.ended:
+            await interaction.response.edit_message(content="✅ 本局已結束，線索選擇失效。", embed=None, view=None)
+            return
+
+        self.parent.history.append(f"💡 ${self.cost}｜【{clue.title}】{clue.text}")
+        embed, file = self.parent.build_embed_and_file(f"公開線索：【{clue.title}】{clue.text}")
+        if self.parent.message is not None:
+            await self.parent.message.edit(embed=embed, attachments=[file], view=self.parent)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。",
+            embed=None,
+            view=self,
+        )
+        self.stop()
+
+
 class NumberSearcherGuessModal(Modal):
     def __init__(self, view: "NumberSearcherView"):
         super().__init__(title="🔢 猜測三位數字")
@@ -270,10 +315,21 @@ class NumberSearcherView(View):
             mixed_pool = build_number_clues(self.secret) + build_color_clues(self.secret, self.colors)
             sampled = random.sample(mixed_pool, 2)
 
-        chosen = random.choice(sampled)
-        sampled_titles = " / ".join(clue.title for clue in sampled)
-        self.history.append(f"💡 ${cost}｜抽到：{sampled_titles}｜公開【{chosen.title}】{chosen.text}")
-        await self.refresh(interaction, f"購買線索成功：公開【{chosen.title}】{chosen.text}")
+        choice_embed = discord.Embed(
+            title="🧠 選擇要公開的線索",
+            description=(
+                f"已支付 ${cost}，請從以下 {len(sampled)} 個候選線索中選擇 1 個公開。\n"
+                "只有你看得到候選清單；遊戲紀錄只會寫入你最後選擇的效果。"
+            ),
+            color=discord.Color.blurple(),
+        )
+        for index, clue in enumerate(sampled, start=1):
+            choice_embed.add_field(name=f"{index}. {clue.title}", value=clue.text, inline=False)
+        await interaction.response.send_message(
+            embed=choice_embed,
+            view=PendingClueChoiceView(self, sampled, cost),
+            ephemeral=True,
+        )
 
     async def handle_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
         if self.ended:
