@@ -14,8 +14,9 @@ from PIL import Image, ImageDraw, ImageFont
 from dcrbot.storage import load_data, open_account, save_data
 
 
-BALLOON_MULTIPLIERS = [1.2, 1.5, 2, 3, 5, 8, 12, 20, 35, 60, 100]
-BALLOON_BURST_CHANCE = 0.20
+BALLOON_MULTIPLIERS = [1.1, 1.3, 1.8, 2.5, 4, 7, 12, 25, 60, 150, 500]
+BALLOON_BURST_CHANCES = [0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.31, 0.32, 0.33]
+BALLOON_MEDICAL_FEE_MULTIPLIERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 CJK_FONT_IDS: set[int] = set()
 CJK_FONT_PATHS = (
@@ -130,7 +131,7 @@ class BalloonPumpModal(Modal):
     def __init__(self, user: discord.User):
         super().__init__(title="🎈 打氣球挑戰 - 下注")
         self.user = user
-        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，最多打氣 11 次可贏 100 倍", required=True)
+        self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，最多打氣 11 次可贏 500 倍", required=True)
         self.add_item(self.bet_amount)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -160,7 +161,7 @@ class BalloonPumpModal(Modal):
         save_data(users)
 
         view = BalloonPumpView(interaction.user, amount)
-        embed, file = await view.build_message("按下「打氣」讓頭像氣球變大；覺得危險就按「結束打氣」領獎！")
+        embed, file = await view.build_message("按下「打氣」讓頭像越變越大；覺得危險就按「結束打氣」領獎！")
         await interaction.response.send_message(embed=embed, file=file, view=view, ephemeral=True)
         view.message = await interaction.original_response()
 
@@ -177,7 +178,7 @@ class BalloonPumpView(View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user.id:
-            await interaction.response.send_message("❌ 這不是你的頭像氣球！請自行開啟遊戲。", ephemeral=True)
+            await interaction.response.send_message("❌ 這不是你的打氣挑戰！請自行開啟遊戲。", ephemeral=True)
             return False
         return True
 
@@ -186,13 +187,22 @@ class BalloonPumpView(View):
             return 1.0
         return BALLOON_MULTIPLIERS[self.pumps - 1]
 
+    def next_burst_chance(self) -> float | None:
+        if self.pumps >= len(BALLOON_BURST_CHANCES):
+            return None
+        return BALLOON_BURST_CHANCES[self.pumps]
+
+    def current_medical_fee_multiplier(self) -> int:
+        fee_index = min(self.pumps, len(BALLOON_MEDICAL_FEE_MULTIPLIERS) - 1)
+        return BALLOON_MEDICAL_FEE_MULTIPLIERS[fee_index]
+
     def disable_all_buttons(self) -> None:
         for child in self.children:
             child.disabled = True
 
     async def build_message(self, status: str, *, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
         multiplier = 0 if self.burst else self.current_multiplier()
-        next_chance = None if self.burst or self.pumps >= len(BALLOON_MULTIPLIERS) else BALLOON_BURST_CHANCE
+        next_chance = None if self.burst else self.next_burst_chance()
         next_reward = None if self.burst or self.pumps >= len(BALLOON_MULTIPLIERS) else BALLOON_MULTIPLIERS[self.pumps]
 
         embed = discord.Embed(
@@ -206,14 +216,14 @@ class BalloonPumpView(View):
         if next_chance is not None and next_reward is not None:
             embed.add_field(
                 name="下一次打氣",
-                value=f"固定爆炸機率 {next_chance * 100:.0f}%｜成功升到 {next_reward:g} 倍",
+                value=f"爆炸機率 {next_chance * 100:.0f}%｜成功升到 {next_reward:g} 倍｜若爆炸醫藥費 {self.current_medical_fee_multiplier():g} 倍",
                 inline=False,
             )
         elif self.burst:
-            embed.add_field(name="結算", value="氣球已爆炸，本局無法領獎。", inline=False)
+            embed.add_field(name="結算", value="頭像已炸裂，本局無法領獎。", inline=False)
         else:
-            embed.add_field(name="最高獎金", value="已達 100 倍！系統會自動結算。", inline=False)
-        embed.set_footer(text="氣球爆炸會失去下注金；最多打氣 11 次，成功可拿 100 倍獎金。")
+            embed.add_field(name="最高獎金", value="已達 500 倍！系統會自動結算。", inline=False)
+        embed.set_footer(text="爆炸會失去下注金並扣醫藥費；最多打氣 11 次，成功可拿 500 倍獎金。")
         embed.set_image(url="attachment://balloon.png")
 
         image_bytes = await render_balloon_avatar(self.user, self.pumps, burst=self.burst)
@@ -241,19 +251,24 @@ class BalloonPumpView(View):
 
         if self.pumps >= 11:
             payout = int(self.bet_amount * BALLOON_MULTIPLIERS[-1])
-            await self.settle(interaction, f"🏆 已達打氣上限，獲得 100 倍獎金 ${payout}！", payout, discord.Color.gold())
+            await self.settle(interaction, f"🏆 已達打氣上限，獲得 500 倍獎金 ${payout}！", payout, discord.Color.gold())
             return
 
-        if random.random() < BALLOON_BURST_CHANCE:
+        if random.random() < (self.next_burst_chance() or 0):
             self.ended = True
             self.burst = True
             self.disable_all_buttons()
             embed, file = await self.build_message(
-                f"💥 氣球炸掉了！第 {self.pumps + 1} 次打氣失敗，失去下注金 ${self.bet_amount}。",
+                f"💥 頭像炸裂！第 {self.pumps + 1} 次打氣失敗，失去下注金 ${self.bet_amount}，並追加醫藥費。",
                 color=discord.Color.dark_red(),
             )
+            medical_fee_multiplier = self.current_medical_fee_multiplier()
+            medical_fee = int(self.bet_amount * medical_fee_multiplier)
             users = load_data()
+            users[str(self.user.id)]["wallet"] -= medical_fee
+            save_data(users)
             balance = users[str(self.user.id)]["wallet"]
+            embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
             self.stop()
@@ -262,11 +277,11 @@ class BalloonPumpView(View):
         self.pumps += 1
         if self.pumps >= 11:
             payout = int(self.bet_amount * BALLOON_MULTIPLIERS[-1])
-            await self.settle(interaction, f"🏆 完成 11 次打氣！頭像氣球撐住了，獲得 100 倍獎金 ${payout}！", payout, discord.Color.gold())
+            await self.settle(interaction, f"🏆 完成 11 次打氣！頭像撐住了，獲得 500 倍獎金 ${payout}！", payout, discord.Color.gold())
             return
 
         embed, file = await self.build_message(
-            f"✅ 打氣成功！頭像氣球變更大了，現在可按「結束打氣」領 {self.current_multiplier():g} 倍。",
+            f"✅ 打氣成功！頭像變更大了，現在可按「結束打氣」領 {self.current_multiplier():g} 倍。",
             color=discord.Color.orange(),
         )
         await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
@@ -333,35 +348,18 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
             outer = rng.randint(110, 178)
             start = (center[0] + int(math.cos(angle) * inner), center[1] + int(math.sin(angle) * inner))
             end = (center[0] + int(math.cos(angle) * outer), center[1] + int(math.sin(angle) * outer))
-            draw.line([start, end], fill=(125, 15, 20, 230), width=rng.randint(2, 5))
+            draw.line([start, end], fill=(85, 85, 85, 210), width=rng.randint(2, 4))
 
-        for _ in range(26):
-            angle = math.radians(rng.uniform(0, 360))
-            distance = rng.randint(72, 174)
-            shard_center = (center[0] + int(math.cos(angle) * distance), center[1] + int(math.sin(angle) * distance))
-            shard_radius = rng.randint(14, 32)
-            points = []
-            for vertex in range(rng.randint(3, 5)):
-                vertex_angle = angle + math.radians(vertex * 360 / 4 + rng.uniform(-22, 22))
-                radius = shard_radius * rng.uniform(0.55, 1.15)
-                points.append((shard_center[0] + radius * math.cos(vertex_angle), shard_center[1] + radius * math.sin(vertex_angle)))
-            draw.polygon(points, fill=(255, rng.randint(70, 125), rng.randint(80, 125), 220), outline=(150, 20, 28, 240))
-
-        draw.ellipse((274, 168, 366, 260), outline=(110, 20, 24, 180), width=4)
-        draw_centered_text(draw, (320, 210), "BOOM!", font=boom_font, fill=(255, 255, 255, 255))
+        draw.ellipse((274, 168, 366, 260), outline=(80, 80, 80, 160), width=4)
+        draw_centered_text(draw, (320, 210), "BOOM!", font=boom_font, fill=(80, 80, 80, 255))
     else:
         size = min(92 + pumps * 20, 312)
         left = (canvas_size[0] - size) // 2
         top = 78 + max(0, 11 - pumps) * 4
-        balloon_box = (left - 12, top - 12, left + size + 12, top + size + 12)
-        draw.ellipse(balloon_box, fill=(255, 100, 100, 255), outline=(183, 36, 36, 255), width=5)
-        draw.ellipse((left + 18, top + 14, left + size // 2, top + size // 2), fill=(255, 180, 180, 95))
-        draw.polygon(
-            [(320, top + size + 7), (305, top + size + 35), (335, top + size + 35)],
-            fill=(210, 56, 56, 255),
-            outline=(150, 30, 30, 255),
-        )
-        string_start = (320, top + size + 35)
+        shadow_box = (left + 9, top + 12, left + size + 9, top + size + 12)
+        draw.ellipse(shadow_box, fill=(120, 90, 70, 55))
+        draw.ellipse((left - 4, top - 4, left + size + 4, top + size + 4), outline=(255, 210, 110, 255), width=5)
+        string_start = (320, top + size + 7)
         string_points = [
             string_start,
             (string_start[0] + 24, string_start[1] + 42),

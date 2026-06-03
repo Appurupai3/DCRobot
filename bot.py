@@ -1716,7 +1716,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🎈 打氣球挑戰",
-        value="下注後用「打氣」按鈕讓 Pillow 產生的頭像氣球越變越大；每次打氣固定 20% 爆炸機率，可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 100 倍獎金。",
+        value="下注後用「打氣」按鈕讓 Pillow 產生的頭像越變越大；爆炸機率從 15% 慢慢增加到 33%，爆炸會追加 0~10 倍醫藥費；可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 500 倍獎金。",
         inline=False,
     )
     embed.add_field(
