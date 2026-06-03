@@ -18,8 +18,8 @@ CODE_LENGTH = 3
 COLORS = ("黃", "綠", "藍")
 COLOR_NAMES = {"黃": "黃色", "綠": "綠色", "藍": "藍色"}
 COLOR_RGB = {"黃": (245, 202, 66), "綠": (72, 196, 116), "藍": (73, 145, 236)}
-GUESS_REWARD = 2000
-RANDOM_CLUE_COST = 200
+GUESS_REWARD = 5000
+RANDOM_CLUE_COST = 300
 MAX_ACTION_COST = 1500
 MAX_CLUE_COST = 750
 
@@ -113,6 +113,9 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
     all_same_parity = "全部同為奇" if all(digit % 2 == 1 for digit in code) else "全部同為偶" if all(digit % 2 == 0 for digit in code) else "奇偶數混雜"
     first_gap = abs(code[0] - code[1])
     second_gap = abs(code[1] - code[2])
+    edge_gap = abs(code[0] - code[2])
+    all_gaps = [first_gap, second_gap, edge_gap]
+    random_gap_pair = random.choice([(0, 1), (1, 2), (0, 2)])
     random_index = random.randrange(CODE_LENGTH)
     two_indexes = sorted(random.sample(range(CODE_LENGTH), 2))
 
@@ -135,7 +138,13 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
         Clue("倍數密碼 B", f"後兩位數字的總和{'可以' if (code[1] + code[2]) % 3 == 0 else '不能'}被 3 整除。"),
         Clue("極值位置 A", f"最大（或並列最大）的數字出現在：{positions_text([i for i, digit in enumerate(code) if digit == max_digit])}。"),
         Clue("極值位置 B", f"最小（或並列最小）的數字出現在：{positions_text([i for i, digit in enumerate(code) if digit == min_digit])}。"),
-        Clue("距離量測", f"第一、二位絕對差 {first_gap} {'大於' if first_gap > second_gap else '小於或等於'} 第二、三位絕對差 {second_gap}。"),
+        Clue("差計算 A", f"第一個與第二個數字的絕對差是 {first_gap}。"),
+        Clue("差計算 B", f"第二個與第三個數字的絕對差是 {second_gap}。"),
+        Clue("差計算 C", f"第一個與第三個數字的絕對差是 {edge_gap}。"),
+        Clue("最大差", f"所有絕對差的最大值是 {max(all_gaps)}。"),
+        Clue("最小差", f"所有絕對差的最小值是 {min(all_gaps)}。"),
+        Clue("差之和", f"所有絕對差的和是 {sum(all_gaps)}。"),
+        Clue("隨機差", f"第 {random_gap_pair[0] + 1} 個與第 {random_gap_pair[1] + 1} 個數字的差為 {abs(code[random_gap_pair[0]] - code[random_gap_pair[1]])}。"),
         Clue("隨機機會", f"密碼包含數字 {code[random_index]}。"),
         Clue("隨機計數器 2A", f"第 {two_indexes[0] + 1} 位與第 {two_indexes[1] + 1} 位的和是 {code[two_indexes[0]] + code[two_indexes[1]]}。"),
     ]
@@ -199,7 +208,13 @@ def clue_choice_text(clue: Clue) -> str:
         "倍數密碼 B": "後兩位數字的總和 [可以被 3 整除 / 不能被 3 整除]。",
         "極值位置 A": "最大（或並列最大）的數字 [出現在第 ? 個的位置]。",
         "極值位置 B": "最小（或並列最小）的數字 [出現在第 ? 個的位置]。",
-        "距離量測": "第一個與第二個數字的絕對差 [大於 / 小於或等於] 第二個與第三個數字的絕對差。",
+        "差計算 A": "第一個與第二個數字的絕對差。",
+        "差計算 B": "第二個與第三個數字的絕對差。",
+        "差計算 C": "第一個與第三個數字的絕對差。",
+        "最大差": "顯示所有的絕對差的最大值。",
+        "最小差": "顯示所有的絕對差的最小值。",
+        "差之和": "顯示所有的絕對差的和。",
+        "隨機差": "隨機顯示一個絕對差 [某數與某數的差為 ?]。",
         "隨機機會": "從 3 個數字隨機爆出一位數字 [密碼包含 ?]。",
         "隨機計數器 2A": "隨機說出 2 位和為多少。",
         "藍色雷達": "顯示所有藍色方塊。",

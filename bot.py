@@ -1718,7 +1718,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🔢 數字搜尋者",
-        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。Pillow 會畫出三個灰色問號方塊；可付費猜數字、購買數字線索、顏色線索或隨機線索，猜對可獲得 $2000。",
+        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。Pillow 會畫出三個灰色問號方塊；可付費猜數字、購買數字線索、顏色線索或隨機線索，猜對可獲得 $5000。",
         inline=False,
     )
     embed.add_field(
