@@ -20,7 +20,7 @@ from dcrbot.pirate_game import PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
-from dcrbot.turing_machine import TuringMachineBetModal
+from dcrbot.turing_machine import NumberSearcherView
 from dcrbot.valorant import ValorantSkillSelectView
 from dcrbot.storage import load_data, open_account, save_data
 
@@ -1626,8 +1626,11 @@ class GameMenu(View):
         await interaction.response.send_modal(CoinFlipChallengeModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="數字搜尋者", style=discord.ButtonStyle.primary, emoji="🔢", row=2)
-    async def turing_machine(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(TuringMachineBetModal(interaction.user, build_game_menu))
+    async def number_searcher(self, interaction: discord.Interaction, button: Button):
+        view = NumberSearcherView(interaction.user)
+        embed, file = view.build_embed_and_file("三個灰色方塊背後藏著隨機三位數字與顏色，購買線索後推理答案！")
+        await interaction.response.send_message(embed=embed, file=file, view=view)
+        view.message = await interaction.original_response()
 
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
@@ -1714,8 +1717,8 @@ def build_game_help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="🔢 數字搜尋者（圖靈機）",
-        value="下注後啟動 1~5 的三位秘密密碼。每回合輸入測試密碼並選 1~3 個驗證器，Pillow 會畫出復古穿孔卡片儀表板記錄 ✔/❌ 歷史；用越少提問猜中，獎金倍率越高。",
+        name="🔢 數字搜尋者",
+        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。Pillow 會畫出三個灰色問號方塊；可付費猜數字、購買數字線索、顏色線索或隨機線索，猜對可獲得 $2000。",
         inline=False,
     )
     embed.add_field(
