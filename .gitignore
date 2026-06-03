@@ -1,0 +1,5 @@
+# Local environment and runtime data
+.env
+bank
+bank/
+bank.json

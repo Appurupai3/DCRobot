@@ -7,23 +7,32 @@ import os
 from typing import Dict, Any
 
 
+BANK_DATA_PATH = "bank.json"
+
+
+def ensure_bank_data_file() -> None:
+    """Create the local bank data file on first startup if it is missing."""
+
+    if os.path.exists(BANK_DATA_PATH):
+        return
+
+    with open(BANK_DATA_PATH, "w", encoding="utf-8") as f:
+        json.dump({}, f, indent=4)
+
+
 def load_data() -> Dict[str, Any]:
-    """Load bank data from disk if present.
+    """Load bank data from disk, creating the file on first startup."""
 
-    Returns an empty dict when the file does not exist to keep callers simple.
-    """
+    ensure_bank_data_file()
 
-    if not os.path.exists("bank.json"):
-        return {}
-
-    with open("bank.json", "r") as f:
+    with open(BANK_DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_data(users: Dict[str, Any]) -> None:
     """Persist bank data to disk with indentation for readability."""
 
-    with open("bank.json", "w") as f:
+    with open(BANK_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(users, f, indent=4)
 
 
