@@ -16,7 +16,7 @@ from dcrbot.storage import load_data, open_account, save_data
 
 BALLOON_MULTIPLIERS = [1.1, 1.3, 1.8, 2.5, 4, 7, 12, 25, 60, 150, 500]
 BALLOON_BURST_CHANCES = [0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.31, 0.32, 0.33]
-BALLOON_MEDICAL_FEE_MULTIPLIERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+BALLOON_MEDICAL_FEE_MULTIPLIERS = [0, 1.1, 1.3, 1.8, 2.5, 3.6, 5, 6.7, 8.2, 9.2, 10]
 
 CJK_FONT_IDS: set[int] = set()
 CJK_FONT_PATHS = (
@@ -69,6 +69,27 @@ def draw_centered_text(
     x = center[0] - (bbox[2] - bbox[0]) // 2
     y = center[1] - (bbox[3] - bbox[1]) // 2
     draw.text((x, y), text, fill=fill, font=font)
+
+
+def draw_3d_text(
+    draw: ImageDraw.ImageDraw,
+    anchor: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    side_fill: tuple[int, int, int, int],
+    stroke_fill: tuple[int, int, int, int],
+    align: str = "left",
+) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=2)
+    x = anchor[0]
+    if align == "right":
+        x -= bbox[2] - bbox[0]
+    y = anchor[1]
+    for offset in range(8, 0, -1):
+        draw.text((x + offset, y + offset), text, fill=side_fill, font=font, stroke_width=2, stroke_fill=stroke_fill)
+    draw.text((x, y), text, fill=fill, font=font, stroke_width=2, stroke_fill=stroke_fill)
 
 
 async def fetch_avatar_image(user: discord.User, size: int) -> Image.Image:
@@ -162,7 +183,7 @@ class BalloonPumpModal(Modal):
 
         view = BalloonPumpView(interaction.user, amount)
         embed, file = await view.build_message("按下「打氣」讓頭像越變越大；覺得危險就按「結束打氣」領獎！")
-        await interaction.response.send_message(embed=embed, file=file, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, file=file, view=view)
         view.message = await interaction.original_response()
 
 
@@ -192,7 +213,7 @@ class BalloonPumpView(View):
             return None
         return BALLOON_BURST_CHANCES[self.pumps]
 
-    def current_medical_fee_multiplier(self) -> int:
+    def current_medical_fee_multiplier(self) -> float:
         fee_index = min(self.pumps, len(BALLOON_MEDICAL_FEE_MULTIPLIERS) - 1)
         return BALLOON_MEDICAL_FEE_MULTIPLIERS[fee_index]
 
@@ -350,16 +371,24 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
             end = (center[0] + int(math.cos(angle) * outer), center[1] + int(math.sin(angle) * outer))
             draw.line([start, end], fill=(85, 85, 85, 210), width=rng.randint(2, 4))
 
-        draw.ellipse((274, 168, 366, 260), outline=(80, 80, 80, 160), width=4)
-        draw_centered_text(draw, (320, 210), "BOOM!", font=boom_font, fill=(80, 80, 80, 255))
+        draw_3d_text(
+            draw,
+            (588, 78),
+            "BOOM!",
+            font=boom_font,
+            fill=(255, 246, 142, 255),
+            side_fill=(92, 92, 92, 235),
+            stroke_fill=(40, 40, 40, 255),
+            align="right",
+        )
     else:
-        size = min(92 + pumps * 20, 312)
+        size = min(132 + pumps * 17, 312)
         left = (canvas_size[0] - size) // 2
         top = 78 + max(0, 11 - pumps) * 4
         shadow_box = (left + 9, top + 12, left + size + 9, top + size + 12)
         draw.ellipse(shadow_box, fill=(120, 90, 70, 55))
         draw.ellipse((left - 4, top - 4, left + size + 4, top + size + 4), outline=(255, 210, 110, 255), width=5)
-        string_start = (320, top + size + 7)
+        string_start = (320, top + size)
         string_points = [
             string_start,
             (string_start[0] + 24, string_start[1] + 42),
