@@ -482,6 +482,61 @@ def _draw_hanging_rope(draw: ImageDraw.ImageDraw, anchor: tuple[int, int], body_
     draw.ellipse((bx - 18, by - 7, bx + 18, by + 14), outline=(177, 125, 68, 255), width=5)
 
 
+def _draw_player_fragments(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    center: tuple[int, int],
+    name: str,
+    avatar: Image.Image | None,
+) -> None:
+    """Draw a cartoony broken-apart player near the shark without showing a full body."""
+    rng = random.Random(f"{name}-pirate-fragments")
+    cx, cy = center
+    source = (avatar.copy() if avatar is not None else _avatar_or_placeholder(name, 84)).convert("RGBA").resize((84, 84), Image.LANCZOS)
+    shard_specs = [
+        ((42, 42), (2, 4), (72, 18), (58, 60), (-72, -18), -24),
+        ((42, 42), (72, 18), (82, 76), (38, 58), (-26, 34), 19),
+        ((42, 42), (38, 58), (82, 76), (10, 82), (36, -2), -13),
+        ((42, 42), (10, 82), (2, 4), (38, 58), (78, 38), 28),
+    ]
+    for _, p1, p2, p3, offset, angle in shard_specs:
+        mask = Image.new("L", source.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.polygon([p1, p2, p3], fill=255)
+        bbox = mask.getbbox()
+        if bbox is None:
+            continue
+        shard = Image.new("RGBA", (bbox[2] - bbox[0], bbox[3] - bbox[1]), (0, 0, 0, 0))
+        shard.paste(source.crop(bbox), (0, 0), mask.crop(bbox))
+        shard = shard.rotate(angle + rng.randint(-8, 8), expand=True, resample=Image.BICUBIC)
+        target = (cx + offset[0] - shard.size[0] // 2, cy + offset[1] - shard.size[1] // 2)
+        image.alpha_composite(shard, target)
+        draw.polygon(
+            [
+                (target[0] + 4, target[1] + shard.size[1] - 8),
+                (target[0] + shard.size[0] // 2, target[1] + shard.size[1] + 8),
+                (target[0] + shard.size[0] - 4, target[1] + shard.size[1] - 8),
+            ],
+            fill=(124, 39, 38, 210),
+        )
+
+    # Scattered coat/boot pieces and splash marks to make the eaten state read as fragments.
+    cloth_colors = [(111, 40, 33, 255), (248, 231, 190, 255), (50, 31, 26, 255)]
+    for idx, (ox, oy) in enumerate([(-112, 44), (-62, 88), (18, 70), (96, 34), (128, -16), (-18, -46)]):
+        color = cloth_colors[idx % len(cloth_colors)]
+        draw.polygon(
+            [
+                (cx + ox, cy + oy),
+                (cx + ox + rng.randint(18, 38), cy + oy + rng.randint(-8, 18)),
+                (cx + ox + rng.randint(2, 26), cy + oy + rng.randint(22, 42)),
+            ],
+            fill=color,
+            outline=(57, 27, 24, 180),
+        )
+    for ox, oy, radius in [(-95, -20, 28), (-35, 18, 40), (46, -24, 32), (112, 18, 24)]:
+        draw.arc((cx + ox - radius, cy + oy - radius // 3, cx + ox + radius, cy + oy + radius // 2), 10, 170, fill=(208, 247, 255, 230), width=5)
+
+
 def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.File:
     width, height = 1100, 650
     image = Image.new("RGBA", (width, height), (20, 38, 65, 255))
@@ -538,12 +593,10 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
 
     stage = len(view.wrong)
     if stage >= view.max_wrong:
-        char_x = 805
-        char_y = 392
-        _draw_hanging_rope(draw, (char_x, 104), (char_x, char_y - 72))
-        _draw_pirate_character(image, draw, char_x, char_y, view.player_name, view.avatar_image, falling=True)
-        for radius in [28, 52, 78]:
-            draw.arc((char_x - radius, 524 - radius // 3, char_x + radius, 524 + radius // 2), 8, 172, fill=(207, 245, 255, 225), width=5)
+        # Once the shark catches the player, hide the rope and show cartoon fragments instead of a whole body.
+        _draw_player_fragments(image, draw, (810, 455), view.player_name, view.avatar_image)
+        for radius in [34, 62, 92]:
+            draw.arc((810 - radius, 522 - radius // 3, 810 + radius, 522 + radius // 2), 8, 172, fill=(207, 245, 255, 225), width=5)
     else:
         progress = stage / view.max_wrong
         char_x = int(310 + progress * 430)
@@ -560,16 +613,15 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     font = load_display_font(26)
     small_font = load_display_font(22)
 
-    _rounded_panel(draw, (38, 492, 540, 632), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((70, 510), "目前題目", font=small_font, fill=(255, 214, 114, 255))
-    _text_center(draw, (290, 564), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
-    draw.text((70, 604), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
+    _rounded_panel(draw, (34, 404, 514, 502), (30, 29, 38, 220), (255, 214, 114, 220))
+    draw.text((62, 420), "目前題目", font=small_font, fill=(255, 214, 114, 255))
+    _text_center(draw, (270, 462), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
 
-    _rounded_panel(draw, (585, 492, 1062, 632), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((615, 510), f"下注 ${view.bet_amount}", font=small_font, fill=(255, 214, 114, 255))
-    draw.text((615, 544), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
-    draw.text((615, 582), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
-    draw.text((615, 612), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
+    _rounded_panel(draw, (34, 512, 514, 632), (30, 29, 38, 220), (255, 214, 114, 220))
+    draw.text((62, 530), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
+    draw.text((62, 568), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
+    draw.text((62, 598), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
+    draw.text((62, 622), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
@@ -587,7 +639,7 @@ def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Em
     title = "🗺️ 單人猜字：海盜寶藏2" if view.visual_mode else "🏴‍☠️ 單人猜字：海盜寶藏"
     embed = discord.Embed(title=title, color=discord.Color.dark_gold())
     if view.visual_mode:
-        embed.description = "玩法與海盜寶藏相同；下方 Pillow 圖會顯示玩家被吊在海面上，右下角有鯊魚等著吃。"
+        embed.description = "玩法與海盜寶藏相同；下方 Pillow 圖會顯示玩家被吊在海面上，右下角有鯊魚等著吃，失敗時會變成碎片。"
     else:
         embed.description = "猜出隱藏的英文單字，錯 6 次海盜就會落水餵鯊魚！"
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
