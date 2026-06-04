@@ -7,7 +7,7 @@ import random
 from dataclasses import dataclass
 
 import discord
-from discord.ui import Button, Modal, TextInput, View
+from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
 from dcrbot.storage import load_data, open_account, save_data
@@ -22,12 +22,21 @@ GUESS_REWARD = 5000
 RANDOM_CLUE_COST = 300
 MAX_ACTION_COST = 1500
 MAX_CLUE_COST = 750
+MULTIPLIER_OPTIONS = (1, 5, 10, 50, 100)
+MAX_CUSTOM_MULTIPLIER = 1000
 HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
+REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
+LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
+MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
 
 
 def format_money_delta(amount: int) -> str:
     sign = "+" if amount >= 0 else "-"
     return f"{sign}${abs(amount)}"
+
+
+def scaled_amount(amount: int, multiplier: int) -> int:
+    return amount * multiplier
 
 
 CJK_FONT_IDS: set[int] = set()
@@ -311,10 +320,38 @@ class NumberSearcherGuessModal(Modal):
         await self.view_ref.handle_guess(interaction, self.guess.value)
 
 
+class NumberSearcherCustomMultiplierModal(Modal):
+    def __init__(self, view: "NumberSearcherView"):
+        super().__init__(title="🔢 自訂數字搜尋者倍率")
+        self.view_ref = view
+        self.multiplier = TextInput(
+            label="倍率",
+            placeholder=f"輸入 1~{MAX_CUSTOM_MULTIPLIER} 的整數倍率",
+            required=True,
+            max_length=6,
+        )
+        self.add_item(self.multiplier)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            multiplier = int(self.multiplier.value)
+        except ValueError:
+            await interaction.response.send_message("❌ 倍率必須是正整數。", ephemeral=True)
+            return
+
+        if multiplier < 1 or multiplier > MAX_CUSTOM_MULTIPLIER:
+            await interaction.response.send_message(f"❌ 自訂倍率需介於 1~{MAX_CUSTOM_MULTIPLIER}。", ephemeral=True)
+            return
+
+        await self.view_ref.set_multiplier(interaction, multiplier)
+
+
 class NumberSearcherView(View):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder=None, *, multiplier: int = 1):
         super().__init__(timeout=420)
         self.user = user
+        self.menu_builder = menu_builder
+        self.multiplier = multiplier
         self.secret = tuple(random.randint(0, 9) for _ in range(CODE_LENGTH))
         self.colors = tuple(random.choice(COLORS) for _ in range(CODE_LENGTH))
         self.guess_count = 0
@@ -324,6 +361,7 @@ class NumberSearcherView(View):
         self.history: list[str] = []
         self.ended = False
         self.message: discord.Message | None = None
+        self.add_multiplier_select()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
@@ -335,18 +373,77 @@ class NumberSearcherView(View):
         return True
 
     def guess_cost(self) -> int:
-        return action_cost(self.guess_count, cap=MAX_ACTION_COST)
+        return scaled_amount(action_cost(self.guess_count, cap=MAX_ACTION_COST), self.multiplier)
 
     def clue_cost(self) -> int:
-        return action_cost(self.clue_count, cap=MAX_CLUE_COST)
+        return scaled_amount(action_cost(self.clue_count, cap=MAX_CLUE_COST), self.multiplier)
+
+    def random_clue_cost(self) -> int:
+        return scaled_amount(RANDOM_CLUE_COST, self.multiplier)
+
+    def guess_reward(self) -> int:
+        return scaled_amount(GUESS_REWARD, self.multiplier)
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
 
-    def disable_gameplay_buttons(self) -> None:
-        for child in self.children:
-            if getattr(child, "custom_id", None) != HISTORY_BUTTON_CUSTOM_ID:
-                child.disabled = True
+    def has_started(self) -> bool:
+        return self.guess_count > 0 or self.clue_count > 0 or self.total_spent > 0
+
+    def add_multiplier_select(self) -> None:
+        options = [
+            discord.SelectOption(
+                label=f"{multiplier} 倍",
+                value=str(multiplier),
+                description=f"費用與猜中獎金都套用 {multiplier} 倍",
+                default=multiplier == self.multiplier,
+            )
+            for multiplier in MULTIPLIER_OPTIONS
+        ]
+        options.append(
+            discord.SelectOption(
+                label="自訂倍率",
+                value="custom",
+                description=f"自行輸入 1~{MAX_CUSTOM_MULTIPLIER} 倍",
+                default=self.multiplier not in MULTIPLIER_OPTIONS,
+            )
+        )
+        select = Select(
+            placeholder=f"目前倍率：{self.multiplier} 倍",
+            options=options,
+            row=3,
+            custom_id=MULTIPLIER_SELECT_CUSTOM_ID,
+            disabled=self.has_started() or self.ended,
+        )
+
+        async def callback(interaction: discord.Interaction):
+            selected = select.values[0]
+            if selected == "custom":
+                await interaction.response.send_modal(NumberSearcherCustomMultiplierModal(self))
+                return
+            await self.set_multiplier(interaction, int(selected))
+
+        select.callback = callback
+        self.add_item(select)
+
+    def refresh_multiplier_select(self) -> None:
+        for child in list(self.children):
+            if getattr(child, "custom_id", None) == MULTIPLIER_SELECT_CUSTOM_ID:
+                self.remove_item(child)
+        if not self.ended:
+            self.add_multiplier_select()
+
+    async def set_multiplier(self, interaction: discord.Interaction, multiplier: int) -> None:
+        if self.ended:
+            await interaction.response.send_message("✅ 本局已結束，無法更改倍率。", ephemeral=True)
+            return
+        if self.has_started():
+            await interaction.response.send_message("❌ 已經開始消費後不能更改倍率，請下一局再調整。", ephemeral=True)
+            return
+        self.multiplier = multiplier
+        self.refresh_multiplier_select()
+        embed, file = self.build_embed_and_file(f"倍率已設定為 {self.multiplier} 倍，購買線索與猜中獎金都會套用此倍率。")
+        await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
 
     def build_history_embed(self) -> discord.Embed:
         embed = discord.Embed(
@@ -366,6 +463,33 @@ class NumberSearcherView(View):
         embed.add_field(name="完整紀錄", value=history_text, inline=False)
         return embed
 
+    def show_post_game_controls(self) -> None:
+        self.clear_items()
+
+        history_button = Button(label="檢視紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=0, custom_id=HISTORY_BUTTON_CUSTOM_ID)
+
+        async def history_callback(interaction: discord.Interaction):
+            await interaction.response.send_message(embed=self.build_history_embed(), ephemeral=True)
+
+        history_button.callback = history_callback
+        self.add_item(history_button)
+
+        replay_button = Button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0, custom_id=REPLAY_BUTTON_CUSTOM_ID)
+
+        async def replay_callback(interaction: discord.Interaction):
+            await self.replay(interaction)
+
+        replay_button.callback = replay_callback
+        self.add_item(replay_button)
+
+        lobby_button = Button(label="返回大廳", style=discord.ButtonStyle.secondary, emoji="🎮", row=0, custom_id=LOBBY_BUTTON_CUSTOM_ID)
+
+        async def lobby_callback(interaction: discord.Interaction):
+            await self.return_to_lobby(interaction)
+
+        lobby_button.callback = lobby_callback
+        self.add_item(lobby_button)
+
     async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
         await open_account(interaction.user)
         users = load_data()
@@ -376,22 +500,24 @@ class NumberSearcherView(View):
         users[uid]["wallet"] -= cost
         save_data(users)
         self.total_spent += cost
+        self.refresh_multiplier_select()
         return True
 
     def build_embed_and_file(self, status_text: str, *, reveal: bool = False, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
         embed = discord.Embed(title="🔢 數字搜尋者", description=status_text, color=color or discord.Color.dark_teal())
+        embed.add_field(name="倍率", value=f"{self.multiplier} 倍", inline=True)
         embed.add_field(name="猜測次數 n1", value=str(self.guess_count), inline=True)
         embed.add_field(name="下次猜數字費用", value=f"${self.guess_cost()}", inline=True)
         embed.add_field(name="線索使用次數 n", value=str(self.clue_count), inline=True)
         embed.add_field(name="下次數字/顏色線索費用", value=f"${self.clue_cost()}", inline=True)
-        embed.add_field(name="隨機線索費用", value=f"${RANDOM_CLUE_COST}", inline=True)
-        embed.add_field(name="猜中獎金", value=f"${GUESS_REWARD}", inline=True)
+        embed.add_field(name="隨機線索費用", value=f"${self.random_clue_cost()}", inline=True)
+        embed.add_field(name="猜中獎金", value=f"${self.guess_reward()}", inline=True)
         embed.add_field(name="已花費", value=f"${self.total_spent}", inline=True)
         if self.ended:
             embed.add_field(name="本局營利", value=format_money_delta(self.settlement_profit()), inline=True)
         recent_history = self.history[-8:] or ["尚未有任何紀錄。"]
         embed.add_field(name="紀錄", value="\n".join(recent_history), inline=False)
-        embed.set_footer(text="猜數字費用為 100×2^(n1-1)，最高 1500；數字/顏色線索費用最高 750。")
+        embed.set_footer(text="下拉選單可在首次消費前選倍率；費用與猜中獎金都會乘上倍率。")
         file = discord.File(render_number_searcher_board(self, reveal=reveal), filename="number_searcher.png")
         embed.set_image(url="attachment://number_searcher.png")
         return embed, file
@@ -420,7 +546,7 @@ class NumberSearcherView(View):
             pool = build_color_clues(self.secret, self.colors)
             sampled = random.sample(pool, 3)
         else:
-            cost = RANDOM_CLUE_COST
+            cost = self.random_clue_cost()
             if not await self.charge_wallet(interaction, cost):
                 return
             mixed_pool = build_number_clues(self.secret) + build_color_clues(self.secret, self.colors)
@@ -461,19 +587,20 @@ class NumberSearcherView(View):
         if guess == self.secret:
             users = load_data()
             uid = str(self.user.id)
-            users[uid]["wallet"] += GUESS_REWARD
+            reward = self.guess_reward()
+            users[uid]["wallet"] += reward
             save_data(users)
             balance = users[uid]["wallet"]
-            self.settlement_reward = GUESS_REWARD
+            self.settlement_reward = reward
             self.ended = True
-            self.disable_gameplay_buttons()
+            self.show_post_game_controls()
             profit = self.settlement_profit()
             self.history.append(
-                f"✅ ${cost}｜猜測 {format_code(guess)}｜正確，獲得 ${GUESS_REWARD}｜營利 {format_money_delta(profit)}"
+                f"✅ ${cost}｜猜測 {format_code(guess)}｜正確，獲得 ${reward}｜營利 {format_money_delta(profit)}"
             )
             await self.refresh(
                 interaction,
-                f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${GUESS_REWARD}。\n"
+                f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${reward}。\n"
                 f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
                 f"目前錢包餘額：${balance}",
                 reveal=True,
@@ -513,7 +640,7 @@ class NumberSearcherView(View):
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
         self.ended = True
-        self.disable_gameplay_buttons()
+        self.show_post_game_controls()
         self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
         await self.refresh(
             interaction,
@@ -523,11 +650,46 @@ class NumberSearcherView(View):
             color=discord.Color.red(),
         )
 
+    async def replay(self, interaction: discord.Interaction) -> None:
+        if not self.ended:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
+            return
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 只有開局玩家可以再來一次。", ephemeral=True)
+            return
+
+        new_view = NumberSearcherView(self.user, self.menu_builder, multiplier=self.multiplier)
+        embed, file = new_view.build_embed_and_file(
+            f"🔁 使用 {self.multiplier} 倍再來一次！三個灰色方塊背後藏著新的隨機三位數字與顏色。"
+        )
+        await interaction.response.edit_message(embed=embed, attachments=[file], view=new_view)
+        new_view.message = interaction.message
+        self.stop()
+
+    async def return_to_lobby(self, interaction: discord.Interaction) -> None:
+        if not self.ended:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回大廳。", ephemeral=True)
+            return
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 只有開局玩家可以返回大廳。", ephemeral=True)
+            return
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回大廳，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(self.user)
+        await interaction.response.edit_message(
+            embed=menu_payload.get("embed"),
+            attachments=[],
+            view=menu_payload.get("view"),
+        )
+        self.stop()
+
     async def on_timeout(self) -> None:
         if self.ended:
             return
         self.ended = True
-        self.disable_gameplay_buttons()
+        self.show_post_game_controls()
         if self.message:
             embed, file = self.build_embed_and_file(
                 f"⌛ 數字搜尋者逾時，遊戲結束。\n"
@@ -572,8 +734,8 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         draw.text((x + 44, y + 166), label, fill=(210, 220, 230), font=small_font)
 
     draw.rounded_rectangle((52, 334, 708, 390), radius=14, fill=(18, 24, 31), outline=(80, 150, 190), width=2)
-    status = f"猜測 {view.guess_count} 次｜線索 {view.clue_count} 次｜已花費 ${view.total_spent}｜猜中 +${GUESS_REWARD}"
-    fallback_status = f"Guesses {view.guess_count} | Clues {view.clue_count} | Spent ${view.total_spent} | Win +${GUESS_REWARD}"
+    status = f"{view.multiplier} 倍｜猜測 {view.guess_count} 次｜線索 {view.clue_count} 次｜已花費 ${view.total_spent}｜猜中 +${view.guess_reward()}"
+    fallback_status = f"{view.multiplier}x | Guesses {view.guess_count} | Clues {view.clue_count} | Spent ${view.total_spent} | Win +${view.guess_reward()}"
     draw.text((70, 352), safe_text(body_font, status, fallback_status), fill=(220, 245, 235), font=body_font)
 
     output = io.BytesIO()

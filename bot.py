@@ -1631,7 +1631,7 @@ class GameMenu(View):
 
     @discord.ui.button(label="數字搜尋者", style=discord.ButtonStyle.primary, emoji="🔢", row=2)
     async def number_searcher(self, interaction: discord.Interaction, button: Button):
-        view = NumberSearcherView(interaction.user)
+        view = NumberSearcherView(interaction.user, build_game_menu)
         embed, file = view.build_embed_and_file("三個灰色方塊背後藏著隨機三位數字與顏色，購買線索後推理答案！")
         await interaction.response.send_message(embed=embed, file=file, view=view)
         view.message = await interaction.original_response()
@@ -1727,7 +1727,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🔢 數字搜尋者",
-        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。Pillow 會畫出三個灰色問號方塊；可付費猜數字、購買數字線索、顏色線索或隨機線索，猜對可獲得 $5000。",
+        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回大廳。",
         inline=False,
     )
     embed.add_field(
