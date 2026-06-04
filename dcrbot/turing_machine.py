@@ -22,6 +22,7 @@ GUESS_REWARD = 5000
 RANDOM_CLUE_COST = 300
 MAX_ACTION_COST = 1500
 MAX_CLUE_COST = 750
+HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
 
 
 def format_money_delta(amount: int) -> str:
@@ -325,6 +326,9 @@ class NumberSearcherView(View):
         self.message: discord.Message | None = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
+        if custom_id == HISTORY_BUTTON_CUSTOM_ID:
+            return True
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("❌ 這不是你的數字搜尋者！請自行開啟遊戲。", ephemeral=True)
             return False
@@ -338,6 +342,29 @@ class NumberSearcherView(View):
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
+
+    def disable_gameplay_buttons(self) -> None:
+        for child in self.children:
+            if getattr(child, "custom_id", None) != HISTORY_BUTTON_CUSTOM_ID:
+                child.disabled = True
+
+    def build_history_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title="📜 數字搜尋者紀錄",
+            description=f"{self.user.display_name} 的本局公開紀錄。",
+            color=discord.Color.dark_teal(),
+        )
+        embed.add_field(name="猜測次數", value=str(self.guess_count), inline=True)
+        embed.add_field(name="線索次數", value=str(self.clue_count), inline=True)
+        embed.add_field(name="已花費", value=f"${self.total_spent}", inline=True)
+        if self.ended:
+            embed.add_field(name="本局營利", value=format_money_delta(self.settlement_profit()), inline=True)
+
+        history_text = "\n".join(self.history) if self.history else "尚未有任何紀錄。"
+        if len(history_text) > 3900:
+            history_text = "…\n" + history_text[-3898:]
+        embed.add_field(name="完整紀錄", value=history_text, inline=False)
+        return embed
 
     async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
         await open_account(interaction.user)
@@ -439,8 +466,7 @@ class NumberSearcherView(View):
             balance = users[uid]["wallet"]
             self.settlement_reward = GUESS_REWARD
             self.ended = True
-            for child in self.children:
-                child.disabled = True
+            self.disable_gameplay_buttons()
             profit = self.settlement_profit()
             self.history.append(
                 f"✅ ${cost}｜猜測 {format_code(guess)}｜正確，獲得 ${GUESS_REWARD}｜營利 {format_money_delta(profit)}"
@@ -477,14 +503,17 @@ class NumberSearcherView(View):
     async def random_clue(self, interaction: discord.Interaction, button: Button):
         await self.reveal_clue(interaction, "random")
 
+    @discord.ui.button(label="檢視紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=2, custom_id=HISTORY_BUTTON_CUSTOM_ID)
+    async def view_history(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(embed=self.build_history_embed(), ephemeral=True)
+
     @discord.ui.button(label="放棄", style=discord.ButtonStyle.danger, emoji="🏳️", row=2)
     async def give_up(self, interaction: discord.Interaction, button: Button):
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
         self.ended = True
-        for child in self.children:
-            child.disabled = True
+        self.disable_gameplay_buttons()
         self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
         await self.refresh(
             interaction,
@@ -498,8 +527,7 @@ class NumberSearcherView(View):
         if self.ended:
             return
         self.ended = True
-        for child in self.children:
-            child.disabled = True
+        self.disable_gameplay_buttons()
         if self.message:
             embed, file = self.build_embed_and_file(
                 f"⌛ 數字搜尋者逾時，遊戲結束。\n"
