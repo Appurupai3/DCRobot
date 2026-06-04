@@ -372,8 +372,10 @@ def build_pirate_display(view: PirateGuessView, *, status_text: str) -> tuple[di
 
 def _text_center(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill, *, stroke_fill=None, stroke_width: int = 0) -> None:
     bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
     draw.text(
-        (xy[0] - (bbox[2] - bbox[0]) / 2, xy[1] - (bbox[3] - bbox[1]) / 2),
+        (xy[0] - text_width / 2 - bbox[0], xy[1] - text_height / 2 - bbox[1]),
         text,
         font=font,
         fill=fill,
