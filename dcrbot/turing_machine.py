@@ -115,6 +115,10 @@ def color_positions(colors: tuple[str, str, str], color: str) -> str:
     return positions_text(indexes)
 
 
+def divisibility_text(value: int, divisor: int) -> str:
+    return "可以" if value % divisor == 0 else "不能"
+
+
 def action_cost(count_before_action: int, *, cap: int) -> int:
     return min(100 * (2**count_before_action), cap)
 
@@ -126,7 +130,8 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
     max_digit = max(code)
     min_digit = min(code)
     sorted_up = tuple(sorted(code)) == code
-    all_same_parity = "全部同為奇" if all(digit % 2 == 1 for digit in code) else "全部同為偶" if all(digit % 2 == 0 for digit in code) else "奇偶數混雜"
+    odd_count = sum(1 for digit in code if digit % 2 == 1)
+    even_count = CODE_LENGTH - odd_count
     first_gap = abs(code[0] - code[1])
     second_gap = abs(code[1] - code[2])
     edge_gap = abs(code[0] - code[2])
@@ -142,18 +147,20 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
         Clue("大小關係 A", f"第一個數字 {relation(code[0], code[1])} 第二個數字。"),
         Clue("大小關係 B", f"第二個數字 {relation(code[1], code[2])} 第三個數字。"),
         Clue("大小關係 C", f"第一個數字 {relation(code[0], code[2])} 第三個數字。"),
-        Clue("極差觀測", f"最大值減最小值的差 {'大於' if max_digit - min_digit > 3 else '小於或等於'} 3。"),
+        Clue("極差觀測", f"最大值減最小值的差等於 {max_digit - min_digit}。"),
         Clue("零的領域", f"這三個數字相乘的積 {'是 0' if 0 in code else '不是 0'}。"),
         Clue("質數獵人", f"質數（2, 3, 5, 7）的數量是 {prime_count}。"),
         Clue("大判定", f"密碼中大於或等於 5 的數量是 {sum(1 for digit in code if digit >= 5)}。"),
         Clue("小判定", f"密碼中小於 5 的數量是 {sum(1 for digit in code if digit < 5)}。"),
         Clue("連續風暴", f"這三個數字{'是' if sorted_up else '不是'}從小到大排列。"),
         Clue("相同複製", f"這三個數字中{'有' if len(set(code)) < 3 else '沒有'}任何數字重複。"),
-        Clue("全體奇偶", f"這三個數字：{all_same_parity}。"),
-        Clue("倍數密碼 A", f"前兩位數字的總和{'可以' if (code[0] + code[1]) % 3 == 0 else '不能'}被 3 整除。"),
-        Clue("倍數密碼 B", f"後兩位數字的總和{'可以' if (code[1] + code[2]) % 3 == 0 else '不能'}被 3 整除。"),
+        Clue("全體奇偶", f"這三個數字中，奇數數量 {odd_count}，偶數數量 {even_count}。"),
+        Clue("倍數密碼 A", f"前兩位數字的總和{divisibility_text(code[0] + code[1], 3)}被 3 整除，且{divisibility_text(code[0] + code[1], 2)}被 2 整除。"),
+        Clue("倍數密碼 B", f"後兩位數字的總和{divisibility_text(code[1] + code[2], 3)}被 3 整除，且{divisibility_text(code[1] + code[2], 2)}被 2 整除。"),
         Clue("極值位置 A", f"最大（或並列最大）的數字出現在：{positions_text([i for i, digit in enumerate(code) if digit == max_digit])}。"),
         Clue("極值位置 B", f"最小（或並列最小）的數字出現在：{positions_text([i for i, digit in enumerate(code) if digit == min_digit])}。"),
+        Clue("極值資訊 A", f"最大（或並列最大）的數字{divisibility_text(max_digit, 3)}被 3 整除，且{divisibility_text(max_digit, 2)}被 2 整除。"),
+        Clue("極值資訊 B", f"最小（或並列最小）的數字是 {min_digit}。"),
         Clue("差計算 A", f"第一個與第二個數字的絕對差是 {first_gap}。"),
         Clue("差計算 B", f"第二個與第三個數字的絕對差是 {second_gap}。"),
         Clue("差計算 C", f"第一個與第三個數字的絕對差是 {edge_gap}。"),
@@ -165,8 +172,8 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
         Clue("隨機計數器 2A", f"第 {two_indexes[0] + 1} 位與第 {two_indexes[1] + 1} 位的和是 {code[two_indexes[0]] + code[two_indexes[1]]}。"),
     ]
     for lucky_digit in DIGITS:
-        count = code.count(lucky_digit)
-        clues.append(Clue(f"幸運號碼 {lucky_digit}", f"密碼中的數字 {lucky_digit} 出現 {count} 次。"))
+        positions = [index for index, digit in enumerate(code) if digit == lucky_digit]
+        clues.append(Clue(f"幸運號碼{lucky_digit}", f"所有密碼中的數字 {lucky_digit} 位置：{positions_text(positions)}。"))
     return clues
 
 
@@ -212,18 +219,20 @@ def clue_choice_text(clue: Clue) -> str:
         "大小關係 A": "第一個數字 [大於 / 小於 / 等於] 第二個數字。",
         "大小關係 B": "第二個數字 [大於 / 小於 / 等於] 第三個數字。",
         "大小關係 C": "第一個數字 [大於 / 小於 / 等於] 第三個數字。",
-        "極差觀測": "最大值減最小值的差 [大於 / 小於或等於] 3。",
+        "極差觀測": "最大值減最小值的差 [等於 ?]。",
         "零的領域": "這三個數字相乘的積 [是 0 / 不是 0]。",
         "質數獵人": "這三個數字中，質數（2, 3, 5, 7）的數量 [質數數量]。",
         "大判定": "密碼中 [大於或等於 5 的數量]。",
         "小判定": "密碼中 [小於 5 的數量]。",
         "連續風暴": "這三個數字是不是從小到大排列 [是 / 不是]。",
         "相同複製": "這三個數字中 [有 / 沒有] 任何數字重複。",
-        "全體奇偶": "這三個數字 [全部同為奇 / 同為偶 / 奇偶數混雜]。",
-        "倍數密碼 A": "前兩位數字的總和 [可以被 3 整除 / 不能被 3 整除]。",
-        "倍數密碼 B": "後兩位數字的總和 [可以被 3 整除 / 不能被 3 整除]。",
+        "全體奇偶": "這三個數字 [奇數數量, 偶數數量]。",
+        "倍數密碼 A": "前兩位數字的總和 [可以被 3 整除 / 不能被 3 整除] 和 [可以被 2 整除 / 不能被 2 整除]。",
+        "倍數密碼 B": "後兩位數字的總和 [可以被 3 整除 / 不能被 3 整除] 和 [可以被 2 整除 / 不能被 2 整除]。",
         "極值位置 A": "最大（或並列最大）的數字 [出現在第 ? 個的位置]。",
         "極值位置 B": "最小（或並列最小）的數字 [出現在第 ? 個的位置]。",
+        "極值資訊 A": "最大（或並列最大）的數字 [可以被 3 整除 / 不能被 3 整除] 和 [可以被 2 整除 / 不能被 2 整除]。",
+        "極值資訊 B": "最小（或並列最小）的數字 [最小值]。",
         "差計算 A": "第一個與第二個數字的絕對差。",
         "差計算 B": "第二個與第三個數字的絕對差。",
         "差計算 C": "第一個與第三個數字的絕對差。",
@@ -259,8 +268,8 @@ def clue_choice_text(clue: Clue) -> str:
         "右側安全區 B": "後兩個方塊（第二與第三個），[有 / 沒有] 包含綠色。",
         "右側安全區 C": "後兩個方塊（第二與第三個），[有 / 沒有] 包含藍色。",
     }
-    if clue.title.startswith("幸運號碼 "):
-        return f"顯示密碼中的數字 {clue.title.rsplit(' ', maxsplit=1)[-1]}。"
+    if clue.title.startswith("幸運號碼"):
+        return f"顯示所有密碼中的數字 {clue.title.removeprefix('幸運號碼')} 的位置 [第 X 位]。"
     return templates.get(clue.title, "選擇後才會公開這個線索的實際結果。")
 
 
