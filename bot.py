@@ -1707,7 +1707,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🗺️ 單人猜字：海盜寶藏2",
-        value="玩法、下注、獎懲與海盜寶藏相同，但使用 Pillow 產生海盜船甲板畫面，會顯示玩家頭像、頭上名字、海盜位置、加大鯊魚與猜測紀錄。",
+        value="玩法、下注、獎懲與海盜寶藏相同，但使用 Pillow 產生半邊海盜船與下方海水畫面，會顯示玩家頭像、頭上名字、加大鯊魚與猜測紀錄。",
         inline=False,
     )
     embed.add_field(
