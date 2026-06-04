@@ -648,17 +648,20 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     font = load_display_font(26)
     small_font = load_display_font(22)
 
-    _rounded_panel(draw, (34, 386, 534, 632), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((62, 404), "目前題目", font=small_font, fill=(255, 214, 114, 255))
-    _text_center(draw, (284, 450), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
-    draw.line((62, 486, 506, 486), fill=(255, 214, 114, 150), width=2)
-    draw.text((62, 504), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
+    # Raise and enlarge the lower-left HUD so every line stays inside the frame,
+    # even if it overlaps the hanging player near the bottom of the scene.
+    _rounded_panel(draw, (34, 326, 534, 632), (30, 29, 38, 220), (255, 214, 114, 220))
+    draw.text((62, 344), "目前題目", font=small_font, fill=(255, 214, 114, 255))
+    progress_text = _truncate_to_width(draw, pirate_word_progress(view), big_font, 445)
+    _text_center(draw, (284, 394), progress_text, big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
+    draw.line((62, 432, 506, 432), fill=(255, 214, 114, 150), width=2)
+    draw.text((62, 450), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
     hit_text = _truncate_to_width(draw, f"命中：{', '.join(sorted(view.guessed)) or '-'}", small_font, 445)
     miss_text = _truncate_to_width(draw, f"失誤：{', '.join(sorted(view.wrong)) or '-'}", small_font, 445)
     answer_text = _truncate_to_width(draw, f"答案：{pirate_answer_reveal(view)}", small_font, 445)
-    draw.text((62, 546), hit_text, font=small_font, fill=(122, 244, 163, 255))
-    draw.text((62, 582), miss_text, font=small_font, fill=(255, 143, 120, 255))
-    draw.text((62, 612), answer_text, font=small_font, fill=(231, 238, 244, 255))
+    draw.text((62, 494), hit_text, font=small_font, fill=(122, 244, 163, 255))
+    draw.text((62, 536), miss_text, font=small_font, fill=(255, 143, 120, 255))
+    draw.text((62, 578), answer_text, font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
