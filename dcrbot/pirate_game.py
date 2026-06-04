@@ -8,7 +8,7 @@ import string
 
 import discord
 from discord.ui import Button, View, Modal, TextInput
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from dcrbot.pirate import PIRATE_WORDS, pirate_translation
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
@@ -537,6 +537,76 @@ def _draw_player_fragments(
         draw.arc((cx + ox - radius, cy + oy - radius // 3, cx + ox + radius, cy + oy + radius // 2), 10, 170, fill=(208, 247, 255, 230), width=5)
 
 
+def _truncate_to_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> str:
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
+        return text
+    ellipsis = "…"
+    trimmed = text
+    while trimmed and draw.textbbox((0, 0), trimmed + ellipsis, font=font)[2] > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed or text[:1]) + ellipsis
+
+
+def _build_shark_cutout(size: tuple[int, int] = (360, 300)) -> Image.Image:
+    """Create a transparent cartoon shark cutout inspired by the provided open-mouth shark."""
+    canvas = Image.new("RGBA", (420, 360), (0, 0, 0, 0))
+    d = ImageDraw.Draw(canvas)
+    outline = (35, 78, 113, 255)
+    blue = (96, 171, 218, 255)
+    blue_dark = (55, 129, 188, 255)
+    blue_light = (159, 221, 244, 255)
+    belly = (230, 250, 255, 255)
+    mouth = (115, 38, 43, 255)
+    mouth_dark = (76, 22, 30, 255)
+    tongue = (238, 115, 121, 255)
+
+    # Body and fins.
+    d.ellipse((128, 34, 312, 330), fill=blue, outline=outline, width=7)
+    d.polygon([(272, 120), (390, 88), (350, 152), (398, 184), (286, 196)], fill=blue, outline=outline)
+    d.polygon([(246, 260), (310, 344), (250, 330)], fill=blue_dark, outline=outline)
+    d.polygon([(160, 250), (116, 318), (148, 206)], fill=blue_dark, outline=outline)
+    d.polygon([(280, 210), (356, 252), (294, 270)], fill=blue_dark, outline=outline)
+
+    # Belly patch and highlight.
+    d.pieslice((100, 40, 306, 338), 102, 275, fill=belly, outline=outline, width=5)
+    d.arc((154, 54, 286, 150), 204, 312, fill=(201, 237, 250, 210), width=8)
+
+    # Open mouth, teeth, tongue.
+    d.ellipse((104, 98, 254, 248), fill=mouth, outline=outline, width=7)
+    d.ellipse((154, 142, 240, 232), fill=mouth_dark)
+    d.pieslice((126, 176, 232, 268), 190, 350, fill=tongue)
+    for points in [
+        [(128, 116), (148, 166), (166, 124)],
+        [(166, 106), (186, 162), (204, 112)],
+        [(206, 120), (222, 168), (242, 136)],
+        [(126, 206), (146, 170), (158, 218)],
+        [(164, 230), (184, 184), (202, 232)],
+        [(214, 218), (230, 178), (246, 210)],
+    ]:
+        d.polygon(points, fill=(255, 255, 255, 255), outline=(232, 240, 244, 255))
+
+    # Face details.
+    d.ellipse((230, 56, 294, 122), fill=(255, 255, 255, 255), outline=outline, width=6)
+    d.ellipse((250, 76, 282, 110), fill=(24, 58, 88, 255))
+    d.ellipse((262, 72, 274, 84), fill=(255, 255, 255, 255))
+    d.ellipse((126, 72, 136, 88), fill=outline)
+    d.ellipse((172, 64, 184, 82), fill=outline)
+    for y in [160, 178, 196]:
+        d.arc((286, y, 332, y + 34), 124, 212, fill=outline, width=4)
+
+    bbox = canvas.getbbox()
+    shark = canvas.crop(bbox) if bbox else canvas
+    shark = shark.resize(size, Image.LANCZOS)
+    shadow = Image.new("RGBA", (size[0] + 34, size[1] + 34), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.ellipse((34, size[1] - 42, size[0] - 8, size[1] + 12), fill=(0, 56, 78, 100))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(8))
+    composed = Image.new("RGBA", shadow.size, (0, 0, 0, 0))
+    composed.alpha_composite(shadow)
+    composed.alpha_composite(shark, (17, 0))
+    return composed
+
+
 def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.File:
     width, height = 1100, 650
     image = Image.new("RGBA", (width, height), (20, 38, 65, 255))
@@ -578,19 +648,12 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     draw.line((162, 150, 260, 98), fill=(58, 35, 23, 255), width=5)
     draw.line((162, 240, 350, 98), fill=(58, 35, 23, 255), width=5)
 
-    # Big shark waits in the lower-right corner. Keep it inside the canvas and draw it only with shapes
-    # so missing emoji fonts cannot create a broken glyph over the shark.
-    shark_x, shark_y = 815, 500
-    draw.ellipse((shark_x - 150, shark_y - 54, shark_x + 166, shark_y + 78), fill=(76, 94, 108, 255), outline=(31, 43, 54, 255), width=6)
-    draw.polygon([(shark_x - 24, shark_y - 48), (shark_x + 42, shark_y - 154), (shark_x + 88, shark_y - 22)], fill=(69, 87, 101, 255), outline=(31, 43, 54, 255))
-    draw.polygon([(shark_x + 104, shark_y - 8), (shark_x + 220, shark_y - 76), (shark_x + 194, shark_y + 62)], fill=(76, 94, 108, 255), outline=(31, 43, 54, 255))
-    draw.polygon([(shark_x + 126, shark_y - 2), (shark_x + 185, shark_y - 34), (shark_x + 178, shark_y + 34)], fill=(66, 84, 99, 255), outline=(31, 43, 54, 255))
-    draw.ellipse((shark_x - 86, shark_y - 18, shark_x - 70, shark_y - 2), fill=(8, 8, 10, 255))
-    draw.arc((shark_x - 104, shark_y + 12, shark_x + 32, shark_y + 66), 4, 168, fill=(28, 22, 22, 255), width=7)
-    for tx in range(shark_x - 74, shark_x + 22, 13):
-        draw.polygon([(tx, shark_y + 44), (tx + 7, shark_y + 62), (tx + 15, shark_y + 43)], fill=(255, 255, 241, 255))
-    for radius in [62, 98, 138]:
-        draw.arc((shark_x - radius, shark_y + 62 - radius // 4, shark_x + radius, shark_y + 62 + radius // 2), 12, 170, fill=(195, 240, 252, 185), width=5)
+    # Use a transparent cartoon cutout shark based on the provided reference.
+    shark = _build_shark_cutout((350, 300))
+    image.alpha_composite(shark, (700, 305))
+    draw = ImageDraw.Draw(image)
+    for radius in [70, 112, 152]:
+        draw.arc((820 - radius, 574 - radius // 4, 820 + radius, 574 + radius // 2), 12, 170, fill=(195, 240, 252, 185), width=5)
 
     stage = len(view.wrong)
     if stage >= view.max_wrong:
@@ -614,14 +677,17 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     font = load_display_font(26)
     small_font = load_display_font(22)
 
-    _rounded_panel(draw, (34, 420, 514, 632), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((62, 438), "目前題目", font=small_font, fill=(255, 214, 114, 255))
-    _text_center(draw, (274, 486), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
-    draw.line((62, 522, 486, 522), fill=(255, 214, 114, 150), width=2)
-    draw.text((62, 538), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
-    draw.text((62, 576), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
-    draw.text((62, 606), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
-    draw.text((62, 620), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
+    _rounded_panel(draw, (34, 386, 534, 632), (30, 29, 38, 220), (255, 214, 114, 220))
+    draw.text((62, 404), "目前題目", font=small_font, fill=(255, 214, 114, 255))
+    _text_center(draw, (284, 450), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
+    draw.line((62, 486, 506, 486), fill=(255, 214, 114, 150), width=2)
+    draw.text((62, 504), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
+    hit_text = _truncate_to_width(draw, f"命中：{', '.join(sorted(view.guessed)) or '-'}", small_font, 445)
+    miss_text = _truncate_to_width(draw, f"失誤：{', '.join(sorted(view.wrong)) or '-'}", small_font, 445)
+    answer_text = _truncate_to_width(draw, f"答案：{pirate_answer_reveal(view)}", small_font, 445)
+    draw.text((62, 546), hit_text, font=small_font, fill=(122, 244, 163, 255))
+    draw.text((62, 582), miss_text, font=small_font, fill=(255, 143, 120, 255))
+    draw.text((62, 612), answer_text, font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
