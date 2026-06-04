@@ -11,7 +11,7 @@ from discord.ui import Button, View, Modal, TextInput
 from PIL import Image, ImageDraw, ImageFilter
 
 from dcrbot.pirate import PIRATE_WORDS, pirate_translation
-from dcrbot.solo_games import load_display_font
+from dcrbot.solo_games import fetch_avatar_image, load_display_font
 from dcrbot.storage import load_data, open_account, save_data
 
 
@@ -51,7 +51,14 @@ class PirateTreasureModal(Modal):
         save_data(users)
 
         secret_word = random.choice(PIRATE_WORDS)
-        view = PirateGuessView(interaction.user, secret_word, amount, visual_mode=self.visual_mode)
+        avatar_image = await fetch_avatar_image(interaction.user, 128) if self.visual_mode else None
+        view = PirateGuessView(
+            interaction.user,
+            secret_word,
+            amount,
+            visual_mode=self.visual_mode,
+            avatar_image=avatar_image,
+        )
         embed, file = build_pirate_display(view, status_text="選擇一個字母開始，最多錯 6 次！")
 
         if file is None:
@@ -67,7 +74,15 @@ class PirateTreasure2Modal(PirateTreasureModal):
 
 
 class PirateGuessView(View):
-    def __init__(self, user: discord.User, secret_word: str, bet_amount: int, *, visual_mode: bool = False):
+    def __init__(
+        self,
+        user: discord.User,
+        secret_word: str,
+        bet_amount: int,
+        *,
+        visual_mode: bool = False,
+        avatar_image: Image.Image | None = None,
+    ):
         super().__init__(timeout=420)
         self.author_id = user.id
         self.player_name = user.display_name
@@ -83,6 +98,7 @@ class PirateGuessView(View):
         self.alphabet = list(string.ascii_uppercase)
         self.struggle_frame = 0
         self.visual_mode = visual_mode
+        self.avatar_image = avatar_image
         self.build_letter_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -367,40 +383,110 @@ def _rounded_panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], fi
     draw.line((x1 + 24, y1 + 3, x2 - 24, y1 + 3), fill=(255, 255, 255, 70), width=2)
 
 
-def _draw_pirate_character(draw: ImageDraw.ImageDraw, x: int, y: int, name: str, *, falling: bool = False) -> None:
-    name = name.strip() or "玩家"
-    if len(name) > 8:
-        name = name[:8] + "…"
+def _avatar_or_placeholder(name: str, size: int) -> Image.Image:
+    avatar = Image.new("RGBA", (size, size), (255, 210, 120, 255))
+    avatar_draw = ImageDraw.Draw(avatar)
+    avatar_draw.ellipse((0, 0, size - 1, size - 1), fill=(255, 210, 120, 255), outline=(106, 59, 32, 255), width=6)
+    initials = (name.strip()[:2] or "DC").upper()
+    _text_center(
+        avatar_draw,
+        (size // 2, size // 2),
+        initials,
+        load_display_font(max(20, size // 4)),
+        (95, 49, 22, 255),
+    )
+    return avatar
 
+
+def _paste_circular_avatar(image: Image.Image, avatar: Image.Image | None, center: tuple[int, int], size: int, name: str) -> None:
+    source = (avatar.copy() if avatar is not None else _avatar_or_placeholder(name, size)).convert("RGBA").resize((size, size), Image.LANCZOS)
+    mask = Image.new("L", (size, size), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((0, 0, size - 1, size - 1), fill=255)
+
+    shadow = Image.new("RGBA", (size + 16, size + 16), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.ellipse((8, 10, size + 8, size + 10), fill=(0, 0, 0, 100))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(5))
+    image.alpha_composite(shadow, (center[0] - size // 2 - 8, center[1] - size // 2 - 8))
+    image.paste(source, (center[0] - size // 2, center[1] - size // 2), mask)
+
+    border_draw = ImageDraw.Draw(image)
+    border_draw.ellipse(
+        (center[0] - size // 2 - 4, center[1] - size // 2 - 4, center[0] + size // 2 + 4, center[1] + size // 2 + 4),
+        outline=(255, 224, 112, 255),
+        width=7,
+    )
+    border_draw.ellipse(
+        (center[0] - size // 2 - 8, center[1] - size // 2 - 8, center[0] + size // 2 + 8, center[1] + size // 2 + 8),
+        outline=(77, 38, 20, 230),
+        width=3,
+    )
+
+
+def _draw_nameplate(draw: ImageDraw.ImageDraw, center: tuple[int, int], name: str) -> None:
+    name = name.strip() or "玩家"
+    if len(name) > 10:
+        name = name[:10] + "…"
+    font = load_display_font(28)
+    bbox = draw.textbbox((0, 0), name, font=font, stroke_width=2)
+    text_width = bbox[2] - bbox[0]
+    plate = (center[0] - text_width // 2 - 24, center[1] - 24, center[0] + text_width // 2 + 24, center[1] + 24)
+    draw.rounded_rectangle(plate, radius=18, fill=(37, 24, 20, 235), outline=(255, 219, 105, 255), width=3)
+    _text_center(draw, center, name, font, (255, 250, 221, 255), stroke_fill=(70, 35, 18, 255), stroke_width=2)
+
+
+def _draw_pirate_hat(draw: ImageDraw.ImageDraw, center: tuple[int, int], size: int) -> None:
+    x, y = center
+    brim_y = y - size // 2 + 7
+    draw.polygon(
+        [(x - size // 2 - 8, brim_y), (x + size // 2 + 8, brim_y), (x + 22, brim_y - 34), (x, brim_y - 46), (x - 22, brim_y - 34)],
+        fill=(31, 24, 27, 255),
+        outline=(8, 8, 10, 255),
+    )
+    draw.rounded_rectangle((x - size // 2 - 14, brim_y - 6, x + size // 2 + 14, brim_y + 7), radius=7, fill=(31, 24, 27, 255))
+    draw.line((x - 26, brim_y - 13, x + 26, brim_y - 13), fill=(255, 220, 92, 255), width=4)
+    _text_center(draw, (x, brim_y - 24), "☠", load_display_font(20), (255, 255, 242, 255), stroke_fill=(20, 20, 20, 255), stroke_width=1)
+
+
+def _draw_pirate_character(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    name: str,
+    avatar: Image.Image | None,
+    *,
+    falling: bool = False,
+) -> None:
     coat = (111, 40, 33, 255)
-    skin = (255, 213, 153, 255)
+    shirt = (248, 231, 190, 255)
     boot = (50, 31, 26, 255)
-    hat = (37, 27, 29, 255)
     trim = (245, 198, 77, 255)
-    font = load_display_font(22)
 
     if falling:
-        draw.ellipse((x - 30, y - 30, x + 30, y + 30), fill=skin, outline=(88, 54, 39), width=3)
-        draw.arc((x - 14, y - 2, x + 16, y + 20), 195, 345, fill=(80, 35, 35), width=3)
-        draw.line((x - 16, y + 44, x - 42, y + 74), fill=coat, width=10)
-        draw.line((x + 16, y + 44, x + 42, y + 74), fill=coat, width=10)
-        draw.line((x - 8, y + 80, x - 34, y + 116), fill=boot, width=9)
-        draw.line((x + 8, y + 80, x + 34, y + 116), fill=boot, width=9)
-        draw.text((x - 55, y - 60), "💦", font=load_display_font(34), fill=(180, 235, 255, 255))
-    else:
-        draw.ellipse((x - 26, y - 70, x + 26, y - 18), fill=skin, outline=(88, 54, 39), width=3)
-        draw.polygon([(x - 34, y - 62), (x + 34, y - 62), (x + 16, y - 88), (x - 16, y - 88)], fill=hat)
-        draw.rectangle((x - 42, y - 64, x + 42, y - 54), fill=hat)
-        draw.line((x - 20, y - 55, x + 10, y - 55), fill=trim, width=3)
-        draw.ellipse((x - 10, y - 48, x - 4, y - 42), fill=(35, 25, 20))
-        draw.line((x + 7, y - 45, x + 19, y - 45), fill=(45, 25, 20), width=2)
-        draw.line((x - 6, y - 28, x + 8, y - 25), fill=(98, 39, 33), width=3)
-        draw.polygon([(x - 34, y - 16), (x + 34, y - 16), (x + 22, y + 58), (x - 22, y + 58)], fill=coat, outline=(67, 23, 22))
-        draw.line((x - 32, y + 2, x - 68, y + 26), fill=coat, width=10)
-        draw.line((x + 32, y + 2, x + 68, y + 26), fill=coat, width=10)
-        draw.line((x - 12, y + 58, x - 24, y + 106), fill=boot, width=10)
-        draw.line((x + 12, y + 58, x + 24, y + 106), fill=boot, width=10)
-    _text_center(draw, (x, y + 138), name, font, (255, 246, 211), stroke_fill=(68, 38, 18), stroke_width=2)
+        _draw_nameplate(draw, (x, y - 104), name)
+        _paste_circular_avatar(image, avatar, (x, y - 30), 74, name)
+        _draw_pirate_hat(draw, (x, y - 30), 74)
+        draw.line((x - 20, y + 24, x - 74, y + 52), fill=coat, width=13)
+        draw.line((x + 20, y + 24, x + 74, y + 52), fill=coat, width=13)
+        draw.polygon([(x - 30, y + 18), (x + 30, y + 18), (x + 22, y + 88), (x - 22, y + 88)], fill=coat, outline=(67, 23, 22))
+        draw.polygon([(x - 13, y + 26), (x + 13, y + 26), (x + 5, y + 78), (x - 5, y + 78)], fill=shirt)
+        draw.line((x - 9, y + 88, x - 42, y + 130), fill=boot, width=11)
+        draw.line((x + 9, y + 88, x + 42, y + 130), fill=boot, width=11)
+        draw.text((x - 78, y - 76), "💦", font=load_display_font(40), fill=(180, 235, 255, 255))
+        return
+
+    _draw_nameplate(draw, (x, y - 170), name)
+    _paste_circular_avatar(image, avatar, (x, y - 82), 86, name)
+    _draw_pirate_hat(draw, (x, y - 82), 86)
+    draw.polygon([(x - 39, y - 28), (x + 39, y - 28), (x + 27, y + 58), (x - 27, y + 58)], fill=coat, outline=(67, 23, 22))
+    draw.polygon([(x - 14, y - 22), (x + 14, y - 22), (x + 7, y + 48), (x - 7, y + 48)], fill=shirt)
+    draw.line((x - 33, y - 4, x - 82, y + 24), fill=coat, width=12)
+    draw.line((x + 33, y - 4, x + 82, y + 24), fill=coat, width=12)
+    draw.line((x - 13, y + 58, x - 30, y + 118), fill=boot, width=12)
+    draw.line((x + 13, y + 58, x + 30, y + 118), fill=boot, width=12)
+    draw.line((x - 30, y + 3, x + 30, y + 3), fill=trim, width=4)
 
 
 def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.File:
@@ -408,58 +494,87 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     image = Image.new("RGBA", (width, height), (20, 38, 65, 255))
     draw = ImageDraw.Draw(image)
 
-    # Painted sky gradient.
+    # Sunset sky and ocean visible beyond the ship rail.
     for y in range(height):
         ratio = y / height
-        r = int(24 + 38 * ratio)
-        g = int(63 + 59 * ratio)
-        b = int(105 + 72 * ratio)
+        r = int(33 + 58 * ratio)
+        g = int(72 + 55 * ratio)
+        b = int(119 + 34 * ratio)
         draw.line((0, y, width, y), fill=(r, g, b, 255))
 
-    # Sun, clouds, and distant islands.
-    draw.ellipse((855, 50, 1015, 210), fill=(255, 192, 83, 235))
-    blur = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    blur_draw = ImageDraw.Draw(blur)
-    for cx, cy, rx in [(150, 100, 65), (210, 92, 80), (280, 110, 62), (740, 130, 72), (810, 118, 92), (890, 138, 62)]:
-        blur_draw.ellipse((cx - rx, cy - rx // 2, cx + rx, cy + rx // 2), fill=(255, 255, 255, 95))
-    image.alpha_composite(blur.filter(ImageFilter.GaussianBlur(5)))
+    draw.ellipse((842, 42, 1018, 218), fill=(255, 186, 72, 230))
+    cloud_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    cloud_draw = ImageDraw.Draw(cloud_layer)
+    for cx, cy, rx in [(150, 104, 66), (214, 94, 82), (285, 112, 62), (707, 126, 70), (785, 112, 90), (875, 138, 65)]:
+        cloud_draw.ellipse((cx - rx, cy - rx // 2, cx + rx, cy + rx // 2), fill=(255, 255, 255, 88))
+    image.alpha_composite(cloud_layer.filter(ImageFilter.GaussianBlur(5)))
     draw = ImageDraw.Draw(image)
-    draw.polygon([(30, 355), (155, 240), (292, 355)], fill=(31, 84, 71, 255))
-    draw.polygon([(790, 355), (928, 250), (1090, 355)], fill=(31, 84, 71, 255))
 
-    # Sea with waves.
-    draw.rectangle((0, 352, width, height), fill=(18, 105, 147, 255))
-    for y in range(375, height, 38):
-        for x in range(-40, width, 96):
-            draw.arc((x, y, x + 92, y + 34), 0, 180, fill=(126, 213, 235, 130), width=3)
+    draw.rectangle((0, 190, width, 315), fill=(18, 103, 149, 255))
+    for y in range(212, 315, 30):
+        for x in range(-35, width, 86):
+            draw.arc((x, y, x + 82, y + 30), 0, 180, fill=(137, 220, 237, 130), width=3)
 
-    # Ship deck and plank.
-    draw.polygon([(0, 255), (408, 285), (505, 432), (0, 454)], fill=(93, 53, 32, 255), outline=(48, 25, 17, 255))
-    for x in range(-20, 455, 48):
-        draw.line((x, 270, x + 96, 452), fill=(132, 79, 44, 255), width=5)
-    draw.rounded_rectangle((332, 302, 820, 352), radius=14, fill=(151, 95, 50, 255), outline=(72, 42, 22, 255), width=5)
-    for x in range(345, 820, 62):
-        draw.line((x, 304, x - 24, 351), fill=(112, 66, 35, 255), width=3)
-    draw.polygon([(812, 302), (973, 326), (812, 352)], fill=(151, 95, 50, 255), outline=(72, 42, 22, 255))
+    # Pirate ship setting: mast, sails, rail, deck boards, ropes and props.
+    draw.rectangle((0, 236, width, height), fill=(93, 55, 34, 255))
+    for y in range(246, height, 52):
+        draw.line((0, y, width, y + 22), fill=(132, 82, 49, 255), width=8)
+    for x in range(-50, width, 94):
+        draw.line((x, 235, x + 120, height), fill=(68, 38, 24, 175), width=4)
+    draw.rectangle((0, 214, width, 258), fill=(104, 59, 35, 255), outline=(50, 28, 19, 255), width=4)
+    for x in range(20, width, 70):
+        draw.rounded_rectangle((x, 170, x + 25, 256), radius=6, fill=(96, 54, 33, 255), outline=(45, 25, 17, 255), width=2)
+    draw.line((0, 198, width, 198), fill=(182, 115, 62, 255), width=8)
 
-    # Shark fins.
-    for sx, sy in [(906, 458), (988, 508), (764, 545)]:
-        draw.polygon([(sx, sy - 50), (sx + 42, sy + 8), (sx - 24, sy + 8)], fill=(78, 92, 104, 255), outline=(38, 51, 66, 255))
+    # Main mast and sails make the board clearly happen on a pirate ship.
+    draw.rounded_rectangle((132, 42, 160, 375), radius=8, fill=(89, 51, 31, 255), outline=(42, 24, 17, 255), width=4)
+    draw.line((146, 70, 394, 246), fill=(64, 39, 26, 255), width=5)
+    draw.line((146, 72, 42, 232), fill=(64, 39, 26, 255), width=5)
+    draw.polygon([(164, 62), (406, 140), (180, 202)], fill=(245, 230, 185, 235), outline=(91, 62, 40, 255))
+    draw.polygon([(126, 88), (38, 230), (128, 214)], fill=(232, 216, 174, 235), outline=(91, 62, 40, 255))
+    draw.polygon([(164, 70), (226, 94), (165, 112)], fill=(38, 33, 36, 255))
+    _text_center(draw, (183, 93), "☠", load_display_font(22), (255, 255, 240, 255), stroke_fill=(0, 0, 0, 255), stroke_width=1)
+
+    # Deck decorations.
+    draw.ellipse((52, 396, 150, 506), fill=(118, 73, 42, 255), outline=(54, 31, 20, 255), width=5)
+    draw.line((57, 430, 146, 430), fill=(196, 137, 72, 255), width=4)
+    draw.line((57, 472, 146, 472), fill=(196, 137, 72, 255), width=4)
+    draw.rounded_rectangle((206, 352, 312, 416), radius=12, fill=(78, 45, 29, 255), outline=(39, 24, 17, 255), width=4)
+    draw.ellipse((190, 337, 328, 389), fill=(47, 48, 50, 255), outline=(24, 25, 27, 255), width=5)
+    draw.ellipse((290, 350, 338, 382), fill=(18, 18, 20, 255))
+
+    # The plank starts on the ship deck and points out over the rail toward the water.
+    draw.rounded_rectangle((354, 312, 824, 362), radius=14, fill=(154, 96, 49, 255), outline=(69, 40, 22, 255), width=5)
+    for x in range(368, 818, 58):
+        draw.line((x, 314, x - 22, 361), fill=(112, 65, 34, 255), width=3)
+    draw.polygon([(812, 312), (1004, 338), (812, 362)], fill=(154, 96, 49, 255), outline=(69, 40, 22, 255))
+    draw.line((812, 312, 1004, 338), fill=(217, 157, 77, 255), width=3)
+
+    # Larger shark beside the ship.
+    shark_x, shark_y = 905, 350
+    draw.ellipse((shark_x - 128, shark_y - 48, shark_x + 144, shark_y + 74), fill=(79, 96, 108, 255), outline=(33, 45, 55, 255), width=5)
+    draw.polygon([(shark_x - 18, shark_y - 38), (shark_x + 42, shark_y - 128), (shark_x + 76, shark_y - 18)], fill=(71, 88, 101, 255), outline=(33, 45, 55, 255))
+    draw.polygon([(shark_x + 86, shark_y - 6), (shark_x + 176, shark_y - 62), (shark_x + 154, shark_y + 48)], fill=(79, 96, 108, 255), outline=(33, 45, 55, 255))
+    draw.ellipse((shark_x - 70, shark_y - 14, shark_x - 56, shark_y), fill=(8, 8, 10, 255))
+    draw.arc((shark_x - 82, shark_y + 8, shark_x + 16, shark_y + 54), 5, 168, fill=(28, 22, 22, 255), width=5)
+    for tx in range(shark_x - 50, shark_x + 2, 12):
+        draw.polygon([(tx, shark_y + 34), (tx + 7, shark_y + 48), (tx + 14, shark_y + 33)], fill=(255, 255, 241, 255))
+    for radius in [48, 74, 104]:
+        draw.arc((shark_x - radius, shark_y + 50 - radius // 4, shark_x + radius, shark_y + 50 + radius // 2), 12, 170, fill=(186, 238, 252, 180), width=4)
 
     stage = len(view.wrong)
     if stage >= view.max_wrong:
-        char_x = 948
-        _draw_pirate_character(draw, char_x, 360, view.player_name, falling=True)
-        for radius in [18, 34, 52]:
-            draw.arc((char_x - radius, 462 - radius // 3, char_x + radius, 462 + radius // 2), 8, 172, fill=(195, 240, 255, 210), width=4)
+        char_x = 955
+        _draw_pirate_character(image, draw, char_x, 392, view.player_name, view.avatar_image, falling=True)
+        for radius in [22, 42, 66]:
+            draw.arc((char_x - radius, 510 - radius // 3, char_x + radius, 510 + radius // 2), 8, 172, fill=(207, 245, 255, 220), width=5)
     else:
-        plank_start, plank_end = 402, 920
+        plank_start, plank_end = 424, 930
         progress = stage / view.max_wrong
         char_x = int(plank_start + progress * (plank_end - plank_start))
-        _draw_pirate_character(draw, char_x, 306, view.player_name)
-        # Danger marker at the plank tip.
-        draw.line((920, 292, 920, 370), fill=(245, 77, 63, 180), width=4)
-        draw.polygon([(920, 276), (950, 298), (920, 320)], fill=(190, 28, 34, 255))
+        _draw_pirate_character(image, draw, char_x, 324, view.player_name, view.avatar_image)
+        draw.line((930, 292, 930, 386), fill=(245, 77, 63, 200), width=5)
+        draw.polygon([(930, 276), (965, 300), (930, 326)], fill=(190, 28, 34, 255), outline=(80, 20, 20, 255))
 
     # HUD panels.
     title_font = load_display_font(46)
@@ -468,22 +583,21 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     small_font = load_display_font(22)
     _text_center(draw, (width // 2, 47), "海盜寶藏 2", title_font, (255, 230, 118, 255), stroke_fill=(64, 32, 16, 255), stroke_width=4)
 
-    _rounded_panel(draw, (40, 470, 540, 625), (30, 29, 38, 210), (255, 214, 114, 210))
+    _rounded_panel(draw, (40, 470, 540, 625), (30, 29, 38, 220), (255, 214, 114, 220))
     draw.text((70, 492), "目前題目", font=small_font, fill=(255, 214, 114, 255))
     _text_center(draw, (290, 550), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
     draw.text((70, 585), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
 
-    _rounded_panel(draw, (585, 470, 1060, 625), (30, 29, 38, 210), (255, 214, 114, 210))
+    _rounded_panel(draw, (585, 470, 1060, 625), (30, 29, 38, 220), (255, 214, 114, 220))
     draw.text((615, 492), f"下注 ${view.bet_amount}", font=small_font, fill=(255, 214, 114, 255))
     draw.text((615, 526), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
     draw.text((615, 564), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
     draw.text((615, 594), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
 
-    # Compact status ribbon, truncated to keep image readable.
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
         cleaned_status = cleaned_status[:45] + "…"
-    _rounded_panel(draw, (240, 92, 860, 150), (255, 246, 201, 225), (111, 63, 30, 210), width=2)
+    _rounded_panel(draw, (240, 92, 860, 150), (255, 246, 201, 230), (111, 63, 30, 220), width=2)
     _text_center(draw, (550, 120), cleaned_status, small_font, (78, 42, 22, 255))
 
     output = io.BytesIO()
@@ -491,11 +605,12 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     output.seek(0)
     return discord.File(output, filename="pirate_treasure2.png")
 
+
 def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Embed:
     title = "🗺️ 單人猜字：海盜寶藏2" if view.visual_mode else "🏴‍☠️ 單人猜字：海盜寶藏"
     embed = discord.Embed(title=title, color=discord.Color.dark_gold())
     if view.visual_mode:
-        embed.description = "玩法與海盜寶藏相同；下方 Pillow 圖會隨猜錯次數更新海盜跳板位置。"
+        embed.description = "玩法與海盜寶藏相同；下方 Pillow 圖會在海盜船甲板上顯示玩家頭像、名字與跳板位置。"
     else:
         embed.description = "猜出隱藏的英文單字，錯 6 次海盜就會落水餵鯊魚！"
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
