@@ -548,58 +548,62 @@ def _truncate_to_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.Ima
 
 
 def _build_shark_cutout(size: tuple[int, int] = (360, 300)) -> Image.Image:
-    """Create a transparent cartoon shark cutout inspired by the provided open-mouth shark."""
-    canvas = Image.new("RGBA", (420, 360), (0, 0, 0, 0))
+    """Create a transparent, readable cartoon shark cutout."""
+    canvas = Image.new("RGBA", (560, 360), (0, 0, 0, 0))
     d = ImageDraw.Draw(canvas)
-    outline = (35, 78, 113, 255)
-    blue = (96, 171, 218, 255)
-    blue_dark = (55, 129, 188, 255)
-    blue_light = (159, 221, 244, 255)
-    belly = (230, 250, 255, 255)
-    mouth = (115, 38, 43, 255)
-    mouth_dark = (76, 22, 30, 255)
-    tongue = (238, 115, 121, 255)
+    outline = (28, 70, 106, 255)
+    blue = (93, 170, 218, 255)
+    blue_dark = (50, 122, 184, 255)
+    blue_shadow = (38, 98, 154, 255)
+    belly = (232, 250, 255, 255)
+    mouth = (106, 34, 40, 255)
+    mouth_dark = (70, 18, 27, 255)
+    tongue = (238, 108, 118, 255)
 
-    # Body and fins.
-    d.ellipse((128, 34, 312, 330), fill=blue, outline=outline, width=7)
-    d.polygon([(272, 120), (390, 88), (350, 152), (398, 184), (286, 196)], fill=blue, outline=outline)
-    d.polygon([(246, 260), (310, 344), (250, 330)], fill=blue_dark, outline=outline)
-    d.polygon([(160, 250), (116, 318), (148, 206)], fill=blue_dark, outline=outline)
-    d.polygon([(280, 210), (356, 252), (294, 270)], fill=blue_dark, outline=outline)
+    # Tail and fins first so the body sits clearly on top.
+    d.polygon([(392, 156), (528, 74), (492, 158), (532, 250)], fill=blue_dark, outline=outline)
+    d.line((392, 156, 492, 158), fill=outline, width=5)
+    d.polygon([(230, 92), (304, 18), (334, 112)], fill=blue_dark, outline=outline)
+    d.polygon([(266, 226), (350, 314), (306, 206)], fill=blue_shadow, outline=outline)
+    d.polygon([(168, 218), (104, 300), (138, 196)], fill=blue_shadow, outline=outline)
 
-    # Belly patch and highlight.
-    d.pieslice((100, 40, 306, 338), 102, 275, fill=belly, outline=outline, width=5)
-    d.arc((154, 54, 286, 150), 204, 312, fill=(201, 237, 250, 210), width=8)
+    # Main body and white belly make the shape read as a shark immediately.
+    d.ellipse((78, 74, 430, 258), fill=blue, outline=outline, width=7)
+    d.pieslice((82, 106, 398, 286), 16, 178, fill=belly)
+    d.arc((104, 88, 374, 164), 194, 332, fill=(176, 225, 246, 205), width=8)
 
-    # Open mouth, teeth, tongue.
-    d.ellipse((104, 98, 254, 248), fill=mouth, outline=outline, width=7)
-    d.ellipse((154, 142, 240, 232), fill=mouth_dark)
-    d.pieslice((126, 176, 232, 268), 190, 350, fill=tongue)
-    for points in [
-        [(128, 116), (148, 166), (166, 124)],
-        [(166, 106), (186, 162), (204, 112)],
-        [(206, 120), (222, 168), (242, 136)],
-        [(126, 206), (146, 170), (158, 218)],
-        [(164, 230), (184, 184), (202, 232)],
-        [(214, 218), (230, 178), (246, 210)],
-    ]:
-        d.polygon(points, fill=(255, 255, 255, 255), outline=(232, 240, 244, 255))
+    # Open mouth facing left, with clear red mouth and triangular teeth.
+    d.pieslice((42, 112, 190, 244), 98, 268, fill=mouth, outline=outline, width=7)
+    d.pieslice((86, 150, 188, 246), 120, 252, fill=mouth_dark)
+    d.pieslice((84, 190, 180, 276), 200, 350, fill=tongue)
+    upper_teeth = [
+        [(70, 126), (88, 172), (104, 132)],
+        [(102, 120), (122, 174), (140, 126)],
+        [(136, 128), (154, 176), (174, 140)],
+    ]
+    lower_teeth = [
+        [(72, 224), (92, 178), (108, 220)],
+        [(110, 238), (132, 184), (150, 232)],
+        [(152, 230), (170, 186), (186, 218)],
+    ]
+    for tooth in upper_teeth + lower_teeth:
+        d.polygon(tooth, fill=(255, 255, 255, 255), outline=(229, 238, 244, 255))
 
-    # Face details.
-    d.ellipse((230, 56, 294, 122), fill=(255, 255, 255, 255), outline=outline, width=6)
-    d.ellipse((250, 76, 282, 110), fill=(24, 58, 88, 255))
-    d.ellipse((262, 72, 274, 84), fill=(255, 255, 255, 255))
-    d.ellipse((126, 72, 136, 88), fill=outline)
-    d.ellipse((172, 64, 184, 82), fill=outline)
-    for y in [160, 178, 196]:
-        d.arc((286, y, 332, y + 34), 124, 212, fill=outline, width=4)
+    # Face details and gills.
+    d.ellipse((188, 92, 250, 154), fill=(255, 255, 255, 255), outline=outline, width=6)
+    d.ellipse((210, 112, 238, 142), fill=(20, 56, 86, 255))
+    d.ellipse((222, 108, 232, 118), fill=(255, 255, 255, 255))
+    d.ellipse((132, 96, 142, 110), fill=outline)
+    for x in [306, 326, 346]:
+        d.arc((x, 130, x + 34, 186), 108, 214, fill=outline, width=4)
 
     bbox = canvas.getbbox()
     shark = canvas.crop(bbox) if bbox else canvas
     shark = shark.resize(size, Image.LANCZOS)
+
     shadow = Image.new("RGBA", (size[0] + 34, size[1] + 34), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
-    sd.ellipse((34, size[1] - 42, size[0] - 8, size[1] + 12), fill=(0, 56, 78, 100))
+    sd.ellipse((34, size[1] - 48, size[0] - 8, size[1] + 12), fill=(0, 56, 78, 105))
     shadow = shadow.filter(ImageFilter.GaussianBlur(8))
     composed = Image.new("RGBA", shadow.size, (0, 0, 0, 0))
     composed.alpha_composite(shadow)
