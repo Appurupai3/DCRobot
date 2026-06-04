@@ -16,7 +16,7 @@ from dcrbot.battle import (
 )
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
 from dcrbot.data_heist import CoinFlipChallengeModal
-from dcrbot.pirate_game import PirateTreasureModal
+from dcrbot.pirate_game import PirateTreasure2Modal, PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
@@ -1609,6 +1609,10 @@ class GameMenu(View):
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PirateTreasureModal(interaction.user))
 
+    @discord.ui.button(label="海盜寶藏2", style=discord.ButtonStyle.success, emoji="🗺️", row=0)
+    async def pirate_treasure2(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(PirateTreasure2Modal(interaction.user))
+
     @discord.ui.button(label="打氣球", style=discord.ButtonStyle.danger, emoji="🎈", row=0)
     async def balloon_pump(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(BalloonPumpModal(interaction.user, build_game_menu))
@@ -1699,6 +1703,11 @@ def build_game_help_embed() -> discord.Embed:
     embed.add_field(
         name="🏴‍☠️ 單人猜字：海盜寶藏",
         value="從題庫抽出英文單字，每次猜一個字母；錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🗺️ 單人猜字：海盜寶藏2",
+        value="玩法、下注、獎懲與海盜寶藏相同，但使用 Pillow 產生彩色海上跳板畫面，會隨猜錯次數更新海盜位置、海浪、鯊魚與猜測紀錄。",
         inline=False,
     )
     embed.add_field(
