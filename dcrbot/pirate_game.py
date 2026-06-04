@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import random
 import string
+from functools import lru_cache
+from pathlib import Path
 
 import discord
 from discord.ui import Button, View, Modal, TextInput
@@ -13,6 +15,9 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from dcrbot.pirate import PIRATE_WORDS, pirate_translation
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
 from dcrbot.storage import load_data, open_account, save_data
+
+
+PIRATE_SHARK_IMAGE_PATH = Path(__file__).resolve().parents[1] / "Resources" / "shark.png"
 
 
 class PirateTreasureModal(Modal):
@@ -547,67 +552,29 @@ def _truncate_to_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.Ima
     return (trimmed or text[:1]) + ellipsis
 
 
+@lru_cache(maxsize=1)
+def _load_resource_shark_image() -> Image.Image:
+    """Load the shark artwork that lives outside the package in Resources."""
+    return Image.open(PIRATE_SHARK_IMAGE_PATH).convert("RGBA")
+
+
 def _build_shark_cutout(size: tuple[int, int] = (360, 300)) -> Image.Image:
-    """Create a transparent, readable cartoon shark cutout."""
-    canvas = Image.new("RGBA", (560, 360), (0, 0, 0, 0))
-    d = ImageDraw.Draw(canvas)
-    outline = (28, 70, 106, 255)
-    blue = (93, 170, 218, 255)
-    blue_dark = (50, 122, 184, 255)
-    blue_shadow = (38, 98, 154, 255)
-    belly = (232, 250, 255, 255)
-    mouth = (106, 34, 40, 255)
-    mouth_dark = (70, 18, 27, 255)
-    tongue = (238, 108, 118, 255)
+    """Build a board-sized cutout from the Resources shark artwork."""
+    shark = _load_resource_shark_image().copy()
+    shark.thumbnail(size, Image.LANCZOS)
 
-    # Tail and fins first so the body sits clearly on top.
-    d.polygon([(392, 156), (528, 74), (492, 158), (532, 250)], fill=blue_dark, outline=outline)
-    d.line((392, 156, 492, 158), fill=outline, width=5)
-    d.polygon([(230, 92), (304, 18), (334, 112)], fill=blue_dark, outline=outline)
-    d.polygon([(266, 226), (350, 314), (306, 206)], fill=blue_shadow, outline=outline)
-    d.polygon([(168, 218), (104, 300), (138, 196)], fill=blue_shadow, outline=outline)
-
-    # Main body and white belly make the shape read as a shark immediately.
-    d.ellipse((78, 74, 430, 258), fill=blue, outline=outline, width=7)
-    d.pieslice((82, 106, 398, 286), 16, 178, fill=belly)
-    d.arc((104, 88, 374, 164), 194, 332, fill=(176, 225, 246, 205), width=8)
-
-    # Open mouth facing left, with clear red mouth and triangular teeth.
-    d.pieslice((42, 112, 190, 244), 98, 268, fill=mouth, outline=outline, width=7)
-    d.pieslice((86, 150, 188, 246), 120, 252, fill=mouth_dark)
-    d.pieslice((84, 190, 180, 276), 200, 350, fill=tongue)
-    upper_teeth = [
-        [(70, 126), (88, 172), (104, 132)],
-        [(102, 120), (122, 174), (140, 126)],
-        [(136, 128), (154, 176), (174, 140)],
-    ]
-    lower_teeth = [
-        [(72, 224), (92, 178), (108, 220)],
-        [(110, 238), (132, 184), (150, 232)],
-        [(152, 230), (170, 186), (186, 218)],
-    ]
-    for tooth in upper_teeth + lower_teeth:
-        d.polygon(tooth, fill=(255, 255, 255, 255), outline=(229, 238, 244, 255))
-
-    # Face details and gills.
-    d.ellipse((188, 92, 250, 154), fill=(255, 255, 255, 255), outline=outline, width=6)
-    d.ellipse((210, 112, 238, 142), fill=(20, 56, 86, 255))
-    d.ellipse((222, 108, 232, 118), fill=(255, 255, 255, 255))
-    d.ellipse((132, 96, 142, 110), fill=outline)
-    for x in [306, 326, 346]:
-        d.arc((x, 130, x + 34, 186), 108, 214, fill=outline, width=4)
-
-    bbox = canvas.getbbox()
-    shark = canvas.crop(bbox) if bbox else canvas
-    shark = shark.resize(size, Image.LANCZOS)
+    cutout = Image.new("RGBA", size, (0, 0, 0, 0))
+    offset = ((size[0] - shark.width) // 2, size[1] - shark.height)
+    cutout.alpha_composite(shark, offset)
 
     shadow = Image.new("RGBA", (size[0] + 34, size[1] + 34), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     sd.ellipse((34, size[1] - 48, size[0] - 8, size[1] + 12), fill=(0, 56, 78, 105))
     shadow = shadow.filter(ImageFilter.GaussianBlur(8))
+
     composed = Image.new("RGBA", shadow.size, (0, 0, 0, 0))
     composed.alpha_composite(shadow)
-    composed.alpha_composite(shark, (17, 0))
+    composed.alpha_composite(cutout, (17, 0))
     return composed
 
 
@@ -652,7 +619,7 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     draw.line((162, 150, 260, 98), fill=(58, 35, 23, 255), width=5)
     draw.line((162, 240, 350, 98), fill=(58, 35, 23, 255), width=5)
 
-    # Use a transparent cartoon cutout shark based on the provided reference.
+    # Use the shark artwork from Resources without modifying the image file.
     shark = _build_shark_cutout((350, 300))
     image.alpha_composite(shark, (700, 305))
     draw = ImageDraw.Draw(image)
