@@ -578,18 +578,19 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     draw.line((162, 150, 260, 98), fill=(58, 35, 23, 255), width=5)
     draw.line((162, 240, 350, 98), fill=(58, 35, 23, 255), width=5)
 
-    # Big shark waits in the lower-right corner.
-    shark_x, shark_y = 850, 500
-    draw.ellipse((shark_x - 152, shark_y - 56, shark_x + 172, shark_y + 80), fill=(76, 94, 108, 255), outline=(31, 43, 54, 255), width=6)
-    draw.polygon([(shark_x - 22, shark_y - 50), (shark_x + 44, shark_y - 162), (shark_x + 92, shark_y - 22)], fill=(69, 87, 101, 255), outline=(31, 43, 54, 255))
-    draw.polygon([(shark_x + 112, shark_y - 8), (shark_x + 226, shark_y - 82), (shark_x + 198, shark_y + 64)], fill=(76, 94, 108, 255), outline=(31, 43, 54, 255))
-    draw.ellipse((shark_x - 84, shark_y - 18, shark_x - 68, shark_y - 2), fill=(8, 8, 10, 255))
-    draw.arc((shark_x - 100, shark_y + 12, shark_x + 30, shark_y + 66), 4, 168, fill=(28, 22, 22, 255), width=6)
-    for tx in range(shark_x - 70, shark_x + 22, 13):
-        draw.polygon([(tx, shark_y + 44), (tx + 7, shark_y + 61), (tx + 15, shark_y + 43)], fill=(255, 255, 241, 255))
+    # Big shark waits in the lower-right corner. Keep it inside the canvas and draw it only with shapes
+    # so missing emoji fonts cannot create a broken glyph over the shark.
+    shark_x, shark_y = 815, 500
+    draw.ellipse((shark_x - 150, shark_y - 54, shark_x + 166, shark_y + 78), fill=(76, 94, 108, 255), outline=(31, 43, 54, 255), width=6)
+    draw.polygon([(shark_x - 24, shark_y - 48), (shark_x + 42, shark_y - 154), (shark_x + 88, shark_y - 22)], fill=(69, 87, 101, 255), outline=(31, 43, 54, 255))
+    draw.polygon([(shark_x + 104, shark_y - 8), (shark_x + 220, shark_y - 76), (shark_x + 194, shark_y + 62)], fill=(76, 94, 108, 255), outline=(31, 43, 54, 255))
+    draw.polygon([(shark_x + 126, shark_y - 2), (shark_x + 185, shark_y - 34), (shark_x + 178, shark_y + 34)], fill=(66, 84, 99, 255), outline=(31, 43, 54, 255))
+    draw.ellipse((shark_x - 86, shark_y - 18, shark_x - 70, shark_y - 2), fill=(8, 8, 10, 255))
+    draw.arc((shark_x - 104, shark_y + 12, shark_x + 32, shark_y + 66), 4, 168, fill=(28, 22, 22, 255), width=7)
+    for tx in range(shark_x - 74, shark_x + 22, 13):
+        draw.polygon([(tx, shark_y + 44), (tx + 7, shark_y + 62), (tx + 15, shark_y + 43)], fill=(255, 255, 241, 255))
     for radius in [62, 98, 138]:
         draw.arc((shark_x - radius, shark_y + 62 - radius // 4, shark_x + radius, shark_y + 62 + radius // 2), 12, 170, fill=(195, 240, 252, 185), width=5)
-    _text_center(draw, (895, 396), "🦈", load_display_font(44), (255, 255, 255, 235), stroke_fill=(18, 65, 86, 255), stroke_width=2)
 
     stage = len(view.wrong)
     if stage >= view.max_wrong:
@@ -613,15 +614,14 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     font = load_display_font(26)
     small_font = load_display_font(22)
 
-    _rounded_panel(draw, (34, 404, 514, 502), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((62, 420), "目前題目", font=small_font, fill=(255, 214, 114, 255))
-    _text_center(draw, (270, 462), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
-
-    _rounded_panel(draw, (34, 512, 514, 632), (30, 29, 38, 220), (255, 214, 114, 220))
-    draw.text((62, 530), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
-    draw.text((62, 568), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
-    draw.text((62, 598), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
-    draw.text((62, 622), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
+    _rounded_panel(draw, (34, 420, 514, 632), (30, 29, 38, 220), (255, 214, 114, 220))
+    draw.text((62, 438), "目前題目", font=small_font, fill=(255, 214, 114, 255))
+    _text_center(draw, (274, 486), pirate_word_progress(view), big_font, (255, 255, 245, 255), stroke_fill=(20, 20, 26, 255), stroke_width=2)
+    draw.line((62, 522, 486, 522), fill=(255, 214, 114, 150), width=2)
+    draw.text((62, 538), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
+    draw.text((62, 576), f"命中：{', '.join(sorted(view.guessed)) or '-'}", font=small_font, fill=(122, 244, 163, 255))
+    draw.text((62, 606), f"失誤：{', '.join(sorted(view.wrong)) or '-'}", font=small_font, fill=(255, 143, 120, 255))
+    draw.text((62, 620), f"答案：{pirate_answer_reveal(view)}", font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
