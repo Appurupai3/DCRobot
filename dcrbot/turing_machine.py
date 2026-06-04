@@ -23,6 +23,12 @@ RANDOM_CLUE_COST = 300
 MAX_ACTION_COST = 1500
 MAX_CLUE_COST = 750
 
+
+def format_money_delta(amount: int) -> str:
+    sign = "+" if amount >= 0 else "-"
+    return f"{sign}${abs(amount)}"
+
+
 CJK_FONT_IDS: set[int] = set()
 CJK_FONT_PATHS = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -312,6 +318,8 @@ class NumberSearcherView(View):
         self.colors = tuple(random.choice(COLORS) for _ in range(CODE_LENGTH))
         self.guess_count = 0
         self.clue_count = 0
+        self.total_spent = 0
+        self.settlement_reward = 0
         self.history: list[str] = []
         self.ended = False
         self.message: discord.Message | None = None
@@ -328,6 +336,9 @@ class NumberSearcherView(View):
     def clue_cost(self) -> int:
         return action_cost(self.clue_count, cap=MAX_CLUE_COST)
 
+    def settlement_profit(self) -> int:
+        return self.settlement_reward - self.total_spent
+
     async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
         await open_account(interaction.user)
         users = load_data()
@@ -337,6 +348,7 @@ class NumberSearcherView(View):
             return False
         users[uid]["wallet"] -= cost
         save_data(users)
+        self.total_spent += cost
         return True
 
     def build_embed_and_file(self, status_text: str, *, reveal: bool = False, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
@@ -347,6 +359,9 @@ class NumberSearcherView(View):
         embed.add_field(name="下次數字/顏色線索費用", value=f"${self.clue_cost()}", inline=True)
         embed.add_field(name="隨機線索費用", value=f"${RANDOM_CLUE_COST}", inline=True)
         embed.add_field(name="猜中獎金", value=f"${GUESS_REWARD}", inline=True)
+        embed.add_field(name="已花費", value=f"${self.total_spent}", inline=True)
+        if self.ended:
+            embed.add_field(name="本局營利", value=format_money_delta(self.settlement_profit()), inline=True)
         recent_history = self.history[-8:] or ["尚未有任何紀錄。"]
         embed.add_field(name="紀錄", value="\n".join(recent_history), inline=False)
         embed.set_footer(text="猜數字費用為 100×2^(n1-1)，最高 1500；數字/顏色線索費用最高 750。")
@@ -422,11 +437,22 @@ class NumberSearcherView(View):
             users[uid]["wallet"] += GUESS_REWARD
             save_data(users)
             balance = users[uid]["wallet"]
+            self.settlement_reward = GUESS_REWARD
             self.ended = True
             for child in self.children:
                 child.disabled = True
-            self.history.append(f"✅ ${cost}｜猜測 {format_code(guess)}｜正確，獲得 ${GUESS_REWARD}")
-            await self.refresh(interaction, f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${GUESS_REWARD}。\n目前錢包餘額：${balance}", reveal=True, color=discord.Color.green())
+            profit = self.settlement_profit()
+            self.history.append(
+                f"✅ ${cost}｜猜測 {format_code(guess)}｜正確，獲得 ${GUESS_REWARD}｜營利 {format_money_delta(profit)}"
+            )
+            await self.refresh(
+                interaction,
+                f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${GUESS_REWARD}。\n"
+                f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
+                f"目前錢包餘額：${balance}",
+                reveal=True,
+                color=discord.Color.green(),
+            )
             return
 
         self.history.append(f"❌ ${cost}｜猜測 {format_code(guess)}｜錯誤")
@@ -459,8 +485,14 @@ class NumberSearcherView(View):
         self.ended = True
         for child in self.children:
             child.disabled = True
-        self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}")
-        await self.refresh(interaction, f"你選擇放棄，正確答案是 {format_code(self.secret)}。", reveal=True, color=discord.Color.red())
+        self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
+        await self.refresh(
+            interaction,
+            f"你選擇放棄，正確答案是 {format_code(self.secret)}。\n"
+            f"本局已花費 ${self.total_spent}，營利 {format_money_delta(self.settlement_profit())}。",
+            reveal=True,
+            color=discord.Color.red(),
+        )
 
     async def on_timeout(self) -> None:
         if self.ended:
@@ -469,7 +501,12 @@ class NumberSearcherView(View):
         for child in self.children:
             child.disabled = True
         if self.message:
-            embed, file = self.build_embed_and_file("⌛ 數字搜尋者逾時，遊戲結束。", reveal=True, color=discord.Color.dark_grey())
+            embed, file = self.build_embed_and_file(
+                f"⌛ 數字搜尋者逾時，遊戲結束。\n"
+                f"本局已花費 ${self.total_spent}，營利 {format_money_delta(self.settlement_profit())}。",
+                reveal=True,
+                color=discord.Color.dark_grey(),
+            )
             await self.message.edit(embed=embed, attachments=[file], view=self)
 
 
@@ -507,8 +544,9 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         draw.text((x + 44, y + 166), label, fill=(210, 220, 230), font=small_font)
 
     draw.rounded_rectangle((52, 334, 708, 390), radius=14, fill=(18, 24, 31), outline=(80, 150, 190), width=2)
-    status = f"猜測 {view.guess_count} 次｜線索 {view.clue_count} 次｜猜中 +${GUESS_REWARD}"
-    draw.text((70, 352), safe_text(body_font, status, f"Guesses {view.guess_count} | Clues {view.clue_count} | Win +${GUESS_REWARD}"), fill=(220, 245, 235), font=body_font)
+    status = f"猜測 {view.guess_count} 次｜線索 {view.clue_count} 次｜已花費 ${view.total_spent}｜猜中 +${GUESS_REWARD}"
+    fallback_status = f"Guesses {view.guess_count} | Clues {view.clue_count} | Spent ${view.total_spent} | Win +${GUESS_REWARD}"
+    draw.text((70, 352), safe_text(body_font, status, fallback_status), fill=(220, 245, 235), font=body_font)
 
     output = io.BytesIO()
     image.save(output, format="PNG")
