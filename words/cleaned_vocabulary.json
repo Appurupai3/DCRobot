@@ -1,0 +1,2358 @@
+[
+    {
+        "english": "TREASURE",
+        "traditional_chinese": "寶藏"
+    },
+    {
+        "english": "GALLEON",
+        "traditional_chinese": "大型西班牙帆船"
+    },
+    {
+        "english": "PARROT",
+        "traditional_chinese": "鸚鵡"
+    },
+    {
+        "english": "ANCHOR",
+        "traditional_chinese": "錨"
+    },
+    {
+        "english": "CUTLASS",
+        "traditional_chinese": "彎刀"
+    },
+    {
+        "english": "BOTTLE",
+        "traditional_chinese": "酒瓶"
+    },
+    {
+        "english": "RUM",
+        "traditional_chinese": "蘭姆酒"
+    },
+    {
+        "english": "CANNON",
+        "traditional_chinese": "大砲"
+    },
+    {
+        "english": "ISLAND",
+        "traditional_chinese": "島嶼"
+    },
+    {
+        "english": "COMPASS",
+        "traditional_chinese": "指南針"
+    },
+    {
+        "english": "PLUNDER",
+        "traditional_chinese": "掠奪"
+    },
+    {
+        "english": "SEASHORE",
+        "traditional_chinese": "海岸"
+    },
+    {
+        "english": "HORIZON",
+        "traditional_chinese": "地平線"
+    },
+    {
+        "english": "NAVIGATE",
+        "traditional_chinese": "航行"
+    },
+    {
+        "english": "BUCCANEER",
+        "traditional_chinese": "海盜"
+    },
+    {
+        "english": "MAST",
+        "traditional_chinese": "桅杆"
+    },
+    {
+        "english": "CABIN",
+        "traditional_chinese": "船艙"
+    },
+    {
+        "english": "SAILOR",
+        "traditional_chinese": "水手"
+    },
+    {
+        "english": "BRIG",
+        "traditional_chinese": "雙桅船 / 監禁室"
+    },
+    {
+        "english": "RAID",
+        "traditional_chinese": "突襲"
+    },
+    {
+        "english": "DOUBLOON",
+        "traditional_chinese": "達布隆金幣"
+    },
+    {
+        "english": "HARBOR",
+        "traditional_chinese": "港灣"
+    },
+    {
+        "english": "PORT",
+        "traditional_chinese": "港口"
+    },
+    {
+        "english": "CORSAIR",
+        "traditional_chinese": "私掠船 / 海盜"
+    },
+    {
+        "english": "MAROON",
+        "traditional_chinese": "棄置荒島"
+    },
+    {
+        "english": "SHIPMATE",
+        "traditional_chinese": "船友"
+    },
+    {
+        "english": "STORM",
+        "traditional_chinese": "暴風雨"
+    },
+    {
+        "english": "LAGOON",
+        "traditional_chinese": "潟湖"
+    },
+    {
+        "english": "WHARF",
+        "traditional_chinese": "碼頭"
+    },
+    {
+        "english": "PLANK",
+        "traditional_chinese": "跳板"
+    },
+    {
+        "english": "CROW",
+        "traditional_chinese": "烏鴉"
+    },
+    {
+        "english": "MERMAID",
+        "traditional_chinese": "美人魚"
+    },
+    {
+        "english": "SIREN",
+        "traditional_chinese": "海妖"
+    },
+    {
+        "english": "COCONUT",
+        "traditional_chinese": "椰子"
+    },
+    {
+        "english": "SHIP",
+        "traditional_chinese": "船"
+    },
+    {
+        "english": "GOLD",
+        "traditional_chinese": "黃金"
+    },
+    {
+        "english": "MAP",
+        "traditional_chinese": "地圖"
+    },
+    {
+        "english": "CREW",
+        "traditional_chinese": "船員"
+    },
+    {
+        "english": "SWORD",
+        "traditional_chinese": "劍"
+    },
+    {
+        "english": "FLAG",
+        "traditional_chinese": "旗幟"
+    },
+    {
+        "english": "BOAT",
+        "traditional_chinese": "小船"
+    },
+    {
+        "english": "COIN",
+        "traditional_chinese": "金幣"
+    },
+    {
+        "english": "WAVE",
+        "traditional_chinese": "海浪"
+    },
+    {
+        "english": "REEF",
+        "traditional_chinese": "礁石"
+    },
+    {
+        "english": "SHARK",
+        "traditional_chinese": "鯊魚"
+    },
+    {
+        "english": "CHEST",
+        "traditional_chinese": "寶箱"
+    },
+    {
+        "english": "CAPTAIN",
+        "traditional_chinese": "船長"
+    },
+    {
+        "english": "SAIL",
+        "traditional_chinese": "帆"
+    },
+    {
+        "english": "RIVER",
+        "traditional_chinese": "河流"
+    },
+    {
+        "english": "BAY",
+        "traditional_chinese": "海灣"
+    },
+    {
+        "english": "ROPE",
+        "traditional_chinese": "繩索"
+    },
+    {
+        "english": "MATEY",
+        "traditional_chinese": "夥伴"
+    },
+    {
+        "english": "OCEAN",
+        "traditional_chinese": "海洋"
+    },
+    {
+        "english": "TIDE",
+        "traditional_chinese": "潮汐"
+    },
+    {
+        "english": "BARNACLE",
+        "traditional_chinese": "藤壺"
+    },
+    {
+        "english": "HARPOON",
+        "traditional_chinese": "魚叉"
+    },
+    {
+        "english": "DECK",
+        "traditional_chinese": "甲板"
+    },
+    {
+        "english": "KRAKEN",
+        "traditional_chinese": "海怪"
+    },
+    {
+        "english": "CURRENT",
+        "traditional_chinese": "洋流"
+    },
+    {
+        "english": "PEARL",
+        "traditional_chinese": "珍珠"
+    },
+    {
+        "english": "CORAL",
+        "traditional_chinese": "珊瑚"
+    },
+    {
+        "english": "SEAGULL",
+        "traditional_chinese": "海鷗"
+    },
+    {
+        "english": "WHIRLPOOL",
+        "traditional_chinese": "漩渦"
+    },
+    {
+        "english": "CANOE",
+        "traditional_chinese": "獨木舟"
+    },
+    {
+        "english": "CARGO",
+        "traditional_chinese": "貨物"
+    },
+    {
+        "english": "ANCHORAGE",
+        "traditional_chinese": "停泊處"
+    },
+    {
+        "english": "LIGHTHOUSE",
+        "traditional_chinese": "燈塔"
+    },
+    {
+        "english": "SMUGGLE",
+        "traditional_chinese": "走私"
+    },
+    {
+        "english": "SEAWEED",
+        "traditional_chinese": "海藻"
+    },
+    {
+        "english": "TORCH",
+        "traditional_chinese": "火把"
+    },
+    {
+        "english": "SAND",
+        "traditional_chinese": "沙子"
+    },
+    {
+        "english": "SHORE",
+        "traditional_chinese": "岸邊"
+    },
+    {
+        "english": "LANTERN",
+        "traditional_chinese": "燈籠"
+    },
+    {
+        "english": "BREEZE",
+        "traditional_chinese": "微風"
+    },
+    {
+        "english": "WHISTLE",
+        "traditional_chinese": "口哨"
+    },
+    {
+        "english": "KNOT",
+        "traditional_chinese": "繩結"
+    },
+    {
+        "english": "DOCK",
+        "traditional_chinese": "碼頭"
+    },
+    {
+        "english": "MARINE",
+        "traditional_chinese": "海事"
+    },
+    {
+        "english": "SHELL",
+        "traditional_chinese": "貝殼"
+    },
+    {
+        "english": "DEPTH",
+        "traditional_chinese": "深度"
+    },
+    {
+        "english": "DIVER",
+        "traditional_chinese": "潛水員"
+    },
+    {
+        "english": "MARINA",
+        "traditional_chinese": "遊艇港"
+    },
+    {
+        "english": "GULL",
+        "traditional_chinese": "海鷗"
+    },
+    {
+        "english": "VOYAGE",
+        "traditional_chinese": "航程"
+    },
+    {
+        "english": "HULL",
+        "traditional_chinese": "船體"
+    },
+    {
+        "english": "PROW",
+        "traditional_chinese": "船首"
+    },
+    {
+        "english": "GALLEY",
+        "traditional_chinese": "廚房"
+    },
+    {
+        "english": "RUMBLE",
+        "traditional_chinese": "隆隆聲"
+    },
+    {
+        "english": "BELLOW",
+        "traditional_chinese": "怒吼"
+    },
+    {
+        "english": "CHART",
+        "traditional_chinese": "航海圖"
+    },
+    {
+        "english": "ANCHORING",
+        "traditional_chinese": "拋錨"
+    },
+    {
+        "english": "CABOOSE",
+        "traditional_chinese": "船尾小屋"
+    },
+    {
+        "english": "MUTINY",
+        "traditional_chinese": "叛變"
+    },
+    {
+        "english": "BANDANA",
+        "traditional_chinese": "頭巾"
+    },
+    {
+        "english": "HOOK",
+        "traditional_chinese": "鉤子"
+    },
+    {
+        "english": "PATCH",
+        "traditional_chinese": "眼罩"
+    },
+    {
+        "english": "PEGLEG",
+        "traditional_chinese": "木腿"
+    },
+    {
+        "english": "PARLEY",
+        "traditional_chinese": "談判"
+    },
+    {
+        "english": "PLANKING",
+        "traditional_chinese": "走板"
+    },
+    {
+        "english": "PRIVATEER",
+        "traditional_chinese": "私掠者"
+    },
+    {
+        "english": "QUARTERMASTER",
+        "traditional_chinese": "大副"
+    },
+    {
+        "english": "SCALLYWAG",
+        "traditional_chinese": "小混混"
+    },
+    {
+        "english": "SEXTANT",
+        "traditional_chinese": "六分儀"
+    },
+    {
+        "english": "SLOOP",
+        "traditional_chinese": "單桅帆船"
+    },
+    {
+        "english": "SLOSH",
+        "traditional_chinese": "濺水"
+    },
+    {
+        "english": "SPLASH",
+        "traditional_chinese": "濺起水花"
+    },
+    {
+        "english": "SWAB",
+        "traditional_chinese": "拖把"
+    },
+    {
+        "english": "SWASHBUCKLE",
+        "traditional_chinese": "揮刀戰鬥"
+    },
+    {
+        "english": "TACK",
+        "traditional_chinese": "航向"
+    },
+    {
+        "english": "TIDAL",
+        "traditional_chinese": "潮汐的"
+    },
+    {
+        "english": "YAR",
+        "traditional_chinese": "敏捷"
+    },
+    {
+        "english": "ZEPHYR",
+        "traditional_chinese": "和風"
+    },
+    {
+        "english": "GALAXY",
+        "traditional_chinese": "銀河"
+    },
+    {
+        "english": "ECLIPSE",
+        "traditional_chinese": "食"
+    },
+    {
+        "english": "NEBULA",
+        "traditional_chinese": "星雲"
+    },
+    {
+        "english": "METEOR",
+        "traditional_chinese": "流星"
+    },
+    {
+        "english": "COMET",
+        "traditional_chinese": "彗星"
+    },
+    {
+        "english": "ASTEROID",
+        "traditional_chinese": "小行星"
+    },
+    {
+        "english": "VOLCANO",
+        "traditional_chinese": "火山"
+    },
+    {
+        "english": "CANYON",
+        "traditional_chinese": "峽谷"
+    },
+    {
+        "english": "GLACIER",
+        "traditional_chinese": "冰河"
+    },
+    {
+        "english": "WATERFALL",
+        "traditional_chinese": "瀑布"
+    },
+    {
+        "english": "AVALANCHE",
+        "traditional_chinese": "雪崩"
+    },
+    {
+        "english": "TSUNAMI",
+        "traditional_chinese": "海嘯"
+    },
+    {
+        "english": "TORNADO",
+        "traditional_chinese": "龍捲風"
+    },
+    {
+        "english": "HURRICANE",
+        "traditional_chinese": "颶風"
+    },
+    {
+        "english": "THUNDER",
+        "traditional_chinese": "雷聲"
+    },
+    {
+        "english": "LIGHTNING",
+        "traditional_chinese": "閃電"
+    },
+    {
+        "english": "CONTINENT",
+        "traditional_chinese": "大陸"
+    },
+    {
+        "english": "PENINSULA",
+        "traditional_chinese": "半島"
+    },
+    {
+        "english": "OASIS",
+        "traditional_chinese": "綠洲"
+    },
+    {
+        "english": "DESERT",
+        "traditional_chinese": "沙漠"
+    },
+    {
+        "english": "FOREST",
+        "traditional_chinese": "森林"
+    },
+    {
+        "english": "JUNGLE",
+        "traditional_chinese": "叢林"
+    },
+    {
+        "english": "SWAMP",
+        "traditional_chinese": "沼澤"
+    },
+    {
+        "english": "MEADOW",
+        "traditional_chinese": "草地"
+    },
+    {
+        "english": "VALLEY",
+        "traditional_chinese": "山谷"
+    },
+    {
+        "english": "MOUNTAIN",
+        "traditional_chinese": "山脈"
+    },
+    {
+        "english": "PLATEAU",
+        "traditional_chinese": "高原"
+    },
+    {
+        "english": "CAVERN",
+        "traditional_chinese": "洞穴"
+    },
+    {
+        "english": "AURORA",
+        "traditional_chinese": "極光"
+    },
+    {
+        "english": "TWILIGHT",
+        "traditional_chinese": "微明"
+    },
+    {
+        "english": "DAWN",
+        "traditional_chinese": "黎明"
+    },
+    {
+        "english": "DUSK",
+        "traditional_chinese": "黃昏"
+    },
+    {
+        "english": "ATMOSPHERE",
+        "traditional_chinese": "大氣"
+    },
+    {
+        "english": "STRATOSPHERE",
+        "traditional_chinese": "平流層"
+    },
+    {
+        "english": "GRAVITY",
+        "traditional_chinese": "重力"
+    },
+    {
+        "english": "ORBIT",
+        "traditional_chinese": "軌道"
+    },
+    {
+        "english": "COSMOS",
+        "traditional_chinese": "宇宙"
+    },
+    {
+        "english": "UNIVERSE",
+        "traditional_chinese": "宇宙"
+    },
+    {
+        "english": "PLANET",
+        "traditional_chinese": "行星"
+    },
+    {
+        "english": "SATELLITE",
+        "traditional_chinese": "衛星"
+    },
+    {
+        "english": "FLORA",
+        "traditional_chinese": "植物群"
+    },
+    {
+        "english": "FAUNA",
+        "traditional_chinese": "動物群"
+    },
+    {
+        "english": "WILDERNESS",
+        "traditional_chinese": "荒野"
+    },
+    {
+        "english": "CURRENTS",
+        "traditional_chinese": "洋流"
+    },
+    {
+        "english": "ECOLOGY",
+        "traditional_chinese": "生態學"
+    },
+    {
+        "english": "EXPEDITION",
+        "traditional_chinese": "探險"
+    },
+    {
+        "english": "JOURNEY",
+        "traditional_chinese": "旅程"
+    },
+    {
+        "english": "CRUISE",
+        "traditional_chinese": "巡航"
+    },
+    {
+        "english": "FREIGHTER",
+        "traditional_chinese": "貨輪"
+    },
+    {
+        "english": "SUBMARINE",
+        "traditional_chinese": "潛水艇"
+    },
+    {
+        "english": "VESSEL",
+        "traditional_chinese": "船隻"
+    },
+    {
+        "english": "RUDDER",
+        "traditional_chinese": "舵"
+    },
+    {
+        "english": "PROPELLER",
+        "traditional_chinese": "螺旋槳"
+    },
+    {
+        "english": "MARINER",
+        "traditional_chinese": "海員"
+    },
+    {
+        "english": "PIRATE",
+        "traditional_chinese": "海盜"
+    },
+    {
+        "english": "FLEET",
+        "traditional_chinese": "船隊"
+    },
+    {
+        "english": "RADAR",
+        "traditional_chinese": "雷達"
+    },
+    {
+        "english": "SONAR",
+        "traditional_chinese": "聲納"
+    },
+    {
+        "english": "RECONNAISSANCE",
+        "traditional_chinese": "偵察"
+    },
+    {
+        "english": "AVIATION",
+        "traditional_chinese": "航空"
+    },
+    {
+        "english": "AIRCRAFT",
+        "traditional_chinese": "航空器"
+    },
+    {
+        "english": "HELICOPTER",
+        "traditional_chinese": "直升機"
+    },
+    {
+        "english": "SPACESHIP",
+        "traditional_chinese": "太空船"
+    },
+    {
+        "english": "ROCKET",
+        "traditional_chinese": "火箭"
+    },
+    {
+        "english": "LOCOMOTIVE",
+        "traditional_chinese": "火車頭"
+    },
+    {
+        "english": "SUBWAY",
+        "traditional_chinese": "地鐵"
+    },
+    {
+        "english": "HIGHWAY",
+        "traditional_chinese": "公路"
+    },
+    {
+        "english": "BOULEVARD",
+        "traditional_chinese": "林蔭大道"
+    },
+    {
+        "english": "INTERSECTION",
+        "traditional_chinese": "十字路口"
+    },
+    {
+        "english": "TERMINAL",
+        "traditional_chinese": "終點站"
+    },
+    {
+        "english": "PASSPORT",
+        "traditional_chinese": "護照"
+    },
+    {
+        "english": "LUGGAGE",
+        "traditional_chinese": "行李"
+    },
+    {
+        "english": "ITINERARY",
+        "traditional_chinese": "行程"
+    },
+    {
+        "english": "DESTINATION",
+        "traditional_chinese": "目的地"
+    },
+    {
+        "english": "SOUVENIR",
+        "traditional_chinese": "紀念品"
+    },
+    {
+        "english": "BACKPACK",
+        "traditional_chinese": "背包"
+    },
+    {
+        "english": "TREK",
+        "traditional_chinese": "艱苦跋涉"
+    },
+    {
+        "english": "SAFARI",
+        "traditional_chinese": "狩獵旅行"
+    },
+    {
+        "english": "PILGRIMAGE",
+        "traditional_chinese": "朝聖"
+    },
+    {
+        "english": "TRANSIT",
+        "traditional_chinese": "過境"
+    },
+    {
+        "english": "IMMIGRATION",
+        "traditional_chinese": "移民"
+    },
+    {
+        "english": "KINGDOM",
+        "traditional_chinese": "王國"
+    },
+    {
+        "english": "EMPIRE",
+        "traditional_chinese": "帝國"
+    },
+    {
+        "english": "DYNASTY",
+        "traditional_chinese": "朝代"
+    },
+    {
+        "english": "MONARCH",
+        "traditional_chinese": "君主"
+    },
+    {
+        "english": "EMPEROR",
+        "traditional_chinese": "皇帝"
+    },
+    {
+        "english": "KNIGHT",
+        "traditional_chinese": "騎士"
+    },
+    {
+        "english": "WARRIOR",
+        "traditional_chinese": "戰士"
+    },
+    {
+        "english": "PALADIN",
+        "traditional_chinese": "聖騎士"
+    },
+    {
+        "english": "WIZARD",
+        "traditional_chinese": "巫師"
+    },
+    {
+        "english": "SORCERER",
+        "traditional_chinese": "魔術師"
+    },
+    {
+        "english": "ALCHEMIST",
+        "traditional_chinese": "鍊金術士"
+    },
+    {
+        "english": "CASTLE",
+        "traditional_chinese": "城堡"
+    },
+    {
+        "english": "FORTRESS",
+        "traditional_chinese": "堡壘"
+    },
+    {
+        "english": "DUNGEON",
+        "traditional_chinese": "地牢"
+    },
+    {
+        "english": "PALACE",
+        "traditional_chinese": "宮殿"
+    },
+    {
+        "english": "SANCTUARY",
+        "traditional_chinese": "庇護所"
+    },
+    {
+        "english": "TEMPLE",
+        "traditional_chinese": "寺廟"
+    },
+    {
+        "english": "CATHEDRAL",
+        "traditional_chinese": "大教堂"
+    },
+    {
+        "english": "MONASTERY",
+        "traditional_chinese": "修修道院"
+    },
+    {
+        "english": "SHRINE",
+        "traditional_chinese": "神龕"
+    },
+    {
+        "english": "LEGEND",
+        "traditional_chinese": "傳說"
+    },
+    {
+        "english": "MYTH",
+        "traditional_chinese": "神話"
+    },
+    {
+        "english": "PROPHECY",
+        "traditional_chinese": "預言"
+    },
+    {
+        "english": "DESTINY",
+        "traditional_chinese": "命運"
+    },
+    {
+        "english": "ARTIFACT",
+        "traditional_chinese": "文物"
+    },
+    {
+        "english": "RELIC",
+        "traditional_chinese": "遺物"
+    },
+    {
+        "english": "ARMOR",
+        "traditional_chinese": "盔甲"
+    },
+    {
+        "english": "SHIELD",
+        "traditional_chinese": "盾牌"
+    },
+    {
+        "english": "ARROW",
+        "traditional_chinese": "箭"
+    },
+    {
+        "english": "ARCHER",
+        "traditional_chinese": "弓箭手"
+    },
+    {
+        "english": "CHARIOT",
+        "traditional_chinese": "戰車"
+    },
+    {
+        "english": "CHRONICLE",
+        "traditional_chinese": "編年史"
+    },
+    {
+        "english": "HERITAGE",
+        "traditional_chinese": "遺產"
+    },
+    {
+        "english": "CIVILIZATION",
+        "traditional_chinese": "文明"
+    },
+    {
+        "english": "ANTIQUITY",
+        "traditional_chinese": "古代"
+    },
+    {
+        "english": "MEDIEVAL",
+        "traditional_chinese": "中世紀的"
+    },
+    {
+        "english": "RENAISSANCE",
+        "traditional_chinese": "文藝復興"
+    },
+    {
+        "english": "ARCHAEOLOGY",
+        "traditional_chinese": "考古學"
+    },
+    {
+        "english": "REBELLION",
+        "traditional_chinese": "叛亂"
+    },
+    {
+        "english": "REVOLUTION",
+        "traditional_chinese": "革命"
+    },
+    {
+        "english": "TREATY",
+        "traditional_chinese": "條約"
+    },
+    {
+        "english": "ALLIANCE",
+        "traditional_chinese": "聯盟"
+    },
+    {
+        "english": "CONQUEST",
+        "traditional_chinese": "征服"
+    },
+    {
+        "english": "SIEGE",
+        "traditional_chinese": "圍攻"
+    },
+    {
+        "english": "BANNER",
+        "traditional_chinese": "旗幟"
+    },
+    {
+        "english": "HERALD",
+        "traditional_chinese": "使者"
+    },
+    {
+        "english": "DYNASTIC",
+        "traditional_chinese": "王朝的"
+    },
+    {
+        "english": "SOVEREIGN",
+        "traditional_chinese": "主權者"
+    },
+    {
+        "english": "PREDATOR",
+        "traditional_chinese": "捕食者"
+    },
+    {
+        "english": "PREY",
+        "traditional_chinese": "獵物"
+    },
+    {
+        "english": "MAMMAL",
+        "traditional_chinese": "哺乳動物"
+    },
+    {
+        "english": "REPTILE",
+        "traditional_chinese": "爬行動物"
+    },
+    {
+        "english": "AMPHIBIAN",
+        "traditional_chinese": "兩棲動物"
+    },
+    {
+        "english": "CARNIVORE",
+        "traditional_chinese": "肉食動物"
+    },
+    {
+        "english": "HERBIVORE",
+        "traditional_chinese": "草食動物"
+    },
+    {
+        "english": "OMNIVORE",
+        "traditional_chinese": "雜食動物"
+    },
+    {
+        "english": "DINOSAUR",
+        "traditional_chinese": "恐龍"
+    },
+    {
+        "english": "FOSSIL",
+        "traditional_chinese": "化石"
+    },
+    {
+        "english": "EAGLE",
+        "traditional_chinese": "老鷹"
+    },
+    {
+        "english": "FALCON",
+        "traditional_chinese": "獵鷹"
+    },
+    {
+        "english": "OWL",
+        "traditional_chinese": "貓頭鷹"
+    },
+    {
+        "english": "LEOPARD",
+        "traditional_chinese": "豹"
+    },
+    {
+        "english": "PANTHER",
+        "traditional_chinese": "黑豹"
+    },
+    {
+        "english": "CHEETAH",
+        "traditional_chinese": "獵豹"
+    },
+    {
+        "english": "STALLION",
+        "traditional_chinese": "公馬"
+    },
+    {
+        "english": "DOLPHIN",
+        "traditional_chinese": "海豚"
+    },
+    {
+        "english": "WHALE",
+        "traditional_chinese": "鯨魚"
+    },
+    {
+        "english": "OCTOPUS",
+        "traditional_chinese": "章魚"
+    },
+    {
+        "english": "JELLYFISH",
+        "traditional_chinese": "水母"
+    },
+    {
+        "english": "REINDEER",
+        "traditional_chinese": "馴鹿"
+    },
+    {
+        "english": "SQUIRREL",
+        "traditional_chinese": "松鼠"
+    },
+    {
+        "english": "CHAMELEON",
+        "traditional_chinese": "變色龍"
+    },
+    {
+        "english": "FLAMINGO",
+        "traditional_chinese": "火烈鳥"
+    },
+    {
+        "english": "PEACOCK",
+        "traditional_chinese": "孔雀"
+    },
+    {
+        "english": "SWAN",
+        "traditional_chinese": "天鵝"
+    },
+    {
+        "english": "BUTTERFLY",
+        "traditional_chinese": "蝴蝶"
+    },
+    {
+        "english": "DRAGONFLY",
+        "traditional_chinese": "蜻蜓"
+    },
+    {
+        "english": "SCORPION",
+        "traditional_chinese": "蠍子"
+    },
+    {
+        "english": "ORCHID",
+        "traditional_chinese": "蘭花"
+    },
+    {
+        "english": "ROSE",
+        "traditional_chinese": "玫瑰"
+    },
+    {
+        "english": "SUNFLOWER",
+        "traditional_chinese": "向日葵"
+    },
+    {
+        "english": "JASMINE",
+        "traditional_chinese": "茉莉花"
+    },
+    {
+        "english": "LAVENDER",
+        "traditional_chinese": "薰衣草"
+    },
+    {
+        "english": "MAPLE",
+        "traditional_chinese": "楓樹"
+    },
+    {
+        "english": "OAK",
+        "traditional_chinese": "橡樹"
+    },
+    {
+        "english": "PINE",
+        "traditional_chinese": "松樹"
+    },
+    {
+        "english": "BAMBOO",
+        "traditional_chinese": "竹子"
+    },
+    {
+        "english": "CACTUS",
+        "traditional_chinese": "仙人掌"
+    },
+    {
+        "english": "MUSHROOM",
+        "traditional_chinese": "蘑菇"
+    },
+    {
+        "english": "FERN",
+        "traditional_chinese": "蕨類"
+    },
+    {
+        "english": "MOSS",
+        "traditional_chinese": "苔蘚"
+    },
+    {
+        "english": "BLOSSOM",
+        "traditional_chinese": "花朵"
+    },
+    {
+        "english": "PETAL",
+        "traditional_chinese": "花瓣"
+    },
+    {
+        "english": "TIMBER",
+        "traditional_chinese": "木材"
+    },
+    {
+        "english": "CANOPY",
+        "traditional_chinese": "樹冠"
+    },
+    {
+        "english": "FOLIAGE",
+        "traditional_chinese": "葉子"
+    },
+    {
+        "english": "ALGORITHM",
+        "traditional_chinese": "演算法"
+    },
+    {
+        "english": "SOFTWARE",
+        "traditional_chinese": "軟體"
+    },
+    {
+        "english": "HARDWARE",
+        "traditional_chinese": "硬體"
+    },
+    {
+        "english": "NETWORK",
+        "traditional_chinese": "網路"
+    },
+    {
+        "english": "DATABASE",
+        "traditional_chinese": "資料庫"
+    },
+    {
+        "english": "INTERNET",
+        "traditional_chinese": "網際網路"
+    },
+    {
+        "english": "CYBERSECURITY",
+        "traditional_chinese": "網絡安全"
+    },
+    {
+        "english": "ROBOTICS",
+        "traditional_chinese": "機器人學"
+    },
+    {
+        "english": "AUTOMATION",
+        "traditional_chinese": "自動化"
+    },
+    {
+        "english": "ELECTRONICS",
+        "traditional_chinese": "電子學"
+    },
+    {
+        "english": "ELECTRICITY",
+        "traditional_chinese": "電力"
+    },
+    {
+        "english": "GENERATOR",
+        "traditional_chinese": "發電機"
+    },
+    {
+        "english": "BATTERY",
+        "traditional_chinese": "電池"
+    },
+    {
+        "english": "CIRCUITS",
+        "traditional_chinese": "電路"
+    },
+    {
+        "english": "PROCESSOR",
+        "traditional_chinese": "處理器"
+    },
+    {
+        "english": "SENSOR",
+        "traditional_chinese": "感測器"
+    },
+    {
+        "english": "TELESCOPE",
+        "traditional_chinese": "望遠鏡"
+    },
+    {
+        "english": "MICROSCOPE",
+        "traditional_chinese": "顯微鏡"
+    },
+    {
+        "english": "LABORATORY",
+        "traditional_chinese": "實驗室"
+    },
+    {
+        "english": "EXPERIMENT",
+        "traditional_chinese": "實驗"
+    },
+    {
+        "english": "RESEARCH",
+        "traditional_chinese": "研究"
+    },
+    {
+        "english": "INNOVATION",
+        "traditional_chinese": "創新"
+    },
+    {
+        "english": "INVENTION",
+        "traditional_chinese": "發明"
+    },
+    {
+        "english": "DISCOVERY",
+        "traditional_chinese": "發現"
+    },
+    {
+        "english": "FORMULA",
+        "traditional_chinese": "公式"
+    },
+    {
+        "english": "EQUATION",
+        "traditional_chinese": "方程式"
+    },
+    {
+        "english": "CHEMICAL",
+        "traditional_chinese": "化學製品"
+    },
+    {
+        "english": "MOLECULE",
+        "traditional_chinese": "分子"
+    },
+    {
+        "english": "ATOM",
+        "traditional_chinese": "原子"
+    },
+    {
+        "english": "ELECTRON",
+        "traditional_chinese": "電子"
+    },
+    {
+        "english": "NEUTRON",
+        "traditional_chinese": "中子"
+    },
+    {
+        "english": "PROTON",
+        "traditional_chinese": "質子"
+    },
+    {
+        "english": "ELEMENT",
+        "traditional_chinese": "元素"
+    },
+    {
+        "english": "GENETICS",
+        "traditional_chinese": "遺傳學"
+    },
+    {
+        "english": "DNA",
+        "traditional_chinese": "去氧核糖核酸"
+    },
+    {
+        "english": "CELL",
+        "traditional_chinese": "細胞"
+    },
+    {
+        "english": "ORGANISM",
+        "traditional_chinese": "生物體"
+    },
+    {
+        "english": "EVOLUTION",
+        "traditional_chinese": "進化"
+    },
+    {
+        "english": "MEDICINE",
+        "traditional_chinese": "醫學"
+    },
+    {
+        "english": "ANTIBIOTIC",
+        "traditional_chinese": "抗生素"
+    },
+    {
+        "english": "VACCINE",
+        "traditional_chinese": "疫苗"
+    },
+    {
+        "english": "SURGERY",
+        "traditional_chinese": "手術"
+    },
+    {
+        "english": "THERAPY",
+        "traditional_chinese": "治療"
+    },
+    {
+        "english": "DIAGNOSIS",
+        "traditional_chinese": "診斷"
+    },
+    {
+        "english": "SYMPTOM",
+        "traditional_chinese": "症狀"
+    },
+    {
+        "english": "DISEASE",
+        "traditional_chinese": "疾病"
+    },
+    {
+        "english": "VIRUS",
+        "traditional_chinese": "病毒"
+    },
+    {
+        "english": "BACTERIA",
+        "traditional_chinese": "細菌"
+    },
+    {
+        "english": "IMMUNITY",
+        "traditional_chinese": "免疫力"
+    },
+    {
+        "english": "GENOME",
+        "traditional_chinese": "基因組"
+    },
+    {
+        "english": "COMPANY",
+        "traditional_chinese": "公司"
+    },
+    {
+        "english": "CORPORATION",
+        "traditional_chinese": "法人"
+    },
+    {
+        "english": "ENTERPRISE",
+        "traditional_chinese": "企業"
+    },
+    {
+        "english": "INDUSTRY",
+        "traditional_chinese": "工業"
+    },
+    {
+        "english": "COMMERCE",
+        "traditional_chinese": "商業"
+    },
+    {
+        "english": "ECONOMY",
+        "traditional_chinese": "經濟"
+    },
+    {
+        "english": "FINANCE",
+        "traditional_chinese": "財政"
+    },
+    {
+        "english": "INVESTMENT",
+        "traditional_chinese": "投資"
+    },
+    {
+        "english": "CAPITAL",
+        "traditional_chinese": "資本"
+    },
+    {
+        "english": "REVENUE",
+        "traditional_chinese": "收入"
+    },
+    {
+        "english": "PROFIT",
+        "traditional_chinese": "利潤"
+    },
+    {
+        "english": "BUDGET",
+        "traditional_chinese": "預算"
+    },
+    {
+        "english": "EXPENSE",
+        "traditional_chinese": "費用"
+    },
+    {
+        "english": "BANKRUPTCY",
+        "traditional_chinese": "破產"
+    },
+    {
+        "english": "INFLATION",
+        "traditional_chinese": "通貨膨脹"
+    },
+    {
+        "english": "MARKETING",
+        "traditional_chinese": "行銷"
+    },
+    {
+        "english": "ADVERTISING",
+        "traditional_chinese": "廣告"
+    },
+    {
+        "english": "CONSUMER",
+        "traditional_chinese": "消費者"
+    },
+    {
+        "english": "CUSTOMER",
+        "traditional_chinese": "顧客"
+    },
+    {
+        "english": "STRATEGY",
+        "traditional_chinese": "策略"
+    },
+    {
+        "english": "MANAGEMENT",
+        "traditional_chinese": "管理"
+    },
+    {
+        "english": "EXECUTIVE",
+        "traditional_chinese": "主管"
+    },
+    {
+        "english": "DIRECTOR",
+        "traditional_chinese": "董事"
+    },
+    {
+        "english": "MANAGER",
+        "traditional_chinese": "經理"
+    },
+    {
+        "english": "EMPLOYEE",
+        "traditional_chinese": "員工"
+    },
+    {
+        "english": "CONTRACT",
+        "traditional_chinese": "合約"
+    },
+    {
+        "english": "AGREEMENT",
+        "traditional_chinese": "協議"
+    },
+    {
+        "english": "NEGOTIATION",
+        "traditional_chinese": "談判"
+    },
+    {
+        "english": "PARTNERSHIP",
+        "traditional_chinese": "合夥關係"
+    },
+    {
+        "english": "MERGER",
+        "traditional_chinese": "合併"
+    },
+    {
+        "english": "ACQUISITION",
+        "traditional_chinese": "收購"
+    },
+    {
+        "english": "CURRENCY",
+        "traditional_chinese": "貨幣"
+    },
+    {
+        "english": "TRANSACTION",
+        "traditional_chinese": "交易"
+    },
+    {
+        "english": "AUDIT",
+        "traditional_chinese": "審計"
+    },
+    {
+        "english": "STOCKS",
+        "traditional_chinese": "股票"
+    },
+    {
+        "english": "BONDS",
+        "traditional_chinese": "債券"
+    },
+    {
+        "english": "INSURANCE",
+        "traditional_chinese": "保險"
+    },
+    {
+        "english": "TAXATION",
+        "traditional_chinese": "稅收"
+    },
+    {
+        "english": "TARIFF",
+        "traditional_chinese": "關稅"
+    },
+    {
+        "english": "LEGISLATION",
+        "traditional_chinese": "立法"
+    },
+    {
+        "english": "REGULATION",
+        "traditional_chinese": "法規"
+    },
+    {
+        "english": "LITIGATION",
+        "traditional_chinese": "訴訟"
+    },
+    {
+        "english": "ATTORNEY",
+        "traditional_chinese": "律師"
+    },
+    {
+        "english": "LAWYER",
+        "traditional_chinese": "律師"
+    },
+    {
+        "english": "JUDGE",
+        "traditional_chinese": "法官"
+    },
+    {
+        "english": "COURT",
+        "traditional_chinese": "法庭"
+    },
+    {
+        "english": "VERDICT",
+        "traditional_chinese": "判決"
+    },
+    {
+        "english": "JUSTICE",
+        "traditional_chinese": "正義"
+    },
+    {
+        "english": "WITNESS",
+        "traditional_chinese": "證人"
+    },
+    {
+        "english": "EVIDENCE",
+        "traditional_chinese": "證據"
+    },
+    {
+        "english": "MASTERPIECE",
+        "traditional_chinese": "傑作"
+    },
+    {
+        "english": "PAINTING",
+        "traditional_chinese": "畫作"
+    },
+    {
+        "english": "SCULPTURE",
+        "traditional_chinese": "雕塑"
+    },
+    {
+        "english": "ARCHITECTURE",
+        "traditional_chinese": "建築"
+    },
+    {
+        "english": "GALLERY",
+        "traditional_chinese": "畫廊"
+    },
+    {
+        "english": "MUSEUM",
+        "traditional_chinese": "博物館"
+    },
+    {
+        "english": "THEATER",
+        "traditional_chinese": "劇院"
+    },
+    {
+        "english": "CINEMA",
+        "traditional_chinese": "電影院"
+    },
+    {
+        "english": "CONCERT",
+        "traditional_chinese": "音樂會"
+    },
+    {
+        "english": "SYMPHONY",
+        "traditional_chinese": "交響樂"
+    },
+    {
+        "english": "ORCHESTRA",
+        "traditional_chinese": "管弦樂團"
+    },
+    {
+        "english": "MELODY",
+        "traditional_chinese": "旋律"
+    },
+    {
+        "english": "RHYTHM",
+        "traditional_chinese": "節奏"
+    },
+    {
+        "english": "HARMONY",
+        "traditional_chinese": "和聲"
+    },
+    {
+        "english": "COMPOSER",
+        "traditional_chinese": "作曲家"
+    },
+    {
+        "english": "MUSICIAN",
+        "traditional_chinese": "音樂家"
+    },
+    {
+        "english": "VOCALIST",
+        "traditional_chinese": "歌手"
+    },
+    {
+        "english": "INSTRUMENT",
+        "traditional_chinese": "樂器"
+    },
+    {
+        "english": "PIANO",
+        "traditional_chinese": "鋼琴"
+    },
+    {
+        "english": "VIOLIN",
+        "traditional_chinese": "小提琴"
+    },
+    {
+        "english": "GUITAR",
+        "traditional_chinese": "吉他"
+    },
+    {
+        "english": "POETRY",
+        "traditional_chinese": "詩歌"
+    },
+    {
+        "english": "NOVEL",
+        "traditional_chinese": "小說"
+    },
+    {
+        "english": "LITERATURE",
+        "traditional_chinese": "文學"
+    },
+    {
+        "english": "DRAMA",
+        "traditional_chinese": "戲劇"
+    },
+    {
+        "english": "COMEDY",
+        "traditional_chinese": "喜劇"
+    },
+    {
+        "english": "TRAGEDY",
+        "traditional_chinese": "悲劇"
+    },
+    {
+        "english": "FICTION",
+        "traditional_chinese": "小說"
+    },
+    {
+        "english": "BIOGRAPHY",
+        "traditional_chinese": "傳記"
+    },
+    {
+        "english": "JOURNAL",
+        "traditional_chinese": "期刊"
+    },
+    {
+        "english": "MAGAZINE",
+        "traditional_chinese": "雜誌"
+    },
+    {
+        "english": "BROADCAST",
+        "traditional_chinese": "廣播"
+    },
+    {
+        "english": "TELEVISION",
+        "traditional_chinese": "電視"
+    },
+    {
+        "english": "FESTIVAL",
+        "traditional_chinese": "節日"
+    },
+    {
+        "english": "CARNIVAL",
+        "traditional_chinese": "狂歡節"
+    },
+    {
+        "english": "EXHIBITION",
+        "traditional_chinese": "展覽"
+    },
+    {
+        "english": "PAGEANT",
+        "traditional_chinese": "盛會"
+    },
+    {
+        "english": "COSTUME",
+        "traditional_chinese": "服裝"
+    },
+    {
+        "english": "ACCESSORY",
+        "traditional_chinese": "飾品"
+    },
+    {
+        "english": "FASHION",
+        "traditional_chinese": "時尚"
+    },
+    {
+        "english": "DESIGN",
+        "traditional_chinese": "設計"
+    },
+    {
+        "english": "PHOTOGRAPHY",
+        "traditional_chinese": "攝影"
+    },
+    {
+        "english": "CREATIVITY",
+        "traditional_chinese": "創造力"
+    },
+    {
+        "english": "IMAGINATION",
+        "traditional_chinese": "想像力"
+    },
+    {
+        "english": "INSPIRATION",
+        "traditional_chinese": "靈感"
+    },
+    {
+        "english": "ENTERTAINMENT",
+        "traditional_chinese": "娛樂"
+    },
+    {
+        "english": "AMUSEMENT",
+        "traditional_chinese": "娛樂"
+    },
+    {
+        "english": "RECREATION",
+        "traditional_chinese": "消遣"
+    },
+    {
+        "english": "LEISURE",
+        "traditional_chinese": "休閒"
+    },
+    {
+        "english": "HOBBY",
+        "traditional_chinese": "嗜好"
+    },
+    {
+        "english": "EMOTION",
+        "traditional_chinese": "情感"
+    },
+    {
+        "english": "PASSION",
+        "traditional_chinese": "激情"
+    },
+    {
+        "english": "EMPATHY",
+        "traditional_chinese": "同理心"
+    },
+    {
+        "english": "SYMPATHY",
+        "traditional_chinese": "同情心"
+    },
+    {
+        "english": "COMPASSION",
+        "traditional_chinese": "憐憫"
+    },
+    {
+        "english": "COURAGE",
+        "traditional_chinese": "勇氣"
+    },
+    {
+        "english": "BRAVERY",
+        "traditional_chinese": "勇敢"
+    },
+    {
+        "english": "WISDOM",
+        "traditional_chinese": "智慧"
+    },
+    {
+        "english": "KNOWLEDGE",
+        "traditional_chinese": "知識"
+    },
+    {
+        "english": "INTELLECT",
+        "traditional_chinese": "智力"
+    },
+    {
+        "english": "INTUITION",
+        "traditional_chinese": "直覺"
+    },
+    {
+        "english": "INSTINCT",
+        "traditional_chinese": "本能"
+    },
+    {
+        "english": "MEMORY",
+        "traditional_chinese": "記憶"
+    },
+    {
+        "english": "CONSCIOUSNESS",
+        "traditional_chinese": "意識"
+    },
+    {
+        "english": "CONSCIENCE",
+        "traditional_chinese": "良心"
+    },
+    {
+        "english": "INTEGRITY",
+        "traditional_chinese": "正直"
+    },
+    {
+        "english": "HONESTY",
+        "traditional_chinese": "誠實"
+    },
+    {
+        "english": "LOYALTY",
+        "traditional_chinese": "忠誠"
+    },
+    {
+        "english": "DEDICATION",
+        "traditional_chinese": "奉獻"
+    },
+    {
+        "english": "PERSEVERANCE",
+        "traditional_chinese": "堅持不懈"
+    },
+    {
+        "english": "PATIENCE",
+        "traditional_chinese": "耐心"
+    },
+    {
+        "english": "TOLERANCE",
+        "traditional_chinese": "寬容"
+    },
+    {
+        "english": "GRATITUDE",
+        "traditional_chinese": "感激"
+    },
+    {
+        "english": "GENEROSITY",
+        "traditional_chinese": "慷慨"
+    },
+    {
+        "english": "AMBITION",
+        "traditional_chinese": "雄心"
+    },
+    {
+        "english": "CONFIDENCE",
+        "traditional_chinese": "自信"
+    },
+    {
+        "english": "OPTIMISM",
+        "traditional_chinese": "樂觀"
+    },
+    {
+        "english": "PESSIMISM",
+        "traditional_chinese": "悲觀"
+    },
+    {
+        "english": "ANXIETY",
+        "traditional_chinese": "焦慮"
+    },
+    {
+        "english": "DEPRESSION",
+        "traditional_chinese": "抑鬱"
+    },
+    {
+        "english": "FRUSTRATION",
+        "traditional_chinese": "挫折"
+    },
+    {
+        "english": "JEALOUSY",
+        "traditional_chinese": "嫉妒"
+    },
+    {
+        "english": "ENVY",
+        "traditional_chinese": "羨慕"
+    },
+    {
+        "english": "ANGER",
+        "traditional_chinese": "憤怒"
+    },
+    {
+        "english": "JOY",
+        "traditional_chinese": "歡樂"
+    },
+    {
+        "english": "HAPPINESS",
+        "traditional_chinese": "幸福"
+    },
+    {
+        "english": "SORROW",
+        "traditional_chinese": "悲傷"
+    },
+    {
+        "english": "GRIEF",
+        "traditional_chinese": "悲痛"
+    },
+    {
+        "english": "COGNITION",
+        "traditional_chinese": "認知"
+    },
+    {
+        "english": "PERCEPTION",
+        "traditional_chinese": "感知"
+    },
+    {
+        "english": "ATTITUDE",
+        "traditional_chinese": "態度"
+    },
+    {
+        "english": "BEHAVIOR",
+        "traditional_chinese": "行為"
+    },
+    {
+        "english": "PERSONALITY",
+        "traditional_chinese": "個性"
+    },
+    {
+        "english": "CHARACTER",
+        "traditional_chinese": "性格"
+    },
+    {
+        "english": "TEMPERAMENT",
+        "traditional_chinese": "氣質"
+    },
+    {
+        "english": "MOTIVATION",
+        "traditional_chinese": "動機"
+    },
+    {
+        "english": "INCENTIVE",
+        "traditional_chinese": "激勵"
+    },
+    {
+        "english": "ASPIRATION",
+        "traditional_chinese": "抱負"
+    },
+    {
+        "english": "CHARISMA",
+        "traditional_chinese": "魅力"
+    },
+    {
+        "english": "MELANCHOLY",
+        "traditional_chinese": "憂鬱"
+    },
+    {
+        "english": "COMMUNITY",
+        "traditional_chinese": "社區"
+    },
+    {
+        "english": "SOCIETY",
+        "traditional_chinese": "社會"
+    },
+    {
+        "english": "CULTURE",
+        "traditional_chinese": "文化"
+    },
+    {
+        "english": "TRADITION",
+        "traditional_chinese": "傳統"
+    },
+    {
+        "english": "CUSTOM",
+        "traditional_chinese": "習俗"
+    },
+    {
+        "english": "CITIZEN",
+        "traditional_chinese": "公民"
+    },
+    {
+        "english": "POPULATION",
+        "traditional_chinese": "人口"
+    },
+    {
+        "english": "NEIGHBORHOOD",
+        "traditional_chinese": "鄰里"
+    },
+    {
+        "english": "METROPOLIS",
+        "traditional_chinese": "大都市"
+    },
+    {
+        "english": "SUBURB",
+        "traditional_chinese": "郊區"
+    },
+    {
+        "english": "INFRASTRUCTURE",
+        "traditional_chinese": "基礎設施"
+    },
+    {
+        "english": "SKYSCRAPER",
+        "traditional_chinese": "摩天大樓"
+    },
+    {
+        "english": "MONUMENT",
+        "traditional_chinese": "紀念碑"
+    },
+    {
+        "english": "FOUNTAIN",
+        "traditional_chinese": "噴泉"
+    },
+    {
+        "english": "SQUARE",
+        "traditional_chinese": "廣場"
+    },
+    {
+        "english": "PAVILION",
+        "traditional_chinese": "涼亭"
+    },
+    {
+        "english": "RESIDENCE",
+        "traditional_chinese": "住宅"
+    },
+    {
+        "english": "APARTMENT",
+        "traditional_chinese": "公寓"
+    },
+    {
+        "english": "MANSION",
+        "traditional_chinese": "豪宅"
+    },
+    {
+        "english": "EDUCATION",
+        "traditional_chinese": "教育"
+    },
+    {
+        "english": "UNIVERSITY",
+        "traditional_chinese": "大學"
+    },
+    {
+        "english": "ACADEMY",
+        "traditional_chinese": "學院"
+    },
+    {
+        "english": "CURRICULUM",
+        "traditional_chinese": "課程"
+    },
+    {
+        "english": "GRADUATION",
+        "traditional_chinese": "畢業"
+    },
+    {
+        "english": "DIPLOMA",
+        "traditional_chinese": "文憑"
+    },
+    {
+        "english": "PROFESSION",
+        "traditional_chinese": "職業"
+    },
+    {
+        "english": "CAREER",
+        "traditional_chinese": "生涯"
+    },
+    {
+        "english": "OCCUPATION",
+        "traditional_chinese": "職業"
+    },
+    {
+        "english": "VOCATION",
+        "traditional_chinese": "天職"
+    },
+    {
+        "english": "CUISINE",
+        "traditional_chinese": "烹飪"
+    },
+    {
+        "english": "GOURMET",
+        "traditional_chinese": "美食家"
+    },
+    {
+        "english": "RESTAURANT",
+        "traditional_chinese": "餐廳"
+    },
+    {
+        "english": "RECIPE",
+        "traditional_chinese": "食譜"
+    },
+    {
+        "english": "INGREDIENT",
+        "traditional_chinese": "原料"
+    },
+    {
+        "english": "BEVERAGE",
+        "traditional_chinese": "飲料"
+    },
+    {
+        "english": "REFRESHMENT",
+        "traditional_chinese": "茶點"
+    },
+    {
+        "english": "BANQUET",
+        "traditional_chinese": "宴會"
+    },
+    {
+        "english": "HOSPITALITY",
+        "traditional_chinese": "款待"
+    },
+    {
+        "english": "ENVIRONMENT",
+        "traditional_chinese": "環境"
+    },
+    {
+        "english": "CONSERVATION",
+        "traditional_chinese": "保育"
+    },
+    {
+        "english": "POLLUTION",
+        "traditional_chinese": "污染"
+    },
+    {
+        "english": "RECYCLING",
+        "traditional_chinese": "回收"
+    },
+    {
+        "english": "SUSTAINABILITY",
+        "traditional_chinese": "永續性"
+    },
+    {
+        "english": "CLIMATE",
+        "traditional_chinese": "氣候"
+    },
+    {
+        "english": "WEATHER",
+        "traditional_chinese": "天氣"
+    },
+    {
+        "english": "SEASONS",
+        "traditional_chinese": "季節"
+    },
+    {
+        "english": "CALENDAR",
+        "traditional_chinese": "日曆"
+    },
+    {
+        "english": "SCHEDULE",
+        "traditional_chinese": "日程表"
+    },
+    {
+        "english": "URBAN",
+        "traditional_chinese": "城市的"
+    },
+    {
+        "english": "RURAL",
+        "traditional_chinese": "鄉村的"
+    },
+    {
+        "english": "DIMENSION",
+        "traditional_chinese": "維度"
+    },
+    {
+        "english": "INFINITY",
+        "traditional_chinese": "無限"
+    },
+    {
+        "english": "ETERNITY",
+        "traditional_chinese": "永恆"
+    },
+    {
+        "english": "PERSPECTIVE",
+        "traditional_chinese": "視角"
+    },
+    {
+        "english": "PROPORTION",
+        "traditional_chinese": "比例"
+    },
+    {
+        "english": "SYMMETRY",
+        "traditional_chinese": "對稱"
+    },
+    {
+        "english": "BALANCE",
+        "traditional_chinese": "平衡"
+    },
+    {
+        "english": "CHAOS",
+        "traditional_chinese": "混亂"
+    },
+    {
+        "english": "ENTROPY",
+        "traditional_chinese": "熵"
+    },
+    {
+        "english": "SPECTRUM",
+        "traditional_chinese": "光譜"
+    },
+    {
+        "english": "FREQUENCY",
+        "traditional_chinese": "頻率"
+    },
+    {
+        "english": "AMPLITUDE",
+        "traditional_chinese": "振幅"
+    },
+    {
+        "english": "VELOCITY",
+        "traditional_chinese": "速度"
+    },
+    {
+        "english": "ACCELERATION",
+        "traditional_chinese": "加速度"
+    },
+    {
+        "english": "MOMENTUM",
+        "traditional_chinese": "動量"
+    },
+    {
+        "english": "FRICTION",
+        "traditional_chinese": "摩擦力"
+    },
+    {
+        "english": "RESISTANCE",
+        "traditional_chinese": "阻力"
+    },
+    {
+        "english": "PRESSURE",
+        "traditional_chinese": "壓力"
+    },
+    {
+        "english": "DENSITY",
+        "traditional_chinese": "密度"
+    },
+    {
+        "english": "VOLUME",
+        "traditional_chinese": "體積"
+    },
+    {
+        "english": "CAPACITY",
+        "traditional_chinese": "容量"
+    },
+    {
+        "english": "MAGNITUDE",
+        "traditional_chinese": "巨大/震級"
+    },
+    {
+        "english": "INTENSITY",
+        "traditional_chinese": "強度"
+    },
+    {
+        "english": "ABSOLUTE",
+        "traditional_chinese": "絕對的"
+    },
+    {
+        "english": "RELATIVE",
+        "traditional_chinese": "相對的"
+    },
+    {
+        "english": "ABSTRACT",
+        "traditional_chinese": "抽象的"
+    },
+    {
+        "english": "CONCRETE",
+        "traditional_chinese": "具體的"
+    },
+    {
+        "english": "VIRTUAL",
+        "traditional_chinese": "虛擬的"
+    },
+    {
+        "english": "ESSENTIAL",
+        "traditional_chinese": "本質的"
+    },
+    {
+        "english": "FUNDAMENTAL",
+        "traditional_chinese": "基礎的"
+    },
+    {
+        "english": "ULTIMATE",
+        "traditional_chinese": "終極的"
+    },
+    {
+        "english": "OPTIMAL",
+        "traditional_chinese": "最佳的"
+    },
+    {
+        "english": "MAXIMUM",
+        "traditional_chinese": "最大的"
+    },
+    {
+        "english": "MINIMUM",
+        "traditional_chinese": "最小的"
+    },
+    {
+        "english": "PERMANENT",
+        "traditional_chinese": "永久的"
+    },
+    {
+        "english": "TEMPORARY",
+        "traditional_chinese": "暫時的"
+    },
+    {
+        "english": "CHRONIC",
+        "traditional_chinese": "慢性的"
+    },
+    {
+        "english": "ACUTE",
+        "traditional_chinese": "急性的"
+    },
+    {
+        "english": "DYNAMIC",
+        "traditional_chinese": "動態的"
+    },
+    {
+        "english": "STATIC",
+        "traditional_chinese": "靜態的"
+    },
+    {
+        "english": "COMPLEX",
+        "traditional_chinese": "複雜的"
+    },
+    {
+        "english": "SIMPLE",
+        "traditional_chinese": "簡單的"
+    },
+    {
+        "english": "PARADOX",
+        "traditional_chinese": "悖論"
+    },
+    {
+        "english": "ILLUSION",
+        "traditional_chinese": "幻覺"
+    },
+    {
+        "english": "REALITY",
+        "traditional_chinese": "現實"
+    },
+    {
+        "english": "PHENOMENON",
+        "traditional_chinese": "現象"
+    },
+    {
+        "english": "CRITERION",
+        "traditional_chinese": "標準"
+    },
+    {
+        "english": "PARADIGM",
+        "traditional_chinese": "範例"
+    },
+    {
+        "english": "SYNTHESIS",
+        "traditional_chinese": "綜合"
+    },
+    {
+        "english": "ANALYSIS",
+        "traditional_chinese": "分析"
+    }
+]
