@@ -12,7 +12,7 @@ import discord
 from discord.ui import Button, View, Modal, TextInput
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from dcrbot.pirate import PIRATE_WORDS, pirate_translation
+from dcrbot.pirate import PirateWordEntry, pirate_translation, random_pirate_word_entry
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
 from dcrbot.storage import load_data, open_account, save_data
 
@@ -55,11 +55,11 @@ class PirateTreasureModal(Modal):
         users[uid]["wallet"] -= amount
         save_data(users)
 
-        secret_word = random.choice(PIRATE_WORDS)
+        word_entry = random_pirate_word_entry()
         avatar_image = await fetch_avatar_image(interaction.user, 128) if self.visual_mode else None
         view = PirateGuessView(
             interaction.user,
-            secret_word,
+            word_entry,
             amount,
             visual_mode=self.visual_mode,
             avatar_image=avatar_image,
@@ -82,7 +82,7 @@ class PirateGuessView(View):
     def __init__(
         self,
         user: discord.User,
-        secret_word: str,
+        word_entry: PirateWordEntry,
         bet_amount: int,
         *,
         visual_mode: bool = False,
@@ -91,7 +91,10 @@ class PirateGuessView(View):
         super().__init__(timeout=420)
         self.author_id = user.id
         self.player_name = user.display_name
-        self.secret_word = secret_word.upper()
+        self.word_entry = word_entry
+        self.secret_word = word_entry.word.upper()
+        self.category_name = word_entry.category_name
+        self.category_story = word_entry.story_hint
         self.unique_letters = set(self.secret_word)
         self.guessed: set[str] = set()
         self.wrong: set[str] = set()
@@ -274,6 +277,10 @@ def pirate_word_bank_hint(view: PirateGuessView) -> str:
     return f"命中：{guessed}\n失誤：{missed}"
 
 
+def pirate_category_story_hint(view: PirateGuessView) -> str:
+    return f"📜 {view.category_story}"
+
+
 def pirate_stage_art(view: PirateGuessView) -> str:
     stage = len(view.wrong)
     head = view.player_name.strip() or "玩家"
@@ -343,7 +350,7 @@ def pirate_answer_reveal(view: PirateGuessView) -> str:
     if not view.resolved:
         return "-"
     translation = pirate_translation(view.secret_word)
-    return f"{view.secret_word}（{translation}）"
+    return f"{view.secret_word}（{translation}｜{view.category_name}）"
 
 
 async def edit_pirate_message(interaction: discord.Interaction, view: PirateGuessView, *, status_text: str) -> None:
@@ -660,10 +667,12 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     draw.text((62, 450), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
     hit_text = _truncate_to_width(draw, f"命中：{', '.join(sorted(view.guessed)) or '-'}", small_font, 445)
     miss_text = _truncate_to_width(draw, f"失誤：{', '.join(sorted(view.wrong)) or '-'}", small_font, 445)
+    story_text = _truncate_to_width(draw, f"故事：{view.category_story}", small_font, 445)
     answer_text = _truncate_to_width(draw, f"答案：{pirate_answer_reveal(view)}", small_font, 445)
     draw.text((62, 494), hit_text, font=small_font, fill=(122, 244, 163, 255))
     draw.text((62, 536), miss_text, font=small_font, fill=(255, 143, 120, 255))
-    draw.text((62, 578), answer_text, font=small_font, fill=(231, 238, 244, 255))
+    draw.text((62, 574), story_text, font=small_font, fill=(255, 220, 140, 255))
+    draw.text((62, 608), answer_text, font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
@@ -687,6 +696,7 @@ def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Em
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
     embed.add_field(name="剩餘容錯", value=f"{view.max_wrong - len(view.wrong)} 次", inline=True)
     embed.add_field(name="目前題目", value=f"`{pirate_word_progress(view)}`", inline=False)
+    embed.add_field(name="故事分類提示", value=pirate_category_story_hint(view), inline=False)
     embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
     if not view.visual_mode:
         embed.add_field(name="跳板狀態", value=pirate_stage_art(view), inline=False)

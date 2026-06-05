@@ -1702,12 +1702,12 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🏴‍☠️ 單人猜字：海盜寶藏",
-        value="從題庫抽出英文單字，每次猜一個字母；錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
+        value="從 words 分類題庫抽出英文單字，先給一段故事提示類別；每次猜一個字母，錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
         inline=False,
     )
     embed.add_field(
         name="🗺️ 單人猜字：海盜寶藏2",
-        value="玩法、下注、獎懲與海盜寶藏相同，但使用 Pillow 顯示玩家被吊在海面上，右下角有加大鯊魚等著吃，失敗時會呈現碎片狀。",
+        value="玩法、下注、分類故事提示與海盜寶藏相同，但使用 Pillow 顯示玩家被吊在海面上，右下角有加大鯊魚等著吃，失敗時會呈現碎片狀。",
         inline=False,
     )
     embed.add_field(
