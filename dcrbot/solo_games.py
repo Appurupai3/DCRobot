@@ -276,6 +276,12 @@ class BalloonPumpView(View):
             delta=payout - self.bet_amount,
             balance=balance,
             details=f"打氣 {self.pumps}/11 次，領回 ${payout}。",
+            extra_stats={
+                "cashout_total": payout,
+                "cashout_count": 1,
+                "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
+                "pump_total": self.pumps,
+            },
         )
         save_data(users)
 
@@ -318,6 +324,7 @@ class BalloonPumpView(View):
                 delta=-(self.bet_amount + medical_fee),
                 balance=balance,
                 details=f"第 {self.pumps + 1} 次打氣爆炸，醫藥費 ${medical_fee}。",
+                extra_stats={"pump_total": self.pumps + 1},
             )
             save_data(users)
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
@@ -412,6 +419,12 @@ class BalloonPumpView(View):
             delta=payout - self.bet_amount,
             balance=balance,
             details=f"逾時自動領回 ${payout}；打氣 {self.pumps}/11 次。",
+            extra_stats={
+                "cashout_total": payout,
+                "cashout_count": 1,
+                "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
+                "pump_total": self.pumps,
+            },
         )
         save_data(users)
 

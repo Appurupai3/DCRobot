@@ -295,6 +295,7 @@ class PirateGuessView(View):
                 delta=reward,
                 balance=balance,
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），錯 {len(self.wrong)} 次。",
+                extra_stats={"wrong_total": len(self.wrong)},
             )
             save_data(users)
             status = (
@@ -317,6 +318,7 @@ class PirateGuessView(View):
                 delta=-(self.bet_amount + penalty),
                 balance=balance,
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），額外損失 ${penalty}。",
+                extra_stats={"wrong_total": len(self.wrong)},
             )
             save_data(users)
             status = (
@@ -350,6 +352,7 @@ class PirateGuessView(View):
                 delta=-self.bet_amount,
                 balance=users[uid].get("wallet", 0),
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}）。",
+                extra_stats={"wrong_total": len(self.wrong)},
             )
             save_data(users)
         if self.message:

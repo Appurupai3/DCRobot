@@ -365,6 +365,9 @@ class NumberSearcherView(View):
         self.colors = tuple(random.choice(COLORS) for _ in range(CODE_LENGTH))
         self.guess_count = 0
         self.clue_count = 0
+        self.number_clue_count = 0
+        self.color_clue_count = 0
+        self.random_clue_count = 0
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
@@ -395,6 +398,14 @@ class NumberSearcherView(View):
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
+
+    def record_extra_stats(self) -> dict[str, int]:
+        return {
+            "number_clue_count": self.number_clue_count,
+            "color_clue_count": self.color_clue_count,
+            "random_clue_count": self.random_clue_count,
+            "guess_total": self.guess_count,
+        }
 
     def has_started(self) -> bool:
         return self.guess_count > 0 or self.clue_count > 0 or self.total_spent > 0
@@ -545,6 +556,7 @@ class NumberSearcherView(View):
             if not await self.charge_wallet(interaction, cost):
                 return
             self.clue_count += 1
+            self.number_clue_count += 1
             pool = build_number_clues(self.secret)
             sampled = random.sample(pool, 3)
         elif clue_type == "color":
@@ -552,12 +564,14 @@ class NumberSearcherView(View):
             if not await self.charge_wallet(interaction, cost):
                 return
             self.clue_count += 1
+            self.color_clue_count += 1
             pool = build_color_clues(self.secret, self.colors)
             sampled = random.sample(pool, 3)
         else:
             cost = self.random_clue_cost()
             if not await self.charge_wallet(interaction, cost):
                 return
+            self.random_clue_count += 1
             mixed_pool = build_number_clues(self.secret) + build_color_clues(self.secret, self.colors)
             sampled = random.sample(mixed_pool, 2)
 
@@ -608,6 +622,7 @@ class NumberSearcherView(View):
                 delta=reward - self.total_spent,
                 balance=balance,
                 details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+                extra_stats=self.record_extra_stats(),
             )
             save_data(users)
             self.settlement_reward = reward
@@ -671,6 +686,7 @@ class NumberSearcherView(View):
             delta=self.settlement_profit(),
             balance=users.get(uid, {}).get("wallet", 0),
             details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+            extra_stats=self.record_extra_stats(),
         )
         save_data(users)
         self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
@@ -733,6 +749,7 @@ class NumberSearcherView(View):
             delta=self.settlement_profit(),
             balance=users.get(uid, {}).get("wallet", 0),
             details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+            extra_stats=self.record_extra_stats(),
         )
         save_data(users)
         if self.message:

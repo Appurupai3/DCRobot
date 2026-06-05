@@ -25,7 +25,6 @@ from dcrbot.valorant import ValorantSkillSelectView, build_valorant_intro_embed
 from dcrbot.storage import (
     append_game_record,
     get_game_records,
-    get_profit_loss_records,
     load_data,
     open_account,
     save_data,
@@ -78,42 +77,81 @@ def format_money_delta(delta: int) -> str:
     return f"+${delta}" if delta >= 0 else f"-${abs(delta)}"
 
 
-def _format_record_line(record: dict, *, include_balance: bool = False) -> str:
-    played_at = str(record.get("played_at", ""))[:16].replace("T", " ")
-    game = record.get("game", "未知遊戲")
-    result = record.get("result", "-")
-    bet = int(record.get("bet", 0) or 0)
-    delta = int(record.get("delta", 0) or 0)
-    balance = int(record.get("balance", 0) or 0)
-    suffix = f"｜餘額 ${balance}" if include_balance else ""
-    return f"{played_at}｜{game}｜{result}｜下注 ${bet}｜{format_money_delta(delta)}{suffix}"
+def _stat_win_rate(stats: dict) -> float:
+    plays = int(stats.get("plays", 0) or 0)
+    wins = int(stats.get("wins", 0) or 0)
+    return wins / plays * 100 if plays else 0
 
 
-def _portfolio_record_block(records: list[dict], *, empty_text: str) -> str:
-    if not records:
-        return empty_text
-    lines = [f"`{idx:02d}` {_format_record_line(record)}" for idx, record in enumerate(records, 1)]
-    text = "\n".join(lines)
-    return text[:1024]
+def _format_stat_summary(game_name: str, stats: dict) -> str:
+    plays = int(stats.get("plays", 0) or 0)
+    wins = int(stats.get("wins", 0) or 0)
+    max_profit = int(stats.get("max_profit") or 0)
+    max_loss = int(stats.get("max_loss") or 0)
+    return (
+        f"**{game_name}**｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}｜"
+        f"獲勝 {wins}/{plays}｜勝率 {_stat_win_rate(stats):.1f}%｜"
+        f"單次最高 {format_money_delta(max_profit)}｜最大虧損 {format_money_delta(max_loss)}"
+    )
 
 
-def build_portfolio_embed(user: discord.User) -> discord.Embed:
+def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
+    extra = stats.get("extra", {}) if isinstance(stats.get("extra", {}), dict) else {}
+    lines: list[str] = []
+    if game_name == "打氣球":
+        cashout_count = int(extra.get("cashout_count", 0) or 0)
+        cashout_total = int(extra.get("cashout_total", 0) or 0)
+        average = cashout_total / cashout_count if cashout_count else 0
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜500x 次數 {int(extra.get('cashout_500x_count', 0) or 0)}")
+        lines.append(f"平均打氣 {float(extra.get('pump_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
+    elif game_name == "骰子決鬥":
+        cashout_count = int(extra.get("cashout_count", 0) or 0)
+        cashout_total = int(extra.get("cashout_total", 0) or 0)
+        average = cashout_total / cashout_count if cashout_count else 0
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜50 倍爆擊次數 {int(extra.get('crit_50x_count', 0) or 0)}")
+    elif game_name.startswith("海盜寶藏"):
+        plays = int(stats.get("plays", 0) or 0)
+        wrong_total = int(extra.get("wrong_total", 0) or 0)
+        lines.append(f"平均失誤次數 {wrong_total / plays:.1f}" if plays else "平均失誤次數 0.0")
+    elif game_name == "數字搜尋者":
+        lines.append(
+            "｜".join(
+                [
+                    f"數字線索 {int(extra.get('number_clue_count', 0) or 0)} 次",
+                    f"顏色線索 {int(extra.get('color_clue_count', 0) or 0)} 次",
+                    f"隨機線索 {int(extra.get('random_clue_count', 0) or 0)} 次",
+                ]
+            )
+        )
+        lines.append(f"平均猜測 {float(extra.get('guess_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
+    return lines
+
+
+def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
     users = load_data()
     uid = str(user.id)
-    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_records": []})
-    records = get_game_records(users, uid, limit=10)
-    profits, losses = get_profit_loss_records(users, uid, limit=5)
+    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_stats": {}})
     summary = summarize_game_records(users, uid)
+    display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
+
+    if game_name and game_name in summary:
+        stats = summary[game_name]
+        embed = discord.Embed(title=f"📊 {display_name}｜{game_name} 統計", color=discord.Color.blurple())
+        embed.add_field(name="基礎統計", value=_format_stat_summary(game_name, stats), inline=False)
+        extras = _extra_stat_lines(game_name, stats)
+        if extras:
+            embed.add_field(name="額外統計", value="\n".join(extras), inline=False)
+        embed.set_footer(text="只保存統計資料，不保存每場過程或每場詳細情況。")
+        return embed
 
     wallet = int(user_data.get("wallet", 0) or 0)
     bank = int(user_data.get("bank", 0) or 0)
     net_worth = wallet + bank
-    total_delta = sum(int(record.get("delta", 0) or 0) for record in user_data.get("game_records", []))
-    total_games = len(user_data.get("game_records", []))
-    profitable_games = sum(1 for record in user_data.get("game_records", []) if int(record.get("delta", 0) or 0) > 0)
-    win_rate = (profitable_games / total_games * 100) if total_games else 0
+    total_delta = sum(int(stats.get("total_delta", 0) or 0) for stats in summary.values())
+    total_games = sum(int(stats.get("plays", 0) or 0) for stats in summary.values())
+    total_wins = sum(int(stats.get("wins", 0) or 0) for stats in summary.values())
+    win_rate = total_wins / total_games * 100 if total_games else 0
 
-    display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
     embed = discord.Embed(title=f"📊 {display_name} 的 Portfolio", color=discord.Color.gold())
     embed.add_field(
         name="個人資訊",
@@ -121,57 +159,74 @@ def build_portfolio_embed(user: discord.User) -> discord.Embed:
             f"錢包：${wallet}\n"
             f"銀行：${bank}\n"
             f"總資產：${net_worth}\n"
-            f"累計遊戲營利：{format_money_delta(total_delta)}\n"
-            f"總遊戲次數：{total_games}｜整體勝率：{win_rate:.1f}%"
+            f"累計遊戲盈虧：{format_money_delta(total_delta)}\n"
+            f"獲勝場次：{total_wins}\n"
+            f"總遊戲次數：{total_games}\n"
+            f"整體勝率：{win_rate:.1f}%"
         ),
         inline=False,
     )
 
     if summary:
-        stat_lines = []
-        sorted_stats = sorted(summary.items(), key=lambda item: (item[1]["total_delta"], item[1]["plays"]), reverse=True)
-        for game_name, stats in sorted_stats[:10]:
-            plays = int(stats["plays"])
-            wins = int(stats["wins"])
-            rate = wins / plays * 100 if plays else 0
-            max_profit = stats["max_profit"] if stats["max_profit"] is not None else 0
-            max_loss = stats["max_loss"] if stats["max_loss"] is not None else 0
-            stat_lines.append(
-                f"**{game_name}**｜總營利 {format_money_delta(int(stats['total_delta']))}｜勝率 {rate:.1f}%｜"
-                f"次數 {plays}｜單次最高 {format_money_delta(int(max_profit))}｜最大虧損 {format_money_delta(int(max_loss))}"
-            )
-        embed.add_field(name="各遊戲統計", value="\n".join(stat_lines)[:1024], inline=False)
+        sorted_stats = sorted(summary.items(), key=lambda item: (int(item[1].get("total_delta", 0) or 0), int(item[1].get("plays", 0) or 0)), reverse=True)
+        stat_lines = [_format_stat_summary(name, stats) for name, stats in sorted_stats[:8]]
+        embed.add_field(name="所有遊戲統計總覽", value="\n".join(stat_lines)[:1024], inline=False)
+        embed.add_field(name="查看單一遊戲", value="使用下方下拉選單選擇遊戲，可查看該遊戲的基礎與額外統計。", inline=False)
     else:
-        embed.add_field(name="各遊戲統計", value="尚未有任何遊戲紀錄。", inline=False)
+        embed.add_field(name="所有遊戲統計總覽", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
 
-    embed.add_field(name="最近賺錢紀錄", value=_portfolio_record_block(profits, empty_text="尚未有賺錢紀錄。"), inline=False)
-    embed.add_field(name="最近虧錢紀錄", value=_portfolio_record_block(losses, empty_text="尚未有虧錢紀錄。"), inline=False)
-    if records:
-        embed.add_field(
-            name="最近全部紀錄",
-            value="\n".join(f"`{idx:02d}` {_format_record_line(record)}" for idx, record in enumerate(records[:5], 1))[:1024],
-            inline=False,
-        )
-    embed.set_footer(text="勝率以單場 delta > 0 視為賺錢場；紀錄保存在本機 bank.json。")
+    embed.set_footer(text="紀錄保存在本機 bank.json 與 leaderboard/；只保存統計，不保存每場過程。")
     return embed
+
+
+def build_portfolio_embed(user: discord.User) -> discord.Embed:
+    return build_game_stat_embed(user)
 
 
 def build_game_records_embed(user: discord.User, *, limit: int = 10) -> discord.Embed:
     users = load_data()
-    records = get_game_records(users, str(user.id), limit=limit)
-    embed = discord.Embed(title="📜 遊戲紀錄", color=discord.Color.dark_gold())
-    if not records:
-        embed.description = "尚未有遊戲紀錄；完成任一場遊戲後會自動保存。"
+    stats = get_game_records(users, str(user.id), limit=limit)
+    embed = discord.Embed(title="📜 遊戲統計紀錄", color=discord.Color.dark_gold())
+    if not stats:
+        embed.description = "尚未有遊戲統計；完成任一場遊戲後會自動保存統計。"
         return embed
 
-    lines = [
-        f"`{idx:02d}` {_format_record_line(record, include_balance=True)}"
-        for idx, record in enumerate(records, 1)
-    ]
-
-    embed.description = "最近遊戲紀錄（新到舊）"
-    embed.add_field(name="紀錄", value="\n".join(lines), inline=False)
+    lines = [_format_stat_summary(str(stat.get("game", "未知遊戲")), stat) for stat in stats]
+    embed.description = "以下只顯示統計結果，不保存每場過程。"
+    embed.add_field(name="統計", value="\n".join(lines)[:1024], inline=False)
     return embed
+
+
+class PortfolioGameSelect(discord.ui.Select):
+    def __init__(self, user: discord.User):
+        self.user = user
+        users = load_data()
+        summary = summarize_game_records(users, str(user.id))
+        options = [discord.SelectOption(label="全部遊戲", value="__all__", emoji="📊", description="查看所有遊戲總覽")]
+        for game_name, stats in sorted(summary.items(), key=lambda item: str(item[0]))[:24]:
+            options.append(
+                discord.SelectOption(
+                    label=game_name[:100],
+                    value=game_name[:100],
+                    emoji="🎮",
+                    description=f"{int(stats.get('plays', 0) or 0)} 場｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}"[:100],
+                )
+            )
+        super().__init__(placeholder="選擇要查看統計的遊戲", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的 Portfolio 選單。", ephemeral=True)
+            return
+        selected = self.values[0]
+        embed = build_game_stat_embed(self.user, None if selected == "__all__" else selected)
+        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user))
+
+
+class PortfolioStatsView(View):
+    def __init__(self, user: discord.User):
+        super().__init__(timeout=180)
+        self.add_item(PortfolioGameSelect(user))
 
 
 class SimplePostGameView(View):
@@ -252,7 +307,7 @@ class EconomyMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
     async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), ephemeral=True)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
 
 
 async def resolve_basic_bet(
@@ -391,6 +446,13 @@ async def resolve_custom_bet(
     result_text, payout_change, frames = resolve_func(amount, uid)
     users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
     balance = users[uid]["wallet"]
+    extra_stats = {}
+    if game_name == "骰子決鬥":
+        extra_stats = {
+            "cashout_total": max(0, payout_change),
+            "cashout_count": 1 if payout_change > 0 else 0,
+            "crit_50x_count": 1 if "50 倍" in result_text else 0,
+        }
     append_game_record(
         users,
         uid,
@@ -400,6 +462,7 @@ async def resolve_custom_bet(
         delta=payout_change - amount,
         balance=balance,
         details=result_text,
+        extra_stats=extra_stats,
     )
     save_data(users)
 
@@ -1947,7 +2010,7 @@ class GameMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
     async def portfolio(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), ephemeral=True)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
 
 
 def build_game_menu(user: discord.User):
@@ -2159,7 +2222,7 @@ async def portfolio_command(interaction: discord.Interaction, user: discord.User
     target = user or interaction.user
     await interaction.response.defer(thinking=True, ephemeral=True)
     await open_account(target)
-    await interaction.followup.send(embed=build_portfolio_embed(target), ephemeral=True)
+    await interaction.followup.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target), ephemeral=True)
 
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
@@ -2170,7 +2233,7 @@ async def rankgame_command(interaction: discord.Interaction):
 @bot.command(name="portfolio")
 async def portfolio_prefix(ctx):
     await open_account(ctx.author)
-    await ctx.send(embed=build_portfolio_embed(ctx.author))
+    await ctx.send(embed=build_portfolio_embed(ctx.author), view=PortfolioStatsView(ctx.author))
 
 
 @bot.command()
