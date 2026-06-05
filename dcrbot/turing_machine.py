@@ -474,13 +474,14 @@ class PendingClueChoiceView(View):
         return True
 
     async def choose_clue(self, interaction: discord.Interaction, clue: Clue) -> None:
+        await interaction.response.defer()
         if self.parent.ended:
-            await interaction.response.edit_message(content="✅ 本局已結束，線索選擇失效。", embed=None, view=None)
+            await interaction.edit_original_response(content="✅ 本局已結束，線索選擇失效。", embed=None, view=None)
             return
 
         offer = self.parent.pending_clue_offer
         if offer is None or clue.title not in {choice.title for choice in offer.choices}:
-            await interaction.response.edit_message(content="✅ 這份候選清單已經選擇過或失效。", embed=None, view=None)
+            await interaction.edit_original_response(content="✅ 這份候選清單已經選擇過或失效。", embed=None, view=None)
             return
 
         self.parent.pending_clue_offer = None
@@ -491,7 +492,7 @@ class PendingClueChoiceView(View):
 
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=selection_text,
             embed=None,
             view=self,
