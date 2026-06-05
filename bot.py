@@ -85,12 +85,8 @@ def _format_record_line(record: dict, *, include_balance: bool = False) -> str:
     bet = int(record.get("bet", 0) or 0)
     delta = int(record.get("delta", 0) or 0)
     balance = int(record.get("balance", 0) or 0)
-    details = str(record.get("details", "")).replace("\n", " ")
-    if len(details) > 42:
-        details = details[:41] + "…"
     suffix = f"｜餘額 ${balance}" if include_balance else ""
-    detail_text = f"｜{details}" if details else ""
-    return f"{played_at}｜{game}｜{result}｜下注 ${bet}｜{format_money_delta(delta)}{suffix}{detail_text}"
+    return f"{played_at}｜{game}｜{result}｜下注 ${bet}｜{format_money_delta(delta)}{suffix}"
 
 
 def _portfolio_record_block(records: list[dict], *, empty_text: str) -> str:

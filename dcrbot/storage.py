@@ -5,11 +5,72 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 from typing import Dict, Any
 
 
 BANK_DATA_PATH = "bank.json"
+LEADERBOARD_DIR = Path("leaderboard")
+LEADERBOARD_INDEX_PATH = LEADERBOARD_DIR / "index.json"
 MAX_GAME_RECORDS = 100
+
+
+def ensure_leaderboard_dir() -> None:
+    """Create the categorized leaderboard directory used for per-game records."""
+
+    LEADERBOARD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_leaderboard_name(game_name: str) -> str:
+    """Return a readable filesystem-safe filename stem for a game name."""
+
+    cleaned = "".join(
+        char if char.isalnum() or char in {"-", "_", " ", "："} else "_"
+        for char in game_name.strip()
+    ).strip()
+    return (cleaned or "unknown_game").replace(" ", "_")[:80]
+
+
+def _load_json_list(path: Path) -> list[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_json(path: Path, data: Any) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def append_leaderboard_record(record: Dict[str, Any]) -> None:
+    """Persist a result-only record into leaderboard/<game>.json and update the index."""
+
+    ensure_leaderboard_dir()
+    game_name = str(record.get("game", "未知遊戲"))
+    file_stem = _safe_leaderboard_name(game_name)
+    record_path = LEADERBOARD_DIR / f"{file_stem}.json"
+
+    leaderboard_record = {**record, "user_id": str(record.get("user_id", ""))}
+    game_records = _load_json_list(record_path)
+    game_records.append(leaderboard_record)
+    if len(game_records) > MAX_GAME_RECORDS:
+        del game_records[:-MAX_GAME_RECORDS]
+    _write_json(record_path, game_records)
+
+    index_records = _load_json_list(LEADERBOARD_INDEX_PATH)
+    index_by_game = {entry.get("game"): entry for entry in index_records if isinstance(entry, dict)}
+    index_by_game[game_name] = {
+        "game": game_name,
+        "file": str(record_path),
+        "records": len(game_records),
+        "updated_at": record.get("played_at"),
+    }
+    _write_json(LEADERBOARD_INDEX_PATH, sorted(index_by_game.values(), key=lambda item: str(item.get("game", ""))))
 
 
 def ensure_bank_data_file() -> None:
@@ -65,21 +126,22 @@ def append_game_record(
     if balance is None:
         balance = int(user_data.get("wallet", 0))
 
+    record = {
+        "played_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "game": game_name,
+        "result": result,
+        "bet": int(bet),
+        "delta": int(delta),
+        "direction": "profit" if int(delta) > 0 else "loss" if int(delta) < 0 else "even",
+        "balance": int(balance),
+    }
+
     records = user_data.setdefault("game_records", [])
-    records.append(
-        {
-            "played_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "game": game_name,
-            "result": result,
-            "bet": int(bet),
-            "delta": int(delta),
-            "direction": "profit" if int(delta) > 0 else "loss" if int(delta) < 0 else "even",
-            "balance": int(balance),
-            "details": details,
-        }
-    )
+    records.append(record)
     if len(records) > MAX_GAME_RECORDS:
         del records[:-MAX_GAME_RECORDS]
+
+    append_leaderboard_record({"user_id": uid, **record})
 
 
 def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[Dict[str, Any]]:
