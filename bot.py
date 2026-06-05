@@ -22,7 +22,15 @@ from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
 from dcrbot.turing_machine import NumberSearcherView
 from dcrbot.valorant import ValorantSkillSelectView, build_valorant_intro_embed
-from dcrbot.storage import append_game_record, get_game_records, load_data, open_account, save_data
+from dcrbot.storage import (
+    append_game_record,
+    get_game_records,
+    get_profit_loss_records,
+    load_data,
+    open_account,
+    save_data,
+    summarize_game_records,
+)
 
 
 patch_discord_test_stubs()
@@ -70,6 +78,88 @@ def format_money_delta(delta: int) -> str:
     return f"+${delta}" if delta >= 0 else f"-${abs(delta)}"
 
 
+def _format_record_line(record: dict, *, include_balance: bool = False) -> str:
+    played_at = str(record.get("played_at", ""))[:16].replace("T", " ")
+    game = record.get("game", "未知遊戲")
+    result = record.get("result", "-")
+    bet = int(record.get("bet", 0) or 0)
+    delta = int(record.get("delta", 0) or 0)
+    balance = int(record.get("balance", 0) or 0)
+    details = str(record.get("details", "")).replace("\n", " ")
+    if len(details) > 42:
+        details = details[:41] + "…"
+    suffix = f"｜餘額 ${balance}" if include_balance else ""
+    detail_text = f"｜{details}" if details else ""
+    return f"{played_at}｜{game}｜{result}｜下注 ${bet}｜{format_money_delta(delta)}{suffix}{detail_text}"
+
+
+def _portfolio_record_block(records: list[dict], *, empty_text: str) -> str:
+    if not records:
+        return empty_text
+    lines = [f"`{idx:02d}` {_format_record_line(record)}" for idx, record in enumerate(records, 1)]
+    text = "\n".join(lines)
+    return text[:1024]
+
+
+def build_portfolio_embed(user: discord.User) -> discord.Embed:
+    users = load_data()
+    uid = str(user.id)
+    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_records": []})
+    records = get_game_records(users, uid, limit=10)
+    profits, losses = get_profit_loss_records(users, uid, limit=5)
+    summary = summarize_game_records(users, uid)
+
+    wallet = int(user_data.get("wallet", 0) or 0)
+    bank = int(user_data.get("bank", 0) or 0)
+    net_worth = wallet + bank
+    total_delta = sum(int(record.get("delta", 0) or 0) for record in user_data.get("game_records", []))
+    total_games = len(user_data.get("game_records", []))
+    profitable_games = sum(1 for record in user_data.get("game_records", []) if int(record.get("delta", 0) or 0) > 0)
+    win_rate = (profitable_games / total_games * 100) if total_games else 0
+
+    display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
+    embed = discord.Embed(title=f"📊 {display_name} 的 Portfolio", color=discord.Color.gold())
+    embed.add_field(
+        name="個人資訊",
+        value=(
+            f"錢包：${wallet}\n"
+            f"銀行：${bank}\n"
+            f"總資產：${net_worth}\n"
+            f"累計遊戲營利：{format_money_delta(total_delta)}\n"
+            f"總遊戲次數：{total_games}｜整體勝率：{win_rate:.1f}%"
+        ),
+        inline=False,
+    )
+
+    if summary:
+        stat_lines = []
+        sorted_stats = sorted(summary.items(), key=lambda item: (item[1]["total_delta"], item[1]["plays"]), reverse=True)
+        for game_name, stats in sorted_stats[:10]:
+            plays = int(stats["plays"])
+            wins = int(stats["wins"])
+            rate = wins / plays * 100 if plays else 0
+            max_profit = stats["max_profit"] if stats["max_profit"] is not None else 0
+            max_loss = stats["max_loss"] if stats["max_loss"] is not None else 0
+            stat_lines.append(
+                f"**{game_name}**｜總營利 {format_money_delta(int(stats['total_delta']))}｜勝率 {rate:.1f}%｜"
+                f"次數 {plays}｜單次最高 {format_money_delta(int(max_profit))}｜最大虧損 {format_money_delta(int(max_loss))}"
+            )
+        embed.add_field(name="各遊戲統計", value="\n".join(stat_lines)[:1024], inline=False)
+    else:
+        embed.add_field(name="各遊戲統計", value="尚未有任何遊戲紀錄。", inline=False)
+
+    embed.add_field(name="最近賺錢紀錄", value=_portfolio_record_block(profits, empty_text="尚未有賺錢紀錄。"), inline=False)
+    embed.add_field(name="最近虧錢紀錄", value=_portfolio_record_block(losses, empty_text="尚未有虧錢紀錄。"), inline=False)
+    if records:
+        embed.add_field(
+            name="最近全部紀錄",
+            value="\n".join(f"`{idx:02d}` {_format_record_line(record)}" for idx, record in enumerate(records[:5], 1))[:1024],
+            inline=False,
+        )
+    embed.set_footer(text="勝率以單場 delta > 0 視為賺錢場；紀錄保存在本機 bank.json。")
+    return embed
+
+
 def build_game_records_embed(user: discord.User, *, limit: int = 10) -> discord.Embed:
     users = load_data()
     records = get_game_records(users, str(user.id), limit=limit)
@@ -78,21 +168,10 @@ def build_game_records_embed(user: discord.User, *, limit: int = 10) -> discord.
         embed.description = "尚未有遊戲紀錄；完成任一場遊戲後會自動保存。"
         return embed
 
-    lines = []
-    for idx, record in enumerate(records, 1):
-        played_at = str(record.get("played_at", ""))[:16].replace("T", " ")
-        game = record.get("game", "未知遊戲")
-        result = record.get("result", "-")
-        bet = int(record.get("bet", 0) or 0)
-        delta = int(record.get("delta", 0) or 0)
-        balance = int(record.get("balance", 0) or 0)
-        details = str(record.get("details", "")).replace("\n", " ")
-        if len(details) > 48:
-            details = details[:47] + "…"
-        detail_text = f"｜{details}" if details else ""
-        lines.append(
-            f"`{idx:02d}` {played_at}｜{game}｜{result}｜下注 ${bet}｜盈虧 {format_money_delta(delta)}｜餘額 ${balance}{detail_text}"
-        )
+    lines = [
+        f"`{idx:02d}` {_format_record_line(record, include_balance=True)}"
+        for idx, record in enumerate(records, 1)
+    ]
 
     embed.description = "最近遊戲紀錄（新到舊）"
     embed.add_field(name="紀錄", value="\n".join(lines), inline=False)
@@ -173,6 +252,11 @@ class EconomyMenu(View):
     async def game_records_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         await interaction.response.send_message(embed=build_game_records_embed(interaction.user), ephemeral=True)
+
+    @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
+    async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), ephemeral=True)
 
 
 async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
@@ -1803,6 +1887,11 @@ class GameMenu(View):
         await open_account(interaction.user)
         await interaction.response.send_message(embed=build_game_records_embed(interaction.user), ephemeral=True)
 
+    @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
+    async def portfolio(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), ephemeral=True)
+
 
 def build_game_menu(user: discord.User):
     embed = discord.Embed(title="🎮 經濟遊戲大廳", description="選擇遊戲，下注挑戰風險，衝高你的金幣！", color=discord.Color.gold())
@@ -1892,7 +1981,7 @@ def build_economy_menu() -> dict:
     )
     embed.add_field(
         name="快速指令",
-        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜",
+        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜\n`/portfolio` 查看個人資訊與遊戲營利",
         inline=False,
     )
     return {"embed": embed, "view": EconomyMenu(), "ephemeral": False}
@@ -1997,9 +2086,23 @@ async def ranking_command(interaction: discord.Interaction):
     await interaction.response.send_message(**build_ranking_message())
 
 
+@bot.tree.command(name="portfolio", description="查看個人資訊與遊戲營利紀錄")
+@app_commands.describe(user="要查看的使用者；留空則查看自己")
+async def portfolio_command(interaction: discord.Interaction, user: discord.User | None = None):
+    target = user or interaction.user
+    await open_account(target)
+    await interaction.response.send_message(embed=build_portfolio_embed(target), ephemeral=True)
+
+
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
 async def rankgame_command(interaction: discord.Interaction):
     await interaction.response.send_message(**build_ranking_message())
+
+
+@bot.command(name="portfolio")
+async def portfolio_prefix(ctx):
+    await open_account(ctx.author)
+    await ctx.send(embed=build_portfolio_embed(ctx.author))
 
 
 @bot.command()

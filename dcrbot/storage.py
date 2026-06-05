@@ -73,6 +73,7 @@ def append_game_record(
             "result": result,
             "bet": int(bet),
             "delta": int(delta),
+            "direction": "profit" if int(delta) > 0 else "loss" if int(delta) < 0 else "even",
             "balance": int(balance),
             "details": details,
         }
@@ -86,6 +87,49 @@ def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[D
 
     records = ensure_user_data(users, uid).get("game_records", [])
     return list(reversed(records[-limit:]))
+
+
+def summarize_game_records(users: Dict[str, Any], uid: str) -> dict[str, Dict[str, Any]]:
+    """Summarize a user's records by game for portfolio/stat views."""
+
+    records = ensure_user_data(users, uid).get("game_records", [])
+    summary: dict[str, Dict[str, Any]] = {}
+    for record in records:
+        game_name = str(record.get("game", "未知遊戲"))
+        delta = int(record.get("delta", 0) or 0)
+        game_summary = summary.setdefault(
+            game_name,
+            {
+                "plays": 0,
+                "wins": 0,
+                "losses": 0,
+                "evens": 0,
+                "total_delta": 0,
+                "max_profit": None,
+                "max_loss": None,
+            },
+        )
+        game_summary["plays"] += 1
+        game_summary["total_delta"] += delta
+        if delta > 0:
+            game_summary["wins"] += 1
+            game_summary["max_profit"] = delta if game_summary["max_profit"] is None else max(game_summary["max_profit"], delta)
+        elif delta < 0:
+            game_summary["losses"] += 1
+            game_summary["max_loss"] = delta if game_summary["max_loss"] is None else min(game_summary["max_loss"], delta)
+        else:
+            game_summary["evens"] += 1
+
+    return summary
+
+
+def get_profit_loss_records(users: Dict[str, Any], uid: str, limit: int = 5) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    """Return recent profit and loss records, newest first."""
+
+    records = list(reversed(ensure_user_data(users, uid).get("game_records", [])))
+    profits = [record for record in records if int(record.get("delta", 0) or 0) > 0][:limit]
+    losses = [record for record in records if int(record.get("delta", 0) or 0) < 0][:limit]
+    return profits, losses
 
 
 async def open_account(user) -> bool:
