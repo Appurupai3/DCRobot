@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from dcrbot.pirate import PirateWordEntry, pirate_translation, random_pirate_word_entry
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 PIRATE_SHARK_IMAGE_PATH = Path(__file__).resolve().parents[1] / "Resources" / "shark.png"
@@ -285,6 +285,17 @@ class PirateGuessView(View):
             reward_multiplier = 1.4 + (self.max_wrong - len(self.wrong)) * 0.12
             reward = int(self.bet_amount * reward_multiplier)
             users[uid]["wallet"] += self.bet_amount + reward
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="成功",
+                bet=self.bet_amount,
+                delta=reward,
+                balance=balance,
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），錯 {len(self.wrong)} 次。",
+            )
             save_data(users)
             status = (
                 f"🎉 你解開了 {self.secret_word}（{pirate_translation(self.secret_word)}）！返還下注 ${self.bet_amount} 並獲得 ${reward}"
@@ -296,6 +307,17 @@ class PirateGuessView(View):
             uid = str(interaction.user.id)
             penalty = int(self.bet_amount * 0.5)
             users[uid]["wallet"] = max(0, users[uid]["wallet"] - penalty)
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="失敗",
+                bet=self.bet_amount,
+                delta=-(self.bet_amount + penalty),
+                balance=balance,
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），額外損失 ${penalty}。",
+            )
             save_data(users)
             status = (
                 f"💀 海盜落水了！答案是 {self.secret_word}（{pirate_translation(self.secret_word)}），"
@@ -316,6 +338,20 @@ class PirateGuessView(View):
             return
         self.resolved = True
         self.build_letter_buttons()
+        users = load_data()
+        uid = str(self.author_id)
+        if uid in users:
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="逾時",
+                bet=self.bet_amount,
+                delta=-self.bet_amount,
+                balance=users[uid].get("wallet", 0),
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}）。",
+            )
+            save_data(users)
         if self.message:
             embed, file = build_pirate_display(self, status_text="⏰ 時間到，此局結束。")
             if file is None:

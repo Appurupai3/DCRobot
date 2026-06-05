@@ -10,7 +10,7 @@ import discord
 from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 DIGITS = tuple(range(10))
@@ -598,8 +598,18 @@ class NumberSearcherView(View):
             uid = str(self.user.id)
             reward = self.guess_reward()
             users[uid]["wallet"] += reward
-            save_data(users)
             balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="數字搜尋者",
+                result="成功",
+                bet=self.total_spent,
+                delta=reward - self.total_spent,
+                balance=balance,
+                details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+            )
+            save_data(users)
             self.settlement_reward = reward
             self.ended = True
             self.show_post_game_controls()
@@ -650,6 +660,19 @@ class NumberSearcherView(View):
             return
         self.ended = True
         self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.user.id)
+        append_game_record(
+            users,
+            uid,
+            game_name="數字搜尋者",
+            result="放棄",
+            bet=self.total_spent,
+            delta=self.settlement_profit(),
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+        )
+        save_data(users)
         self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
         await self.refresh(
             interaction,
@@ -699,6 +722,19 @@ class NumberSearcherView(View):
             return
         self.ended = True
         self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.user.id)
+        append_game_record(
+            users,
+            uid,
+            game_name="數字搜尋者",
+            result="逾時",
+            bet=self.total_spent,
+            delta=self.settlement_profit(),
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+        )
+        save_data(users)
         if self.message:
             embed, file = self.build_embed_and_file(
                 f"⌛ 數字搜尋者逾時，遊戲結束。\n"

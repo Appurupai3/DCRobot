@@ -8,7 +8,7 @@ from collections.abc import Callable
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 class PuzzleBetModal(Modal):
@@ -127,6 +127,20 @@ class PuzzleGuessView(View):
             return
         self.resolved = True
         self.show_post_game_buttons()
+        users = load_data()
+        uid = str(self.author_id)
+        if uid in users:
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="逾時",
+                bet=self.bet_amount,
+                delta=-self.bet_amount,
+                balance=users[uid].get("wallet", 0),
+                details=f"答案 {self.secret}；已猜 {self.attempts}/{self.max_attempts} 次。",
+            )
+            save_data(users)
         if self.message:
             embed = build_puzzle_embed(self, status_text="⏰ 時間到，挑戰結束！")
             await self.message.edit(embed=embed, view=self)
@@ -175,6 +189,17 @@ class PuzzleGuessModal(Modal):
             reward_multiplier = puzzle_reward_multiplier(view.attempts)
             reward = int(view.bet_amount * reward_multiplier)
             users[uid]["wallet"] += view.bet_amount + reward
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="成功",
+                bet=view.bet_amount,
+                delta=reward,
+                balance=balance,
+                details=f"答案 {view.secret}；第 {view.attempts} 次解開。",
+            )
             save_data(users)
             status_text = (
                 f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}"
@@ -183,6 +208,19 @@ class PuzzleGuessModal(Modal):
             view.resolved = True
         elif view.attempts >= view.max_attempts:
             status_text = f"😢 挑戰失敗，正確答案為 {view.secret}。"
+            users = load_data()
+            uid = str(interaction.user.id)
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="失敗",
+                bet=view.bet_amount,
+                delta=-view.bet_amount,
+                balance=users[uid]["wallet"],
+                details=f"答案 {view.secret}；8 次未解開。",
+            )
+            save_data(users)
             view.resolved = True
 
         if view.resolved:

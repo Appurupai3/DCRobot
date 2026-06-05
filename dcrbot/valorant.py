@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Optional
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
+from dcrbot.storage import append_game_record, load_data, save_data
+
 
 # === 特戰棋盤設定 ===
 VALORANT_WIDTH = 15
@@ -755,6 +757,19 @@ class ValorantGameView(View):
     async def finalize(self, interaction: discord.Interaction, reason: str):
         self.ended = True
         self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.author_id)
+        append_game_record(
+            users,
+            uid,
+            game_name="特戰棋盤",
+            result="勝利" if self.game.check_end()[1] and "勝利" in self.game.check_end()[1] else "結束",
+            bet=0,
+            delta=0,
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=reason,
+        )
+        save_data(users)
         embed = build_valorant_embed(self.game, reason)
         if interaction.response.is_done():
             if self.message:

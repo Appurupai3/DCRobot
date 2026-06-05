@@ -8,7 +8,7 @@ from collections.abc import Callable
 import discord
 from discord.ui import Button, Modal, TextInput, View
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 COIN_FACE_LABELS = {"H": "正面", "T": "反面"}
@@ -168,8 +168,18 @@ class CoinFlipChallengeView(View):
             result_text = f"🤖 AI 的組合「{compact_sequence(self.ai_sequence)}」先出現，你失去下注金 ${self.bet_amount}。"
             color = discord.Color.red()
 
-        save_data(users)
         balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="拋硬幣挑戰",
+            result="勝利" if self.winner == "player" else "失敗",
+            bet=self.bet_amount,
+            delta=payout - self.bet_amount,
+            balance=balance,
+            details=f"玩家 {compact_sequence(self.player_sequence)}；AI {compact_sequence(self.ai_sequence)}；投擲 {len(self.tosses)} 次。",
+        )
+        save_data(users)
         self.ended = True
         self.finish_buttons()
         embed = self.build_embed(f"{result_text}\n目前錢包餘額：${balance}")
@@ -256,6 +266,20 @@ class CoinFlipChallengeView(View):
             return
         self.ended = True
         self.finish_buttons()
+        users = load_data()
+        uid = str(self.user.id)
+        if uid in users:
+            append_game_record(
+                users,
+                uid,
+                game_name="拋硬幣挑戰",
+                result="逾時",
+                bet=self.bet_amount,
+                delta=-self.bet_amount,
+                balance=users[uid].get("wallet", 0),
+                details="選擇階段逾時，下注不退還。",
+            )
+            save_data(users)
         if self.message:
             embed = self.build_embed("⌛ 拋硬幣挑戰逾時，下注不退還。")
             await self.message.edit(embed=embed, view=self)

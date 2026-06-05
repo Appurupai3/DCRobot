@@ -12,7 +12,7 @@ from discord.ui import Button, Modal, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 from collections.abc import Callable
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 BALLOON_MULTIPLIERS = [1.1, 1.3, 1.8, 2.5, 4, 7, 12, 25, 60, 150, 500]
@@ -266,8 +266,18 @@ class BalloonPumpView(View):
         users = load_data()
         uid = str(self.user.id)
         users[uid]["wallet"] += payout
-        save_data(users)
         balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="打氣球",
+            result="領獎",
+            bet=self.bet_amount,
+            delta=payout - self.bet_amount,
+            balance=balance,
+            details=f"打氣 {self.pumps}/11 次，領回 ${payout}。",
+        )
+        save_data(users)
 
         self.ended = True
         self.show_post_game_buttons()
@@ -296,9 +306,20 @@ class BalloonPumpView(View):
             medical_fee_multiplier = self.current_medical_fee_multiplier()
             medical_fee = int(self.bet_amount * medical_fee_multiplier)
             users = load_data()
-            users[str(self.user.id)]["wallet"] -= medical_fee
+            uid = str(self.user.id)
+            users[uid]["wallet"] -= medical_fee
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="打氣球",
+                result="爆炸",
+                bet=self.bet_amount,
+                delta=-(self.bet_amount + medical_fee),
+                balance=balance,
+                details=f"第 {self.pumps + 1} 次打氣爆炸，醫藥費 ${medical_fee}。",
+            )
             save_data(users)
-            balance = users[str(self.user.id)]["wallet"]
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
@@ -381,8 +402,18 @@ class BalloonPumpView(View):
         users = load_data()
         uid = str(self.user.id)
         users[uid]["wallet"] += payout
-        save_data(users)
         balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="打氣球",
+            result="逾時領獎",
+            bet=self.bet_amount,
+            delta=payout - self.bet_amount,
+            balance=balance,
+            details=f"逾時自動領回 ${payout}；打氣 {self.pumps}/11 次。",
+        )
+        save_data(users)
 
         self.ended = True
         self.show_post_game_buttons()
@@ -572,6 +603,17 @@ class HorseRaceModal(Modal):
             )
 
         users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
+        balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="賽馬競速",
+            result="勝利" if user_idx == winner_idx else "失敗",
+            bet=amount,
+            delta=payout_change - amount,
+            balance=balance,
+            details=f"選 {names[user_idx]}；冠軍 {names[winner_idx]}；距離 {top_distance}m。",
+        )
         save_data(users)
 
         race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
@@ -583,7 +625,6 @@ class HorseRaceModal(Modal):
             f"{names[i]} | {build_bar(positions[i])} {positions[i]}m" for i in range(3)
         )
         race_embed.add_field(name="十四格賽道視覺", value=segment_view, inline=False)
-        balance = users[uid]["wallet"]
 
         await progress_msg.edit(content=build_status(round_idx))
 
