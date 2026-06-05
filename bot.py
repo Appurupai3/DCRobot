@@ -21,7 +21,7 @@ from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
 from dcrbot.turing_machine import NumberSearcherView
-from dcrbot.valorant import ValorantSkillSelectView
+from dcrbot.valorant import ValorantSkillSelectView, build_valorant_intro_embed
 from dcrbot.storage import load_data, open_account, save_data
 
 
@@ -63,6 +63,41 @@ class PayModal(Modal, title='💸 轉帳中心'):
             await interaction.response.send_message(f"✅ 已轉帳 ${amt} 給 {receiver.mention}", ephemeral=True)
         except:
             await interaction.response.send_message("❌ 轉帳失敗，請檢查 ID 或金額。", ephemeral=True)
+
+
+
+class SimplePostGameView(View):
+    def __init__(self, user: discord.User, replay_modal_factory: Callable[[discord.User], Modal], menu_builder: Callable | None = None):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+        self.replay_modal_factory = replay_modal_factory
+        self.menu_builder = menu_builder
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲結算面板！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+    async def replay(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(self.replay_modal_factory(interaction.user))
+        self.stop()
+
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+    async def return_to_main(self, interaction: discord.Interaction, button: Button):
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(
+            content=None,
+            embed=menu_payload.get("embed"),
+            view=menu_payload.get("view"),
+        )
+        self.stop()
+
 
 class EconomyMenu(View):
     def __init__(self):
@@ -150,8 +185,21 @@ async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
 
     save_data(users)
     balance = users[uid]["wallet"]
+    post_view = SimplePostGameView(
+        interaction.user,
+        lambda user: BetModal(
+            user,
+            modal.game_name,
+            modal.reward_mult_range,
+            modal.penalty_chance,
+            modal.penalty_mult_range,
+            modal.crit_chance,
+        ),
+        build_game_menu,
+    )
     await interaction.response.send_message(
         f"{result_text}\n目前錢包餘額：${balance}",
+        view=post_view,
         ephemeral=True,
     )
 
@@ -195,11 +243,22 @@ async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetM
             await progress.edit(content=frame)
 
         final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        post_view = SimplePostGameView(
+            interaction.user,
+            lambda user: CustomBetModal(user, modal.game_name, modal.resolve_func),
+            build_game_menu,
+        )
         await asyncio.sleep(1.1)
-        await progress.edit(content=f"{frames[-1]}\n{final_text}")
+        await progress.edit(content=f"{frames[-1]}\n{final_text}", view=post_view)
     else:
+        post_view = SimplePostGameView(
+            interaction.user,
+            lambda user: CustomBetModal(user, modal.game_name, modal.resolve_func),
+            build_game_menu,
+        )
         await interaction.response.send_message(
             f"{result_text}\n目前錢包餘額：${balance}",
+            view=post_view,
             ephemeral=True,
         )
 
@@ -1607,11 +1666,11 @@ class GameMenu(View):
 
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PirateTreasureModal(interaction.user))
+        await interaction.response.send_modal(PirateTreasureModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="海盜寶藏2", style=discord.ButtonStyle.success, emoji="🗺️", row=0)
     async def pirate_treasure2(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PirateTreasure2Modal(interaction.user))
+        await interaction.response.send_modal(PirateTreasure2Modal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="打氣球", style=discord.ButtonStyle.danger, emoji="🎈", row=0)
     async def balloon_pump(self, interaction: discord.Interaction, button: Button):
@@ -1619,11 +1678,11 @@ class GameMenu(View):
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(HorseRaceModal(interaction.user))
+        await interaction.response.send_modal(HorseRaceModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PuzzleBetModal(interaction.user))
+        await interaction.response.send_modal(PuzzleBetModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="拋硬幣挑戰", style=discord.ButtonStyle.danger, emoji="🪙", row=1)
     async def coin_flip_challenge(self, interaction: discord.Interaction, button: Button):
@@ -1638,26 +1697,10 @@ class GameMenu(View):
 
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
-        intro = discord.Embed(
-            title="🎯 特戰棋盤：1v3",
-            description=(
-                "15x13 戰術棋盤，選擇 3 個技能後與三名電腦對戰。\n"
-                "兩名敵人防守兩個下包點，右下還有一名支援。勝利：擊殺全部或下包後撐 10 回合；"
-                "失敗：未下包超過 20 回合或爆能器遭拆除（你倒下後仍可等待爆炸/拆除結果）。"
-            ),
-            color=discord.Color.teal(),
+        await interaction.response.send_message(
+            embed=build_valorant_intro_embed(),
+            view=ValorantSkillSelectView(interaction.user, build_game_menu),
         )
-        intro.add_field(
-            name="圖例",
-            value="⬜ 地面｜⬛ 掩體｜🟦 你｜🟥 敵人｜💠 爆能器｜☁️ 煙霧｜❄️ 緩速",
-            inline=False,
-        )
-        intro.add_field(
-            name="技能",
-            value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可在 6x6 內選點位移（技能一次性）",
-            inline=False,
-        )
-        await interaction.response.send_message(embed=intro, view=ValorantSkillSelectView(interaction.user))
 
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
@@ -1727,7 +1770,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🔢 數字搜尋者",
-        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回大廳。",
+        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回主畫面。",
         inline=False,
     )
     embed.add_field(

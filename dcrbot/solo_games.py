@@ -10,6 +10,7 @@ import random
 import discord
 from discord.ui import Button, Modal, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
+from collections.abc import Callable
 
 from dcrbot.storage import load_data, open_account, save_data
 
@@ -192,6 +193,7 @@ class BalloonPumpView(View):
     def __init__(self, user: discord.User, bet_amount: int, menu_builder=None):
         super().__init__(timeout=180)
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = bet_amount
         self.menu_builder = menu_builder
         self.pumps = 0
@@ -224,7 +226,7 @@ class BalloonPumpView(View):
         for child in self.children:
             if child.label in {"打氣", "結束打氣"}:
                 child.disabled = enabled
-            elif child.label in {"再玩一次", "返回遊戲畫面"}:
+            elif child.label in {"再來一次", "返回主畫面"}:
                 child.disabled = not enabled
 
     def show_post_game_buttons(self) -> None:
@@ -328,17 +330,17 @@ class BalloonPumpView(View):
             discord.Color.green(),
         )
 
-    @discord.ui.button(label="再玩一次", style=discord.ButtonStyle.primary, emoji="🔁", row=1)
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=1)
     async def replay(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再玩一次。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
             return
 
         await open_account(interaction.user)
         users = load_data()
         uid = str(interaction.user.id)
         if users[uid]["wallet"] < self.bet_amount:
-            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再玩一次。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再來一次。", ephemeral=True)
             return
 
         users[uid]["wallet"] -= self.bet_amount
@@ -346,21 +348,21 @@ class BalloonPumpView(View):
 
         new_view = BalloonPumpView(self.user, self.bet_amount, self.menu_builder)
         embed, file = await new_view.build_message(
-            f"🔁 使用相同下注 ${self.bet_amount} 再玩一次！按下「打氣」讓頭像越變越大。",
+            f"🔁 使用相同下注 ${self.bet_amount} 再來一次！按下「打氣」讓頭像越變越大。",
             color=discord.Color.red(),
         )
         await interaction.response.edit_message(embed=embed, attachments=[file], view=new_view)
         new_view.message = interaction.message
         self.stop()
 
-    @discord.ui.button(label="返回遊戲畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
     async def return_to_game_menu(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回遊戲畫面。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
             return
 
         if self.menu_builder is None:
-            await interaction.response.send_message("❌ 目前無法返回遊戲畫面，請重新使用 /opengame。", ephemeral=True)
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
             return
 
         menu_payload = self.menu_builder(self.user)
@@ -466,9 +468,10 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
 
 
 class HorseRaceModal(Modal):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
         super().__init__(title="🐎 賽馬競速 - 選擇座騎與下注")
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.horse_choice = TextInput(label="選擇賽馬 (1-3)", placeholder="1=赤焰、2=蒼影、3=金蹄", required=True, max_length=1)
         self.add_item(self.bet_amount)
@@ -587,9 +590,42 @@ class HorseRaceModal(Modal):
         await interaction.followup.send(
             content=f"{result_text}\n目前錢包餘額：${balance}",
             embed=race_embed,
+            view=HorseRacePostGameView(interaction.user, self.menu_builder),
             ephemeral=True,
         )
 
+
+
+class HorseRacePostGameView(View):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+        self.menu_builder = menu_builder
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的賽馬結算面板！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+    async def replay(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(HorseRaceModal(interaction.user, self.menu_builder))
+        self.stop()
+
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+    async def return_to_main(self, interaction: discord.Interaction, button: Button):
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(
+            content=None,
+            embed=menu_payload.get("embed"),
+            view=menu_payload.get("view"),
+        )
+        self.stop()
 
 def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int, list[str]]:
     player_rolls = (random.randint(1, 6), random.randint(1, 6))

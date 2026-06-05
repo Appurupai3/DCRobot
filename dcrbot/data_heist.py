@@ -119,7 +119,7 @@ class CoinFlipChallengeView(View):
         for child in self.children:
             if child.label in {"正面", "反面", "重選"}:
                 child.disabled = enabled
-            elif child.label in {"再玩一次", "返回遊戲畫面"}:
+            elif child.label in {"再來一次", "返回主畫面"}:
                 child.disabled = not enabled
 
     def finish_buttons(self) -> None:
@@ -127,7 +127,7 @@ class CoinFlipChallengeView(View):
 
     def current_status(self) -> str:
         if self.ended:
-            return "✅ 遊戲已結束，可選擇再玩一次或返回遊戲畫面。"
+            return "✅ 遊戲已結束，可選擇再來一次或返回主畫面。"
         if self.ai_first:
             return "🤖 AI 先選，已公開它的 3 連組合；請選擇你的 3 個正反面。"
         return "🧑 玩家先選；你選完後，AI 會用你的第 2 枚反轉放第 1 枚，並接上你的第 1、2 枚。"
@@ -215,36 +215,36 @@ class CoinFlipChallengeView(View):
 
         await self.resolve_game(interaction)
 
-    @discord.ui.button(label="再玩一次", style=discord.ButtonStyle.success, emoji="🔁", row=1)
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.success, emoji="🔁", row=1)
     async def replay(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再玩一次。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
             return
 
         await open_account(interaction.user)
         users = load_data()
         uid = str(interaction.user.id)
         if users[uid]["wallet"] < self.bet_amount:
-            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再玩一次。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再來一次。", ephemeral=True)
             return
 
         users[uid]["wallet"] -= self.bet_amount
         save_data(users)
 
         new_view = CoinFlipChallengeView(self.user, self.bet_amount, self.menu_builder)
-        embed = new_view.build_embed(f"🔁 使用相同下注 ${self.bet_amount} 再玩一次！請選擇你的 3 個正反面組合。")
+        embed = new_view.build_embed(f"🔁 使用相同下注 ${self.bet_amount} 再來一次！請選擇你的 3 個正反面組合。")
         await interaction.response.edit_message(embed=embed, view=new_view)
         new_view.message = interaction.message
         self.stop()
 
-    @discord.ui.button(label="返回遊戲畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
     async def return_to_game_menu(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回遊戲畫面。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
             return
 
         if self.menu_builder is None:
-            await interaction.response.send_message("❌ 目前無法返回遊戲畫面，請重新使用 /opengame。", ephemeral=True)
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
             return
 
         menu_payload = self.menu_builder(self.user)

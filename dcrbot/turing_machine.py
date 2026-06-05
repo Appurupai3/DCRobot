@@ -491,7 +491,7 @@ class NumberSearcherView(View):
         replay_button.callback = replay_callback
         self.add_item(replay_button)
 
-        lobby_button = Button(label="返回大廳", style=discord.ButtonStyle.secondary, emoji="🎮", row=0, custom_id=LOBBY_BUTTON_CUSTOM_ID)
+        lobby_button = Button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0, custom_id=LOBBY_BUTTON_CUSTOM_ID)
 
         async def lobby_callback(interaction: discord.Interaction):
             await self.return_to_lobby(interaction)
@@ -677,13 +677,13 @@ class NumberSearcherView(View):
 
     async def return_to_lobby(self, interaction: discord.Interaction) -> None:
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回大廳。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
             return
         if interaction.user.id != self.user.id:
-            await interaction.response.send_message("❌ 只有開局玩家可以返回大廳。", ephemeral=True)
+            await interaction.response.send_message("❌ 只有開局玩家可以返回主畫面。", ephemeral=True)
             return
         if self.menu_builder is None:
-            await interaction.response.send_message("❌ 目前無法返回大廳，請重新使用 /opengame。", ephemeral=True)
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
             return
 
         menu_payload = self.menu_builder(self.user)
