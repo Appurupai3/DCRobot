@@ -1,0 +1,15 @@
+{
+    "437224959291686924": {
+        "game": "拋硬幣挑戰",
+        "plays": 2,
+        "wins": 1,
+        "losses": 1,
+        "evens": 0,
+        "total_delta": 5000,
+        "total_bet": 10000,
+        "max_profit": 10000,
+        "max_loss": -5000,
+        "last_played_at": "2026-06-05T17:41:54+00:00",
+        "extra": {}
+    }
+}
