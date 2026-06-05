@@ -68,6 +68,11 @@ class Clue:
     text: str
 
 
+RANDOM_NUMBER_PACK_TITLE = "隨機數字禮包"
+RANDOM_COLOR_PACK_TITLE = "隨機顏色禮包"
+RANDOM_PACK_TITLES = {RANDOM_NUMBER_PACK_TITLE, RANDOM_COLOR_PACK_TITLE}
+
+
 @dataclass(frozen=True)
 class PendingClueOffer:
     clue_type: str
@@ -205,6 +210,7 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
         Clue("隨機差", f"第 {random_gap_pair[0] + 1} 個與第 {random_gap_pair[1] + 1} 個數字的差為 {abs(code[random_gap_pair[0]] - code[random_gap_pair[1]])}。"),
         Clue("隨機機會", f"密碼包含數字 {code[random_index]}。"),
         Clue("隨機計數器 2A", f"第 {two_indexes[0] + 1} 位與第 {two_indexes[1] + 1} 位的和是 {code[two_indexes[0]] + code[two_indexes[1]]}。"),
+        Clue(RANDOM_NUMBER_PACK_TITLE, "抽到後會立刻隨機公開 2 個數字有關的線索。"),
     ]
     for lucky_digit in DIGITS:
         positions = [index for index, digit in enumerate(code) if digit == lucky_digit]
@@ -236,6 +242,7 @@ def build_color_clues(
         Clue("藍色計數器", f"藍色方塊上面的數字總和是 {color_sum['藍']}。"),
         Clue("隨機計數器", f"某一種顏色方塊上面的數字總和是 {color_sum[random_color]}。"),
         Clue("隨機計數器 2B", f"某兩種顏色方塊上面的數字總和是 {sum(color_sum[color] for color in two_colors)}。"),
+        Clue(RANDOM_COLOR_PACK_TITLE, "抽到後會立刻隨機公開 2 個顏色有關的線索。"),
         Clue("藍黃配", f"藍色方塊 + 黃色方塊上面的數字總和是 {color_sum['藍'] + color_sum['黃']}。"),
         Clue("黃綠配", f"綠色方塊 + 黃色方塊上面的數字總和是 {color_sum['綠'] + color_sum['黃']}。"),
         Clue("藍綠配", f"藍色方塊 + 綠色方塊上面的數字總和是 {color_sum['藍'] + color_sum['綠']}。"),
@@ -364,6 +371,7 @@ def clue_choice_text(clue: Clue) -> str:
         "隨機差": "隨機顯示一個絕對差 [某數與某數的差為 ?]。",
         "隨機機會": "從 3 個數字隨機爆出一位數字 [密碼包含 ?]。",
         "隨機計數器 2A": "隨機說出 2 位和為多少。",
+        RANDOM_NUMBER_PACK_TITLE: "抽到後會立刻隨機公開 2 個數字有關的線索。",
         "藍色雷達": "顯示所有藍色方塊。",
         "綠色雷達": "顯示所有綠色方塊。",
         "黃色雷達": "顯示所有黃色方塊。",
@@ -375,6 +383,7 @@ def clue_choice_text(clue: Clue) -> str:
         "藍色計數器": "藍色方塊上面的數字總和。",
         "隨機計數器": "其中一種顏色（不顯示顏色）方塊上面的數字總和。",
         "隨機計數器 2B": "隨機二種顏色（不顯示顏色）方塊上面的數字總和。",
+        RANDOM_COLOR_PACK_TITLE: "抽到後會立刻隨機公開 2 個顏色有關的線索。",
         "藍黃配": "藍色方塊 + 黃色方塊上面的數字總和。",
         "黃綠配": "綠色方塊 + 黃色方塊上面的數字總和。",
         "藍綠配": "藍色方塊 + 綠色方塊上面的數字總和。",
@@ -475,15 +484,15 @@ class PendingClueChoiceView(View):
             return
 
         self.parent.pending_clue_offer = None
-        self.parent.history.append(f"💡 ${self.cost}｜【{clue.title}】{clue.text}")
-        embed, file = self.parent.build_embed_and_file(f"公開線索：【{clue.title}】{clue.text}")
+        status_text, selection_text = self.parent.resolve_selected_clue(clue, self.cost)
+        embed, file = self.parent.build_embed_and_file(status_text)
         if self.parent.message is not None:
             await self.parent.message.edit(embed=embed, attachments=[file], view=self.parent)
 
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
-            content=f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。",
+            content=selection_text,
             embed=None,
             view=self,
         )
@@ -823,6 +832,46 @@ class NumberSearcherView(View):
         self.seen_clue_titles.update(clue.title for clue in sampled)
         return sampled
 
+    def random_pack_pool(self, pack_title: str) -> tuple[list[Clue], str]:
+        if pack_title == RANDOM_NUMBER_PACK_TITLE:
+            return build_number_clues(self.secret), "數字"
+        if pack_title == RANDOM_COLOR_PACK_TITLE:
+            return build_color_clues(self.secret, self.colors, self.available_colors), "顏色"
+        return [], ""
+
+    def trigger_random_pack(self, pack_title: str) -> tuple[Clue, ...]:
+        pool, _ = self.random_pack_pool(pack_title)
+        pool = [clue for clue in pool if clue.title not in RANDOM_PACK_TITLES]
+        return self.sample_unseen_clues(pool, 2)
+
+    def resolve_selected_clue(self, clue: Clue, cost: int) -> tuple[str, str]:
+        if clue.title in RANDOM_PACK_TITLES:
+            pack_results = self.trigger_random_pack(clue.title)
+            pool_name = "數字" if clue.title == RANDOM_NUMBER_PACK_TITLE else "顏色"
+            self.random_clue_count += 1
+            if clue.title == RANDOM_NUMBER_PACK_TITLE:
+                self.number_clue_count += len(pack_results)
+            else:
+                self.color_clue_count += len(pack_results)
+            if pack_results:
+                result_lines = [f"【{result.title}】{result.text}" for result in pack_results]
+                joined_results = "\n".join(result_lines)
+                self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，公開 {len(pack_results)} 個{pool_name}線索")
+                for result in pack_results:
+                    self.history.append(f"💡 禮包｜【{result.title}】{result.text}")
+                return (
+                    f"觸發【{clue.title}】，隨機公開 {len(pack_results)} 個{pool_name}有關的線索：\n{joined_results}",
+                    f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。",
+                )
+            self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，但{pool_name}線索卡池已沒有未出現過的線索")
+            return (
+                f"觸發【{clue.title}】，但{pool_name}線索卡池已沒有未出現過的線索。",
+                f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。",
+            )
+
+        self.history.append(f"💡 ${cost}｜【{clue.title}】{clue.text}")
+        return f"公開線索：【{clue.title}】{clue.text}", f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+
     def pool_for_clue_type(self, clue_type: str) -> tuple[list[Clue], int, str]:
         if clue_type == "number":
             return build_number_clues(self.secret), 3, "數字有關的線索"
@@ -1077,14 +1126,6 @@ class NumberSearcherView(View):
     @discord.ui.button(label="顏色有關的線索", style=discord.ButtonStyle.success, emoji="🎨", row=1)
     async def color_clue(self, interaction: discord.Interaction, button: Button):
         await self.reveal_clue(interaction, "color")
-
-    @discord.ui.button(label="隨機數字禮包", style=discord.ButtonStyle.secondary, emoji="🎲", row=1)
-    async def random_number_clue(self, interaction: discord.Interaction, button: Button):
-        await self.reveal_clue(interaction, "random_number")
-
-    @discord.ui.button(label="隨機顏色禮包", style=discord.ButtonStyle.secondary, emoji="🎁", row=2)
-    async def random_color_clue(self, interaction: discord.Interaction, button: Button):
-        await self.reveal_clue(interaction, "random_color")
 
     @discord.ui.button(label="檢視紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=2, custom_id=HISTORY_BUTTON_CUSTOM_ID)
     async def view_history(self, interaction: discord.Interaction, button: Button):

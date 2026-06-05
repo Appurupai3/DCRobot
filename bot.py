@@ -1998,7 +1998,6 @@ class GameMenu(View):
         await interaction.response.send_message(
             embed=build_number_searcher2_difficulty_embed(interaction.user),
             view=NumberSearcher2DifficultyView(interaction.user, build_game_menu),
-            ephemeral=True,
         )
 
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
