@@ -1,0 +1,14 @@
+[
+    {
+        "game": "拋硬幣挑戰",
+        "file": "leaderboard\\拋硬幣挑戰.json",
+        "players": 1,
+        "updated_at": "2026-06-05T17:41:54+00:00"
+    },
+    {
+        "game": "骰子決鬥",
+        "file": "leaderboard\\骰子決鬥.json",
+        "players": 1,
+        "updated_at": "2026-06-05T17:41:58+00:00"
+    }
+]

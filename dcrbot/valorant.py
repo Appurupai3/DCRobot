@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Optional
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
+from dcrbot.storage import append_game_record, load_data, save_data
+
 
 # === 特戰棋盤設定 ===
 VALORANT_WIDTH = 15
@@ -701,10 +703,12 @@ def build_valorant_embed(game: ValorantTacticsGame, status_text: str) -> discord
 
 
 class ValorantGameView(View):
-    def __init__(self, user: discord.User, game: ValorantTacticsGame):
+    def __init__(self, user: discord.User, game: ValorantTacticsGame, menu_builder: Callable | None = None):
         super().__init__(timeout=420)
         self.author_id = user.id
         self.game = game
+        self.menu_builder = menu_builder
+        self.ended = False
         self.message: discord.Message | None = None
         self.skill_select = SkillUseSelect(self)
         self.add_item(self.skill_select)
@@ -713,14 +717,59 @@ class ValorantGameView(View):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("❌ 這不是你的遊戲面板！", ephemeral=True)
             return False
+        if self.ended:
+            return True
         if self.game.player_hp <= 0:
             await interaction.response.send_message("💀 你已倒下，無法再行動，只能等待爆能器結果。", ephemeral=True)
             return False
         return True
 
+    def show_post_game_controls(self) -> None:
+        self.clear_items()
+        replay_btn = Button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+        lobby_btn = Button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+
+        async def replay_callback(interaction: discord.Interaction):
+            await self.replay(interaction)
+
+        async def lobby_callback(interaction: discord.Interaction):
+            await self.return_to_main(interaction)
+
+        replay_btn.callback = replay_callback
+        lobby_btn.callback = lobby_callback
+        self.add_item(replay_btn)
+        self.add_item(lobby_btn)
+
+    async def replay(self, interaction: discord.Interaction) -> None:
+        new_select = ValorantSkillSelectView(interaction.user, self.menu_builder)
+        intro = build_valorant_intro_embed()
+        await interaction.response.edit_message(embed=intro, view=new_select)
+        self.stop()
+
+    async def return_to_main(self, interaction: discord.Interaction) -> None:
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(embed=menu_payload.get("embed"), view=menu_payload.get("view"))
+        self.stop()
+
     async def finalize(self, interaction: discord.Interaction, reason: str):
-        for child in self.children:
-            child.disabled = True
+        self.ended = True
+        self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.author_id)
+        append_game_record(
+            users,
+            uid,
+            game_name="特戰棋盤",
+            result="勝利" if self.game.check_end()[1] and "勝利" in self.game.check_end()[1] else "結束",
+            bet=0,
+            delta=0,
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=reason,
+        )
+        save_data(users)
         embed = build_valorant_embed(self.game, reason)
         if interaction.response.is_done():
             if self.message:
@@ -801,8 +850,8 @@ class ValorantGameView(View):
         self.game.attack_used = True
         await self.resolve_action(interaction, [status], True)
     @classmethod
-    def build(cls, user: discord.User, game: ValorantTacticsGame):
-        return cls(user, game)
+    def build(cls, user: discord.User, game: ValorantTacticsGame, menu_builder: Callable | None = None):
+        return cls(user, game, menu_builder)
 
 
 class AttackTargetPicker(View):
@@ -942,10 +991,34 @@ class SkillUseSelect(discord.ui.Select):
         await view.resolve_action(interaction, [result], False)
 
 
+def build_valorant_intro_embed() -> discord.Embed:
+    intro = discord.Embed(
+        title="🎯 特戰棋盤：1v3",
+        description=(
+            "15x13 戰術棋盤，選擇 3 個技能後與三名電腦對戰。\n"
+            "兩名敵人防守兩個下包點，右下還有一名支援。勝利：擊殺全部或下包後撐 10 回合；"
+            "失敗：未下包超過 20 回合或爆能器遭拆除（你倒下後仍可等待爆炸/拆除結果）。"
+        ),
+        color=discord.Color.teal(),
+    )
+    intro.add_field(
+        name="圖例",
+        value="⬜ 地面｜⬛ 掩體｜🟦 你｜🟥 敵人｜💠 爆能器｜☁️ 煙霧｜❄️ 緩速",
+        inline=False,
+    )
+    intro.add_field(
+        name="技能",
+        value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可在 6x6 內選點位移（技能一次性）",
+        inline=False,
+    )
+    return intro
+
+
 class ValorantSkillSelectView(View):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
         super().__init__(timeout=180)
         self.author_id = user.id
+        self.menu_builder = menu_builder
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -967,7 +1040,7 @@ class ValorantSkillSelectView(View):
     )
     async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         game = ValorantTacticsGame(list(select.values))
-        view = ValorantGameView.build(interaction.user, game)
+        view = ValorantGameView.build(interaction.user, game, self.menu_builder)
         embed = build_valorant_embed(game, "✅ 技能已配置，開始行動！")
         await interaction.response.send_message(embed=embed, view=view)
         view.message = await interaction.original_response()

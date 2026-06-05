@@ -10,7 +10,7 @@ import discord
 from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 DIGITS = tuple(range(10))
@@ -365,6 +365,9 @@ class NumberSearcherView(View):
         self.colors = tuple(random.choice(COLORS) for _ in range(CODE_LENGTH))
         self.guess_count = 0
         self.clue_count = 0
+        self.number_clue_count = 0
+        self.color_clue_count = 0
+        self.random_clue_count = 0
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
@@ -395,6 +398,14 @@ class NumberSearcherView(View):
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
+
+    def record_extra_stats(self) -> dict[str, int]:
+        return {
+            "number_clue_count": self.number_clue_count,
+            "color_clue_count": self.color_clue_count,
+            "random_clue_count": self.random_clue_count,
+            "guess_total": self.guess_count,
+        }
 
     def has_started(self) -> bool:
         return self.guess_count > 0 or self.clue_count > 0 or self.total_spent > 0
@@ -491,7 +502,7 @@ class NumberSearcherView(View):
         replay_button.callback = replay_callback
         self.add_item(replay_button)
 
-        lobby_button = Button(label="返回大廳", style=discord.ButtonStyle.secondary, emoji="🎮", row=0, custom_id=LOBBY_BUTTON_CUSTOM_ID)
+        lobby_button = Button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0, custom_id=LOBBY_BUTTON_CUSTOM_ID)
 
         async def lobby_callback(interaction: discord.Interaction):
             await self.return_to_lobby(interaction)
@@ -545,6 +556,7 @@ class NumberSearcherView(View):
             if not await self.charge_wallet(interaction, cost):
                 return
             self.clue_count += 1
+            self.number_clue_count += 1
             pool = build_number_clues(self.secret)
             sampled = random.sample(pool, 3)
         elif clue_type == "color":
@@ -552,12 +564,14 @@ class NumberSearcherView(View):
             if not await self.charge_wallet(interaction, cost):
                 return
             self.clue_count += 1
+            self.color_clue_count += 1
             pool = build_color_clues(self.secret, self.colors)
             sampled = random.sample(pool, 3)
         else:
             cost = self.random_clue_cost()
             if not await self.charge_wallet(interaction, cost):
                 return
+            self.random_clue_count += 1
             mixed_pool = build_number_clues(self.secret) + build_color_clues(self.secret, self.colors)
             sampled = random.sample(mixed_pool, 2)
 
@@ -598,8 +612,19 @@ class NumberSearcherView(View):
             uid = str(self.user.id)
             reward = self.guess_reward()
             users[uid]["wallet"] += reward
-            save_data(users)
             balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="數字搜尋者",
+                result="成功",
+                bet=self.total_spent,
+                delta=reward - self.total_spent,
+                balance=balance,
+                details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+                extra_stats=self.record_extra_stats(),
+            )
+            save_data(users)
             self.settlement_reward = reward
             self.ended = True
             self.show_post_game_controls()
@@ -650,6 +675,20 @@ class NumberSearcherView(View):
             return
         self.ended = True
         self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.user.id)
+        append_game_record(
+            users,
+            uid,
+            game_name="數字搜尋者",
+            result="放棄",
+            bet=self.total_spent,
+            delta=self.settlement_profit(),
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+            extra_stats=self.record_extra_stats(),
+        )
+        save_data(users)
         self.history.append(f"🏳️ 放棄｜答案是 {format_code(self.secret)}｜營利 {format_money_delta(self.settlement_profit())}")
         await self.refresh(
             interaction,
@@ -677,13 +716,13 @@ class NumberSearcherView(View):
 
     async def return_to_lobby(self, interaction: discord.Interaction) -> None:
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回大廳。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
             return
         if interaction.user.id != self.user.id:
-            await interaction.response.send_message("❌ 只有開局玩家可以返回大廳。", ephemeral=True)
+            await interaction.response.send_message("❌ 只有開局玩家可以返回主畫面。", ephemeral=True)
             return
         if self.menu_builder is None:
-            await interaction.response.send_message("❌ 目前無法返回大廳，請重新使用 /opengame。", ephemeral=True)
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
             return
 
         menu_payload = self.menu_builder(self.user)
@@ -699,6 +738,20 @@ class NumberSearcherView(View):
             return
         self.ended = True
         self.show_post_game_controls()
+        users = load_data()
+        uid = str(self.user.id)
+        append_game_record(
+            users,
+            uid,
+            game_name="數字搜尋者",
+            result="逾時",
+            bet=self.total_spent,
+            delta=self.settlement_profit(),
+            balance=users.get(uid, {}).get("wallet", 0),
+            details=f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。",
+            extra_stats=self.record_extra_stats(),
+        )
+        save_data(users)
         if self.message:
             embed, file = self.build_embed_and_file(
                 f"⌛ 數字搜尋者逾時，遊戲結束。\n"

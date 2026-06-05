@@ -10,8 +10,9 @@ import random
 import discord
 from discord.ui import Button, Modal, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
+from collections.abc import Callable
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 BALLOON_MULTIPLIERS = [1.1, 1.3, 1.8, 2.5, 4, 7, 12, 25, 60, 150, 500]
@@ -192,6 +193,7 @@ class BalloonPumpView(View):
     def __init__(self, user: discord.User, bet_amount: int, menu_builder=None):
         super().__init__(timeout=180)
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = bet_amount
         self.menu_builder = menu_builder
         self.pumps = 0
@@ -224,7 +226,7 @@ class BalloonPumpView(View):
         for child in self.children:
             if child.label in {"打氣", "結束打氣"}:
                 child.disabled = enabled
-            elif child.label in {"再玩一次", "返回遊戲畫面"}:
+            elif child.label in {"再來一次", "返回主畫面"}:
                 child.disabled = not enabled
 
     def show_post_game_buttons(self) -> None:
@@ -264,8 +266,24 @@ class BalloonPumpView(View):
         users = load_data()
         uid = str(self.user.id)
         users[uid]["wallet"] += payout
-        save_data(users)
         balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="打氣球",
+            result="領獎",
+            bet=self.bet_amount,
+            delta=payout - self.bet_amount,
+            balance=balance,
+            details=f"打氣 {self.pumps}/11 次，領回 ${payout}。",
+            extra_stats={
+                "cashout_total": payout,
+                "cashout_count": 1,
+                "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
+                "pump_total": self.pumps,
+            },
+        )
+        save_data(users)
 
         self.ended = True
         self.show_post_game_buttons()
@@ -294,9 +312,21 @@ class BalloonPumpView(View):
             medical_fee_multiplier = self.current_medical_fee_multiplier()
             medical_fee = int(self.bet_amount * medical_fee_multiplier)
             users = load_data()
-            users[str(self.user.id)]["wallet"] -= medical_fee
+            uid = str(self.user.id)
+            users[uid]["wallet"] -= medical_fee
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="打氣球",
+                result="爆炸",
+                bet=self.bet_amount,
+                delta=-(self.bet_amount + medical_fee),
+                balance=balance,
+                details=f"第 {self.pumps + 1} 次打氣爆炸，醫藥費 ${medical_fee}。",
+                extra_stats={"pump_total": self.pumps + 1},
+            )
             save_data(users)
-            balance = users[str(self.user.id)]["wallet"]
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
@@ -328,17 +358,17 @@ class BalloonPumpView(View):
             discord.Color.green(),
         )
 
-    @discord.ui.button(label="再玩一次", style=discord.ButtonStyle.primary, emoji="🔁", row=1)
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=1)
     async def replay(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再玩一次。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
             return
 
         await open_account(interaction.user)
         users = load_data()
         uid = str(interaction.user.id)
         if users[uid]["wallet"] < self.bet_amount:
-            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再玩一次。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再來一次。", ephemeral=True)
             return
 
         users[uid]["wallet"] -= self.bet_amount
@@ -346,21 +376,21 @@ class BalloonPumpView(View):
 
         new_view = BalloonPumpView(self.user, self.bet_amount, self.menu_builder)
         embed, file = await new_view.build_message(
-            f"🔁 使用相同下注 ${self.bet_amount} 再玩一次！按下「打氣」讓頭像越變越大。",
+            f"🔁 使用相同下注 ${self.bet_amount} 再來一次！按下「打氣」讓頭像越變越大。",
             color=discord.Color.red(),
         )
         await interaction.response.edit_message(embed=embed, attachments=[file], view=new_view)
         new_view.message = interaction.message
         self.stop()
 
-    @discord.ui.button(label="返回遊戲畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=1)
     async def return_to_game_menu(self, interaction: discord.Interaction, button: Button):
         if not self.ended:
-            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回遊戲畫面。", ephemeral=True)
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
             return
 
         if self.menu_builder is None:
-            await interaction.response.send_message("❌ 目前無法返回遊戲畫面，請重新使用 /opengame。", ephemeral=True)
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
             return
 
         menu_payload = self.menu_builder(self.user)
@@ -379,8 +409,24 @@ class BalloonPumpView(View):
         users = load_data()
         uid = str(self.user.id)
         users[uid]["wallet"] += payout
-        save_data(users)
         balance = users[uid]["wallet"]
+        append_game_record(
+            users,
+            uid,
+            game_name="打氣球",
+            result="逾時領獎",
+            bet=self.bet_amount,
+            delta=payout - self.bet_amount,
+            balance=balance,
+            details=f"逾時自動領回 ${payout}；打氣 {self.pumps}/11 次。",
+            extra_stats={
+                "cashout_total": payout,
+                "cashout_count": 1,
+                "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
+                "pump_total": self.pumps,
+            },
+        )
+        save_data(users)
 
         self.ended = True
         self.show_post_game_buttons()
@@ -466,9 +512,10 @@ async def render_balloon_avatar(user: discord.User, pumps: int, *, burst: bool =
 
 
 class HorseRaceModal(Modal):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
         super().__init__(title="🐎 賽馬競速 - 選擇座騎與下注")
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.horse_choice = TextInput(label="選擇賽馬 (1-3)", placeholder="1=赤焰、2=蒼影、3=金蹄", required=True, max_length=1)
         self.add_item(self.bet_amount)
@@ -479,10 +526,6 @@ class HorseRaceModal(Modal):
             await interaction.response.send_message("❌ 這不是你的賽馬視窗！請自行開啟遊戲。", ephemeral=True)
             return
 
-        await open_account(interaction.user)
-        users = load_data()
-        uid = str(interaction.user.id)
-
         try:
             amount = int(self.bet_amount.value)
         except ValueError:
@@ -491,10 +534,6 @@ class HorseRaceModal(Modal):
 
         if amount < 10:
             await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
-            return
-
-        if users[uid]["wallet"] < amount:
-            await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
             return
 
         try:
@@ -507,89 +546,151 @@ class HorseRaceModal(Modal):
             await interaction.response.send_message("❌ 賽馬編號只能是 1、2、3。", ephemeral=True)
             return
 
-        users[uid]["wallet"] -= amount
+        await run_horse_race(interaction, self.user, amount, pick, self.menu_builder)
 
-        names = ["赤焰", "蒼影", "金蹄"]
-        positions = [0, 0, 0]
-        log_lines = []
-        finish_line = 70
 
-        await interaction.response.defer(ephemeral=True)
+async def run_horse_race(interaction: discord.Interaction, user: discord.User, amount: int, pick: int, menu_builder: Callable | None = None):
+    await open_account(user)
+    users = load_data()
+    uid = str(user.id)
 
-        def build_bar(distance: int) -> str:
-            filled_segments = min(14, distance // 5)
-            empty_segments = 14 - filled_segments
-            return "🟩" * filled_segments + "⬛" * empty_segments
+    if users[uid]["wallet"] < amount:
+        await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${amount} 再來一次。", ephemeral=True)
+        return
 
-        progress_msg = await interaction.followup.send(
-            content="🏇 三匹賽馬出閘準備中...", ephemeral=True
-        )
+    users[uid]["wallet"] -= amount
 
-        def build_status(round_idx: int) -> str:
-            lines = [f"第 {round_idx} 段進度 (每格代表 5m)："]
-            for i in range(3):
-                lines.append(f"{names[i]} | {build_bar(positions[i])} {positions[i]}m")
-            return "\n".join(lines)
+    names = ["赤焰", "蒼影", "金蹄"]
+    positions = [0, 0, 0]
+    log_lines = []
+    finish_line = 70
 
-        await progress_msg.edit(content=build_status(0))
+    await interaction.response.defer(ephemeral=True)
 
-        for round_idx in range(1, 8):
-            for i in range(3):
-                stride = random.randint(6, 12)
-                positions[i] += stride
+    def build_bar(distance: int) -> str:
+        filled_segments = min(14, distance // 5)
+        empty_segments = 14 - filled_segments
+        return "🟩" * filled_segments + "⬛" * empty_segments
 
-            await progress_msg.edit(content=build_status(round_idx))
+    progress_msg = await interaction.followup.send(
+        content="🏇 三匹賽馬出閘準備中...", ephemeral=True
+    )
 
-            log_lines.append(
-                f"第 {round_idx} 段：{names[0]} {positions[0]}m / {names[1]} {positions[1]}m / {names[2]} {positions[2]}m"
-            )
+    def build_status(round_idx: int) -> str:
+        lines = [f"第 {round_idx} 段進度 (每格代表 5m)："]
+        for i in range(3):
+            lines.append(f"{names[i]} | {build_bar(positions[i])} {positions[i]}m")
+        return "\n".join(lines)
 
-            await asyncio.sleep(1.25)
+    await progress_msg.edit(content=build_status(0))
 
-            if max(positions) >= finish_line:
-                break
-
-        top_distance = max(positions)
-        top_indices = [i for i, pos in enumerate(positions) if pos == top_distance]
-        winner_idx = random.choice(top_indices)
-        user_idx = pick - 1
-
-        if user_idx == winner_idx:
-            reward_multiplier = random.uniform(1.8, 3.2)
-            reward = int(amount * reward_multiplier)
-            payout_change = amount + reward
-            result_text = (
-                f"🏁 {names[winner_idx]} 奪冠！你押中的賽馬狂奔到 {top_distance}m，返還下注 ${amount} 再贏得 ${reward}！"
-            )
-        else:
-            consolation = int(amount * 0.2)
-            payout_change = consolation
-            result_text = (
-                f"🐴 最終由 {names[winner_idx]} 奪冠 (距離 {top_distance}m)。你押的 {names[user_idx]} 落敗，只追回 ${consolation}。"
-            )
-
-        users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
-        save_data(users)
-
-        race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
-        race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
-        race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
-        race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)
-
-        segment_view = "\n".join(
-            f"{names[i]} | {build_bar(positions[i])} {positions[i]}m" for i in range(3)
-        )
-        race_embed.add_field(name="十四格賽道視覺", value=segment_view, inline=False)
-        balance = users[uid]["wallet"]
+    for round_idx in range(1, 8):
+        for i in range(3):
+            stride = random.randint(6, 12)
+            positions[i] += stride
 
         await progress_msg.edit(content=build_status(round_idx))
 
-        await interaction.followup.send(
-            content=f"{result_text}\n目前錢包餘額：${balance}",
-            embed=race_embed,
-            ephemeral=True,
+        log_lines.append(
+            f"第 {round_idx} 段：{names[0]} {positions[0]}m / {names[1]} {positions[1]}m / {names[2]} {positions[2]}m"
         )
 
+        await asyncio.sleep(1.25)
+
+        if max(positions) >= finish_line:
+            break
+
+    top_distance = max(positions)
+    top_indices = [i for i, pos in enumerate(positions) if pos == top_distance]
+    winner_idx = random.choice(top_indices)
+    user_idx = pick - 1
+
+    if user_idx == winner_idx:
+        reward_multiplier = random.uniform(1.8, 3.2)
+        reward = int(amount * reward_multiplier)
+        payout_change = amount + reward
+        result_text = (
+            f"🏁 {names[winner_idx]} 奪冠！你押中的賽馬狂奔到 {top_distance}m，返還下注 ${amount} 再贏得 ${reward}！"
+        )
+    else:
+        consolation = int(amount * 0.2)
+        payout_change = consolation
+        result_text = (
+            f"🐴 最終由 {names[winner_idx]} 奪冠 (距離 {top_distance}m)。你押的 {names[user_idx]} 落敗，只追回 ${consolation}。"
+        )
+
+    users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
+    balance = users[uid]["wallet"]
+    append_game_record(
+        users,
+        uid,
+        game_name="賽馬競速",
+        result="勝利" if user_idx == winner_idx else "失敗",
+        bet=amount,
+        delta=payout_change - amount,
+        balance=balance,
+        details=f"選 {names[user_idx]}；冠軍 {names[winner_idx]}；距離 {top_distance}m。",
+    )
+    save_data(users)
+
+    race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
+    race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
+    race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
+    race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)
+
+    segment_view = "\n".join(
+        f"{names[i]} | {build_bar(positions[i])} {positions[i]}m" for i in range(3)
+    )
+    race_embed.add_field(name="十四格賽道視覺", value=segment_view, inline=False)
+
+    await progress_msg.edit(content=build_status(round_idx))
+
+    await interaction.followup.send(
+        content=f"{result_text}\n目前錢包餘額：${balance}",
+        embed=race_embed,
+        view=HorseRacePostGameView(user, menu_builder, amount, pick),
+        ephemeral=True,
+    )
+
+
+
+class HorseRacePostGameView(View):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None, bet_amount: int | None = None, horse_choice: int | None = None):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+        self.user = user
+        self.menu_builder = menu_builder
+        self.bet_amount = bet_amount
+        self.horse_choice = horse_choice
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的賽馬結算面板！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+    async def replay(self, interaction: discord.Interaction, button: Button):
+        if self.bet_amount is None or self.horse_choice is None:
+            await interaction.response.send_modal(HorseRaceModal(interaction.user, self.menu_builder))
+            self.stop()
+            return
+        await run_horse_race(interaction, self.user, self.bet_amount, self.horse_choice, self.menu_builder)
+        self.stop()
+
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+    async def return_to_main(self, interaction: discord.Interaction, button: Button):
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(
+            content=None,
+            embed=menu_payload.get("embed"),
+            view=menu_payload.get("view"),
+        )
+        self.stop()
 
 def resolve_dice_duel(amount: int, uid: str) -> tuple[str, int, list[str]]:
     player_rolls = (random.randint(1, 6), random.randint(1, 6))

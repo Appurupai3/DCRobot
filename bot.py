@@ -21,8 +21,15 @@ from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
 from dcrbot.turing_machine import NumberSearcherView
-from dcrbot.valorant import ValorantSkillSelectView
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.valorant import ValorantSkillSelectView, build_valorant_intro_embed
+from dcrbot.storage import (
+    append_game_record,
+    get_game_records,
+    load_data,
+    open_account,
+    save_data,
+    summarize_game_records,
+)
 
 
 patch_discord_test_stubs()
@@ -64,6 +71,197 @@ class PayModal(Modal, title='💸 轉帳中心'):
         except:
             await interaction.response.send_message("❌ 轉帳失敗，請檢查 ID 或金額。", ephemeral=True)
 
+
+
+def format_money_delta(delta: int) -> str:
+    return f"+${delta}" if delta >= 0 else f"-${abs(delta)}"
+
+
+def _stat_win_rate(stats: dict) -> float:
+    plays = int(stats.get("plays", 0) or 0)
+    wins = int(stats.get("wins", 0) or 0)
+    return wins / plays * 100 if plays else 0
+
+
+def _format_stat_summary(game_name: str, stats: dict) -> str:
+    plays = int(stats.get("plays", 0) or 0)
+    wins = int(stats.get("wins", 0) or 0)
+    max_profit = int(stats.get("max_profit") or 0)
+    max_loss = int(stats.get("max_loss") or 0)
+    return (
+        f"**{game_name}**｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}｜"
+        f"獲勝 {wins}/{plays}｜勝率 {_stat_win_rate(stats):.1f}%｜"
+        f"單次最高 {format_money_delta(max_profit)}｜最大虧損 {format_money_delta(max_loss)}"
+    )
+
+
+def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
+    extra = stats.get("extra", {}) if isinstance(stats.get("extra", {}), dict) else {}
+    lines: list[str] = []
+    if game_name == "打氣球":
+        cashout_count = int(extra.get("cashout_count", 0) or 0)
+        cashout_total = int(extra.get("cashout_total", 0) or 0)
+        average = cashout_total / cashout_count if cashout_count else 0
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜500x 次數 {int(extra.get('cashout_500x_count', 0) or 0)}")
+        lines.append(f"平均打氣 {float(extra.get('pump_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
+    elif game_name == "骰子決鬥":
+        cashout_count = int(extra.get("cashout_count", 0) or 0)
+        cashout_total = int(extra.get("cashout_total", 0) or 0)
+        average = cashout_total / cashout_count if cashout_count else 0
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜50 倍爆擊次數 {int(extra.get('crit_50x_count', 0) or 0)}")
+    elif game_name.startswith("海盜寶藏"):
+        plays = int(stats.get("plays", 0) or 0)
+        wrong_total = int(extra.get("wrong_total", 0) or 0)
+        lines.append(f"平均失誤次數 {wrong_total / plays:.1f}" if plays else "平均失誤次數 0.0")
+    elif game_name == "數字搜尋者":
+        lines.append(
+            "｜".join(
+                [
+                    f"數字線索 {int(extra.get('number_clue_count', 0) or 0)} 次",
+                    f"顏色線索 {int(extra.get('color_clue_count', 0) or 0)} 次",
+                    f"隨機線索 {int(extra.get('random_clue_count', 0) or 0)} 次",
+                ]
+            )
+        )
+        lines.append(f"平均猜測 {float(extra.get('guess_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
+    return lines
+
+
+def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
+    users = load_data()
+    uid = str(user.id)
+    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_stats": {}})
+    summary = summarize_game_records(users, uid)
+    display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
+
+    if game_name and game_name in summary:
+        stats = summary[game_name]
+        embed = discord.Embed(title=f"📊 {display_name}｜{game_name} 統計", color=discord.Color.blurple())
+        embed.add_field(name="基礎統計", value=_format_stat_summary(game_name, stats), inline=False)
+        extras = _extra_stat_lines(game_name, stats)
+        if extras:
+            embed.add_field(name="額外統計", value="\n".join(extras), inline=False)
+        embed.set_footer(text="只保存統計資料，不保存每場過程或每場詳細情況。")
+        return embed
+
+    wallet = int(user_data.get("wallet", 0) or 0)
+    bank = int(user_data.get("bank", 0) or 0)
+    net_worth = wallet + bank
+    total_delta = sum(int(stats.get("total_delta", 0) or 0) for stats in summary.values())
+    total_games = sum(int(stats.get("plays", 0) or 0) for stats in summary.values())
+    total_wins = sum(int(stats.get("wins", 0) or 0) for stats in summary.values())
+    win_rate = total_wins / total_games * 100 if total_games else 0
+
+    embed = discord.Embed(title=f"📊 {display_name} 的 Portfolio", color=discord.Color.gold())
+    embed.add_field(
+        name="個人資訊",
+        value=(
+            f"錢包：${wallet}\n"
+            f"銀行：${bank}\n"
+            f"總資產：${net_worth}\n"
+            f"累計遊戲盈虧：{format_money_delta(total_delta)}\n"
+            f"獲勝場次：{total_wins}\n"
+            f"總遊戲次數：{total_games}\n"
+            f"整體勝率：{win_rate:.1f}%"
+        ),
+        inline=False,
+    )
+
+    if summary:
+        sorted_stats = sorted(summary.items(), key=lambda item: (int(item[1].get("total_delta", 0) or 0), int(item[1].get("plays", 0) or 0)), reverse=True)
+        stat_lines = [_format_stat_summary(name, stats) for name, stats in sorted_stats[:8]]
+        embed.add_field(name="所有遊戲統計總覽", value="\n".join(stat_lines)[:1024], inline=False)
+        embed.add_field(name="查看單一遊戲", value="使用下方下拉選單選擇遊戲，可查看該遊戲的基礎與額外統計。", inline=False)
+    else:
+        embed.add_field(name="所有遊戲統計總覽", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
+
+    embed.set_footer(text="紀錄保存在本機 bank.json 與 leaderboard/；只保存統計，不保存每場過程。")
+    return embed
+
+
+def build_portfolio_embed(user: discord.User) -> discord.Embed:
+    return build_game_stat_embed(user)
+
+
+def build_game_records_embed(user: discord.User, *, limit: int = 10) -> discord.Embed:
+    users = load_data()
+    stats = get_game_records(users, str(user.id), limit=limit)
+    embed = discord.Embed(title="📜 遊戲統計紀錄", color=discord.Color.dark_gold())
+    if not stats:
+        embed.description = "尚未有遊戲統計；完成任一場遊戲後會自動保存統計。"
+        return embed
+
+    lines = [_format_stat_summary(str(stat.get("game", "未知遊戲")), stat) for stat in stats]
+    embed.description = "以下只顯示統計結果，不保存每場過程。"
+    embed.add_field(name="統計", value="\n".join(lines)[:1024], inline=False)
+    return embed
+
+
+class PortfolioGameSelect(discord.ui.Select):
+    def __init__(self, user: discord.User):
+        self.user = user
+        users = load_data()
+        summary = summarize_game_records(users, str(user.id))
+        options = [discord.SelectOption(label="全部遊戲", value="__all__", emoji="📊", description="查看所有遊戲總覽")]
+        for game_name, stats in sorted(summary.items(), key=lambda item: str(item[0]))[:24]:
+            options.append(
+                discord.SelectOption(
+                    label=game_name[:100],
+                    value=game_name[:100],
+                    emoji="🎮",
+                    description=f"{int(stats.get('plays', 0) or 0)} 場｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}"[:100],
+                )
+            )
+        super().__init__(placeholder="選擇要查看統計的遊戲", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的 Portfolio 選單。", ephemeral=True)
+            return
+        selected = self.values[0]
+        embed = build_game_stat_embed(self.user, None if selected == "__all__" else selected)
+        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user))
+
+
+class PortfolioStatsView(View):
+    def __init__(self, user: discord.User):
+        super().__init__(timeout=180)
+        self.add_item(PortfolioGameSelect(user))
+
+
+class SimplePostGameView(View):
+    def __init__(self, user: discord.User, replay_handler: Callable[[discord.Interaction], object], menu_builder: Callable | None = None):
+        super().__init__(timeout=180)
+        self.author_id = user.id
+        self.replay_handler = replay_handler
+        self.menu_builder = menu_builder
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 這不是你的遊戲結算面板！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+    async def replay(self, interaction: discord.Interaction, button: Button):
+        await self.replay_handler(interaction)
+        self.stop()
+
+    @discord.ui.button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+    async def return_to_main(self, interaction: discord.Interaction, button: Button):
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(
+            content=None,
+            embed=menu_payload.get("embed"),
+            view=menu_payload.get("view"),
+        )
+        self.stop()
+
+
 class EconomyMenu(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -101,28 +299,38 @@ class EconomyMenu(View):
     async def ranking_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_ranking_message())
 
+    @discord.ui.button(label="遊戲紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=3, custom_id="economy_game_records")
+    async def game_records_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_game_records_embed(interaction.user), ephemeral=True)
 
-async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
-    if interaction.user.id != modal.user.id:
-        await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
+    @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
+    async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
+
+
+async def resolve_basic_bet(
+    interaction: discord.Interaction,
+    user: discord.User,
+    amount: int,
+    *,
+    game_name: str,
+    reward_mult_range: tuple[float, float],
+    penalty_chance: float,
+    penalty_mult_range: tuple[float, float],
+    crit_chance: float = 0.1,
+) -> None:
+    if interaction.user.id != user.id:
+        await interaction.response.send_message("❌ 這不是你的遊戲結算面板！", ephemeral=True)
         return
 
-    await open_account(interaction.user)
+    await open_account(user)
     users = load_data()
-    uid = str(interaction.user.id)
-
-    try:
-        amount = int(modal.bet_amount.value)
-    except ValueError:
-        await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
-        return
-
-    if amount < 10:
-        await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
-        return
+    uid = str(user.id)
 
     if users[uid]["wallet"] < amount:
-        await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+        await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${amount} 再來一次。", ephemeral=True)
         return
 
     users[uid]["wallet"] -= amount
@@ -130,40 +338,65 @@ async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
     outcome = random.random()
     critical = False
 
-    if outcome < modal.penalty_chance:
-        extra_loss = int(amount * random.uniform(*modal.penalty_mult_range))
+    if outcome < penalty_chance:
+        extra_loss = int(amount * random.uniform(*penalty_mult_range))
         users[uid]["wallet"] = max(0, users[uid]["wallet"] - extra_loss)
+        net_delta = -amount - extra_loss
+        record_result = "失敗"
         result_text = (
-            f"😢 {modal.game_name} 失利，扣除下注 ${amount}，另外被處罰 ${extra_loss}。\n"
+            f"😢 {game_name} 失利，扣除下注 ${amount}，另外被處罰 ${extra_loss}。\n"
             "（扣款已反映在錢包）"
         )
     else:
-        reward_multiplier = random.uniform(*modal.reward_mult_range)
-        if random.random() < modal.crit_chance:
+        reward_multiplier = random.uniform(*reward_mult_range)
+        if random.random() < crit_chance:
             critical = True
             reward_multiplier *= 1.5
 
         reward = int(amount * reward_multiplier)
         users[uid]["wallet"] += amount + reward
+        net_delta = reward
+        record_result = "成功"
         crit_text = "（暴擊收益 x1.5！）" if critical else ""
-        result_text = f"🎉 {modal.game_name} 成功！返還下注 ${amount}，另獲得 ${reward}。{crit_text}"
+        result_text = f"🎉 {game_name} 成功！返還下注 ${amount}，另獲得 ${reward}。{crit_text}"
 
-    save_data(users)
     balance = users[uid]["wallet"]
+    append_game_record(
+        users,
+        uid,
+        game_name=game_name,
+        result=record_result,
+        bet=amount,
+        delta=net_delta,
+        balance=balance,
+        details=result_text,
+    )
+    save_data(users)
+
+    async def replay_handler(replay_interaction: discord.Interaction) -> None:
+        await resolve_basic_bet(
+            replay_interaction,
+            user,
+            amount,
+            game_name=game_name,
+            reward_mult_range=reward_mult_range,
+            penalty_chance=penalty_chance,
+            penalty_mult_range=penalty_mult_range,
+            crit_chance=crit_chance,
+        )
+
+    post_view = SimplePostGameView(user, replay_handler, build_game_menu)
     await interaction.response.send_message(
         f"{result_text}\n目前錢包餘額：${balance}",
+        view=post_view,
         ephemeral=True,
     )
 
 
-async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetModal):
+async def process_basic_bet(interaction: discord.Interaction, modal: BetModal):
     if interaction.user.id != modal.user.id:
         await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
         return
-
-    await open_account(interaction.user)
-    users = load_data()
-    uid = str(interaction.user.id)
 
     try:
         amount = int(modal.bet_amount.value)
@@ -175,33 +408,118 @@ async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetM
         await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
         return
 
+    await resolve_basic_bet(
+        interaction,
+        modal.user,
+        amount,
+        game_name=modal.game_name,
+        reward_mult_range=modal.reward_mult_range,
+        penalty_chance=modal.penalty_chance,
+        penalty_mult_range=modal.penalty_mult_range,
+        crit_chance=modal.crit_chance,
+    )
+
+
+async def resolve_custom_bet(
+    interaction: discord.Interaction,
+    user: discord.User,
+    amount: int,
+    *,
+    game_name: str,
+    resolve_func: Callable[[int, str], tuple[str, int, list[str]]],
+    public_result: bool = False,
+) -> None:
+    if interaction.user.id != user.id:
+        await interaction.response.send_message("❌ 這不是你的遊戲結算面板！", ephemeral=True)
+        return
+
+    await open_account(user)
+    users = load_data()
+    uid = str(user.id)
+
     if users[uid]["wallet"] < amount:
-        await interaction.response.send_message("❌ 錢包餘額不足，請先賺點錢再來挑戰。", ephemeral=True)
+        await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${amount} 再來一次。", ephemeral=True)
         return
 
     users[uid]["wallet"] -= amount
 
-    result_text, payout_change, frames = modal.resolve_func(amount, uid)
+    result_text, payout_change, frames = resolve_func(amount, uid)
     users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
-
-    save_data(users)
     balance = users[uid]["wallet"]
+    extra_stats = {}
+    if game_name == "骰子決鬥":
+        extra_stats = {
+            "cashout_total": max(0, payout_change),
+            "cashout_count": 1 if payout_change > 0 else 0,
+            "crit_50x_count": 1 if "50 倍" in result_text else 0,
+        }
+    append_game_record(
+        users,
+        uid,
+        game_name=game_name,
+        result="完成",
+        bet=amount,
+        delta=payout_change - amount,
+        balance=balance,
+        details=result_text,
+        extra_stats=extra_stats,
+    )
+    save_data(users)
 
+    async def replay_handler(replay_interaction: discord.Interaction) -> None:
+        await resolve_custom_bet(
+            replay_interaction,
+            user,
+            amount,
+            game_name=game_name,
+            resolve_func=resolve_func,
+            public_result=public_result,
+        )
+
+    response_ephemeral = not public_result
     if frames:
-        await interaction.response.defer(ephemeral=True)
-        progress = await interaction.followup.send(frames[0], ephemeral=True)
+        await interaction.response.defer(ephemeral=response_ephemeral)
+        progress = await interaction.followup.send(frames[0], ephemeral=response_ephemeral)
         for frame in frames[1:]:
             await asyncio.sleep(1.1)
             await progress.edit(content=frame)
 
         final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        post_view = SimplePostGameView(user, replay_handler, build_game_menu)
         await asyncio.sleep(1.1)
-        await progress.edit(content=f"{frames[-1]}\n{final_text}")
+        await progress.edit(content=f"{frames[-1]}\n{final_text}", view=post_view)
     else:
+        post_view = SimplePostGameView(user, replay_handler, build_game_menu)
         await interaction.response.send_message(
             f"{result_text}\n目前錢包餘額：${balance}",
-            ephemeral=True,
+            view=post_view,
+            ephemeral=response_ephemeral,
         )
+
+
+async def process_custom_bet(interaction: discord.Interaction, modal: CustomBetModal):
+    if interaction.user.id != modal.user.id:
+        await interaction.response.send_message("❌ 這不是你的下注視窗！請自行開啟遊戲。", ephemeral=True)
+        return
+
+    try:
+        amount = int(modal.bet_amount.value)
+    except ValueError:
+        await interaction.response.send_message("❌ 下注金額必須是正整數。", ephemeral=True)
+        return
+
+    if amount < 10:
+        await interaction.response.send_message("❌ 下注金額至少需要 10 金幣。", ephemeral=True)
+        return
+
+    await resolve_custom_bet(
+        interaction,
+        modal.user,
+        amount,
+        game_name=modal.game_name,
+        resolve_func=modal.resolve_func,
+        public_result=modal.public_result,
+    )
 
 
 class BetModal(Modal):
@@ -235,11 +553,14 @@ class CustomBetModal(Modal):
         user: discord.User,
         game_name: str,
         resolve_func: Callable[[int, str], tuple[str, int, list[str]]],
+        *,
+        public_result: bool = False,
     ):
         super().__init__(title=f"💰 {game_name} - 請輸入下注金額")
         self.user = user
         self.game_name = game_name
         self.resolve_func = resolve_func
+        self.public_result = public_result
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.add_item(self.bet_amount)
 
@@ -328,17 +649,48 @@ def refund_contributions(match: BattleMatch):
 
 
 def distribute_winnings(match: BattleMatch, winners: list[int]) -> str:
+    game_name = BATTLE_GAMES.get(match.game_key, {}).get("name", match.game_key)
+    users = load_data()
+
     if not winners:
-        refund_contributions(match)
+        for uid, amount in match.contributions.items():
+            user_data = users.setdefault(str(uid), {"wallet": 0, "bank": 0})
+            user_data["wallet"] += amount
+            append_game_record(
+                users,
+                str(uid),
+                game_name=f"多人遊戲：{game_name}",
+                result="平手退還",
+                bet=amount,
+                delta=0,
+                balance=user_data["wallet"],
+                details="戰局平手，已退回下注。",
+            )
+        save_data(users)
         return "戰局平手，已退回所有下注。"
 
-    users = load_data()
     share = match.pot // len(winners)
     remainder = match.pot - (share * len(winners))
+    gains: dict[int, int] = {}
     for idx, uid in enumerate(winners):
-        users.setdefault(str(uid), {"wallet": 0, "bank": 0})
         gain = share + (remainder if idx == 0 else 0)
-        users[str(uid)]["wallet"] += gain
+        gains[uid] = gain
+        users.setdefault(str(uid), {"wallet": 0, "bank": 0})["wallet"] += gain
+
+    for uid, contribution in match.contributions.items():
+        user_data = users.setdefault(str(uid), {"wallet": 0, "bank": 0})
+        gain = gains.get(uid, 0)
+        is_winner = uid in winners
+        append_game_record(
+            users,
+            str(uid),
+            game_name=f"多人遊戲：{game_name}",
+            result="勝利" if is_winner else "失敗",
+            bet=contribution,
+            delta=gain - contribution,
+            balance=user_data["wallet"],
+            details=f"彩池 ${match.pot}；{'分得 $' + str(gain) if is_winner else '未分得彩池'}。",
+        )
     save_data(users)
 
     winner_text = "、".join(f"<@{uid}>" for uid in winners)
@@ -1588,12 +1940,14 @@ class GameMenu(View):
         *,
         game_name: str,
         resolve_func: Callable[[int, str], tuple[str, int, list[str]]],
+        public_result: bool = False,
     ):
         await interaction.response.send_modal(
             CustomBetModal(
                 interaction.user,
                 game_name,
                 resolve_func,
+                public_result=public_result,
             )
         )
 
@@ -1603,15 +1957,16 @@ class GameMenu(View):
             interaction,
             game_name="骰子決鬥",
             resolve_func=resolve_dice_duel,
+            public_result=True,
         )
 
     @discord.ui.button(label="海盜寶藏", style=discord.ButtonStyle.success, emoji="🏴\u200d☠️", row=0)
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PirateTreasureModal(interaction.user))
+        await interaction.response.send_modal(PirateTreasureModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="海盜寶藏2", style=discord.ButtonStyle.success, emoji="🗺️", row=0)
     async def pirate_treasure2(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PirateTreasure2Modal(interaction.user))
+        await interaction.response.send_modal(PirateTreasure2Modal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="打氣球", style=discord.ButtonStyle.danger, emoji="🎈", row=0)
     async def balloon_pump(self, interaction: discord.Interaction, button: Button):
@@ -1619,11 +1974,11 @@ class GameMenu(View):
 
     @discord.ui.button(label="賽馬競速", style=discord.ButtonStyle.primary, emoji="🐎", row=1)
     async def horse_race(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(HorseRaceModal(interaction.user))
+        await interaction.response.send_modal(HorseRaceModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="解謎挑戰", style=discord.ButtonStyle.success, emoji="🧩", row=1)
     async def puzzle_trial(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(PuzzleBetModal(interaction.user))
+        await interaction.response.send_modal(PuzzleBetModal(interaction.user, build_game_menu))
 
     @discord.ui.button(label="拋硬幣挑戰", style=discord.ButtonStyle.danger, emoji="🪙", row=1)
     async def coin_flip_challenge(self, interaction: discord.Interaction, button: Button):
@@ -1638,30 +1993,24 @@ class GameMenu(View):
 
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
-        intro = discord.Embed(
-            title="🎯 特戰棋盤：1v3",
-            description=(
-                "15x13 戰術棋盤，選擇 3 個技能後與三名電腦對戰。\n"
-                "兩名敵人防守兩個下包點，右下還有一名支援。勝利：擊殺全部或下包後撐 10 回合；"
-                "失敗：未下包超過 20 回合或爆能器遭拆除（你倒下後仍可等待爆炸/拆除結果）。"
-            ),
-            color=discord.Color.teal(),
+        await interaction.response.send_message(
+            embed=build_valorant_intro_embed(),
+            view=ValorantSkillSelectView(interaction.user, build_game_menu),
         )
-        intro.add_field(
-            name="圖例",
-            value="⬜ 地面｜⬛ 掩體｜🟦 你｜🟥 敵人｜💠 爆能器｜☁️ 煙霧｜❄️ 緩速",
-            inline=False,
-        )
-        intro.add_field(
-            name="技能",
-            value="煙霧阻擋視線｜閃光讓敵人下回合無法攻擊｜緩速 6x6 減速｜束縛讓敵人無法移動｜傳送可在 6x6 內選點位移（技能一次性）",
-            inline=False,
-        )
-        await interaction.response.send_message(embed=intro, view=ValorantSkillSelectView(interaction.user))
 
     @discord.ui.button(label="遊戲說明", style=discord.ButtonStyle.secondary, emoji="ℹ️", row=3)
     async def game_help(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=build_game_help_embed(), ephemeral=True)
+
+    @discord.ui.button(label="遊戲紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=3)
+    async def game_records(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_game_records_embed(interaction.user), ephemeral=True)
+
+    @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
+    async def portfolio(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
 
 
 def build_game_menu(user: discord.User):
@@ -1702,12 +2051,12 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🏴‍☠️ 單人猜字：海盜寶藏",
-        value="從題庫抽出英文單字，每次猜一個字母；錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
+        value="從 words 分類題庫抽出英文單字，先給一段故事提示類別；每次猜一個字母，錯 6 次會被推下跳板扣錢，猜出單字返還本金並依錯誤數給獎勵。",
         inline=False,
     )
     embed.add_field(
         name="🗺️ 單人猜字：海盜寶藏2",
-        value="玩法、下注、獎懲與海盜寶藏相同，但使用 Pillow 顯示玩家被吊在海面上，右下角有加大鯊魚等著吃，失敗時會呈現碎片狀。",
+        value="玩法、下注、分類故事提示與海盜寶藏相同，但使用 Pillow 顯示玩家被吊在海面上，右下角有加大鯊魚等著吃，失敗時會呈現碎片狀。",
         inline=False,
     )
     embed.add_field(
@@ -1727,7 +2076,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🔢 數字搜尋者",
-        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回大廳。",
+        value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回主畫面。",
         inline=False,
     )
     embed.add_field(
@@ -1744,6 +2093,16 @@ def build_game_help_embed() -> discord.Embed:
     return embed
 
 
+async def send_deferred_payload(interaction: discord.Interaction, payload: dict) -> None:
+    """Acknowledge slash commands before sending potentially slow menu/embed payloads."""
+
+    send_kwargs = dict(payload)
+    ephemeral = bool(send_kwargs.pop("ephemeral", False))
+    if not interaction.response.is_done():
+        await interaction.response.defer(thinking=True, ephemeral=ephemeral)
+    await interaction.followup.send(**send_kwargs, ephemeral=ephemeral)
+
+
 def build_economy_menu() -> dict:
     embed = discord.Embed(
         title="🎮 經濟遊戲 & 銀行系統",
@@ -1752,7 +2111,7 @@ def build_economy_menu() -> dict:
     )
     embed.add_field(
         name="快速指令",
-        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜",
+        value="`/openmenu` 開啟選單\n`/opengame` 開啟單人遊戲\n`/ranking` 查看排行榜\n`/portfolio` 查看個人資訊與遊戲營利",
         inline=False,
     )
     return {"embed": embed, "view": EconomyMenu(), "ephemeral": False}
@@ -1838,12 +2197,12 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
 
 @bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_game_menu(interaction.user))
+    await send_deferred_payload(interaction, build_game_menu(interaction.user))
 
 
 @bot.tree.command(name="openmenu", description="開啟經濟選單")
 async def openmenu_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_economy_menu())
+    await send_deferred_payload(interaction, build_economy_menu())
 
 
 @bot.tree.command(name="birthfire", description="為壽星播放 30 秒生日煙火")
@@ -1854,12 +2213,27 @@ async def birthfire_command(interaction: discord.Interaction, name: str | None =
 
 @bot.tree.command(name="ranking", description="展示經濟排行榜")
 async def ranking_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message())
+
+
+@bot.tree.command(name="portfolio", description="查看個人資訊與遊戲營利紀錄")
+@app_commands.describe(user="要查看的使用者；留空則查看自己")
+async def portfolio_command(interaction: discord.Interaction, user: discord.User | None = None):
+    target = user or interaction.user
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    await open_account(target)
+    await interaction.followup.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target), ephemeral=True)
 
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
 async def rankgame_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message())
+
+
+@bot.command(name="portfolio")
+async def portfolio_prefix(ctx):
+    await open_account(ctx.author)
+    await ctx.send(embed=build_portfolio_embed(ctx.author), view=PortfolioStatsView(ctx.author))
 
 
 @bot.command()

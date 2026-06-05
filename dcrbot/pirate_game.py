@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import random
 import string
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,20 +13,21 @@ import discord
 from discord.ui import Button, View, Modal, TextInput
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from dcrbot.pirate import PIRATE_WORDS, pirate_translation
+from dcrbot.pirate import PirateWordEntry, pirate_translation, random_pirate_word_entry
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 PIRATE_SHARK_IMAGE_PATH = Path(__file__).resolve().parents[1] / "Resources" / "shark.png"
 
 
 class PirateTreasureModal(Modal):
-    def __init__(self, user: discord.User, *, visual_mode: bool = False):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None, *, visual_mode: bool = False):
         title = "🏴‍☠️ 海盜寶藏2 - 下注開始" if visual_mode else "🏴‍☠️ 單人猜字 - 下注開始"
         super().__init__(title=title)
         self.user = user
         self.visual_mode = visual_mode
+        self.menu_builder = menu_builder
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.add_item(self.bet_amount)
 
@@ -55,14 +57,15 @@ class PirateTreasureModal(Modal):
         users[uid]["wallet"] -= amount
         save_data(users)
 
-        secret_word = random.choice(PIRATE_WORDS)
+        word_entry = random_pirate_word_entry()
         avatar_image = await fetch_avatar_image(interaction.user, 128) if self.visual_mode else None
         view = PirateGuessView(
             interaction.user,
-            secret_word,
+            word_entry,
             amount,
             visual_mode=self.visual_mode,
             avatar_image=avatar_image,
+            menu_builder=self.menu_builder,
         )
         embed, file = build_pirate_display(view, status_text="選擇一個字母開始，最多錯 6 次！")
 
@@ -74,24 +77,28 @@ class PirateTreasureModal(Modal):
 
 
 class PirateTreasure2Modal(PirateTreasureModal):
-    def __init__(self, user: discord.User):
-        super().__init__(user, visual_mode=True)
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
+        super().__init__(user, menu_builder, visual_mode=True)
 
 
 class PirateGuessView(View):
     def __init__(
         self,
         user: discord.User,
-        secret_word: str,
+        word_entry: PirateWordEntry,
         bet_amount: int,
         *,
         visual_mode: bool = False,
         avatar_image: Image.Image | None = None,
+        menu_builder: Callable | None = None,
     ):
         super().__init__(timeout=420)
         self.author_id = user.id
         self.player_name = user.display_name
-        self.secret_word = secret_word.upper()
+        self.word_entry = word_entry
+        self.secret_word = word_entry.word.upper()
+        self.category_name = word_entry.category_name
+        self.category_story = word_entry.story_hint
         self.unique_letters = set(self.secret_word)
         self.guessed: set[str] = set()
         self.wrong: set[str] = set()
@@ -104,6 +111,7 @@ class PirateGuessView(View):
         self.struggle_frame = 0
         self.visual_mode = visual_mode
         self.avatar_image = avatar_image
+        self.menu_builder = menu_builder
         self.build_letter_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -114,6 +122,10 @@ class PirateGuessView(View):
 
     def build_letter_buttons(self):
         self.clear_items()
+        if self.resolved:
+            self.add_post_game_buttons()
+            return
+
         page_size = 13
         start = self.current_page * page_size
         letters = self.alphabet[start : start + page_size]
@@ -169,6 +181,73 @@ class PirateGuessView(View):
         manual_input.callback = open_manual
         self.add_item(manual_input)
 
+
+    def add_post_game_buttons(self) -> None:
+        replay_btn = Button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+        lobby_btn = Button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+
+        async def replay_callback(interaction: discord.Interaction):
+            await self.replay(interaction)
+
+        async def lobby_callback(interaction: discord.Interaction):
+            await self.return_to_main(interaction)
+
+        replay_btn.callback = replay_callback
+        lobby_btn.callback = lobby_callback
+        self.add_item(replay_btn)
+        self.add_item(lobby_btn)
+
+    async def replay(self, interaction: discord.Interaction) -> None:
+        if not self.resolved:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+        if users[uid]["wallet"] < self.bet_amount:
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再來一次。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= self.bet_amount
+        save_data(users)
+
+        word_entry = random_pirate_word_entry()
+        avatar_image = await fetch_avatar_image(interaction.user, 128) if self.visual_mode else None
+        new_view = PirateGuessView(
+            interaction.user,
+            word_entry,
+            self.bet_amount,
+            visual_mode=self.visual_mode,
+            avatar_image=avatar_image,
+            menu_builder=self.menu_builder,
+        )
+        embed, file = build_pirate_display(new_view, status_text=f"🔁 使用相同下注 ${self.bet_amount} 再來一次！")
+        edit_kwargs = {"embed": embed, "view": new_view}
+        if file is not None:
+            edit_kwargs["attachments"] = [file]
+        else:
+            edit_kwargs["attachments"] = []
+        await interaction.response.edit_message(**edit_kwargs)
+        new_view.message = interaction.message
+        self.stop()
+
+    async def return_to_main(self, interaction: discord.Interaction) -> None:
+        if not self.resolved:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
+            return
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(
+            embed=menu_payload.get("embed"),
+            attachments=[],
+            view=menu_payload.get("view"),
+        )
+        self.stop()
+
     def is_letter_used(self, letter: str) -> bool:
         upper = letter.upper()
         return upper in self.guessed or upper in self.wrong
@@ -206,6 +285,18 @@ class PirateGuessView(View):
             reward_multiplier = 1.4 + (self.max_wrong - len(self.wrong)) * 0.12
             reward = int(self.bet_amount * reward_multiplier)
             users[uid]["wallet"] += self.bet_amount + reward
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="成功",
+                bet=self.bet_amount,
+                delta=reward,
+                balance=balance,
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），錯 {len(self.wrong)} 次。",
+                extra_stats={"wrong_total": len(self.wrong)},
+            )
             save_data(users)
             status = (
                 f"🎉 你解開了 {self.secret_word}（{pirate_translation(self.secret_word)}）！返還下注 ${self.bet_amount} 並獲得 ${reward}"
@@ -217,6 +308,18 @@ class PirateGuessView(View):
             uid = str(interaction.user.id)
             penalty = int(self.bet_amount * 0.5)
             users[uid]["wallet"] = max(0, users[uid]["wallet"] - penalty)
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="失敗",
+                bet=self.bet_amount,
+                delta=-(self.bet_amount + penalty),
+                balance=balance,
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），額外損失 ${penalty}。",
+                extra_stats={"wrong_total": len(self.wrong)},
+            )
             save_data(users)
             status = (
                 f"💀 海盜落水了！答案是 {self.secret_word}（{pirate_translation(self.secret_word)}），"
@@ -231,19 +334,33 @@ class PirateGuessView(View):
         self.build_letter_buttons()
         await edit_pirate_message(interaction, self, status_text=status)
 
-        if self.resolved:
-            self.stop()
 
     async def on_timeout(self) -> None:
-        for child in self.children:
-            child.disabled = True
+        if self.resolved:
+            return
+        self.resolved = True
+        self.build_letter_buttons()
+        users = load_data()
+        uid = str(self.author_id)
+        if uid in users:
+            append_game_record(
+                users,
+                uid,
+                game_name="海盜寶藏2" if self.visual_mode else "海盜寶藏",
+                result="逾時",
+                bet=self.bet_amount,
+                delta=-self.bet_amount,
+                balance=users[uid].get("wallet", 0),
+                details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}）。",
+                extra_stats={"wrong_total": len(self.wrong)},
+            )
+            save_data(users)
         if self.message:
             embed, file = build_pirate_display(self, status_text="⏰ 時間到，此局結束。")
             if file is None:
                 await self.message.edit(embed=embed, view=self)
             else:
                 await self.message.edit(embed=embed, attachments=[file], view=self)
-        self.stop()
 
 
 class PirateLetterModal(Modal):
@@ -272,6 +389,10 @@ def pirate_word_bank_hint(view: PirateGuessView) -> str:
     guessed = ", ".join(sorted(view.guessed)) or "-"
     missed = ", ".join(sorted(view.wrong)) or "-"
     return f"命中：{guessed}\n失誤：{missed}"
+
+
+def pirate_category_story_hint(view: PirateGuessView) -> str:
+    return f"📜 {view.category_story}"
 
 
 def pirate_stage_art(view: PirateGuessView) -> str:
@@ -343,7 +464,7 @@ def pirate_answer_reveal(view: PirateGuessView) -> str:
     if not view.resolved:
         return "-"
     translation = pirate_translation(view.secret_word)
-    return f"{view.secret_word}（{translation}）"
+    return f"{view.secret_word}（{translation}｜{view.category_name}）"
 
 
 async def edit_pirate_message(interaction: discord.Interaction, view: PirateGuessView, *, status_text: str) -> None:
@@ -472,13 +593,33 @@ def _draw_pirate_character(
 
     _draw_nameplate(draw, (x, y - 170), name)
     _paste_circular_avatar(image, avatar, (x, y - 82), 86, name)
-    draw.polygon([(x - 39, y - 28), (x + 39, y - 28), (x + 27, y + 58), (x - 27, y + 58)], fill=coat, outline=(67, 23, 22))
-    draw.polygon([(x - 14, y - 22), (x + 14, y - 22), (x + 7, y + 48), (x - 7, y + 48)], fill=shirt)
-    draw.line((x - 33, y - 4, x - 82, y + 24), fill=coat, width=12)
-    draw.line((x + 33, y - 4, x + 82, y + 24), fill=coat, width=12)
-    draw.line((x - 13, y + 58, x - 30, y + 118), fill=boot, width=12)
-    draw.line((x + 13, y + 58, x + 30, y + 118), fill=boot, width=12)
-    draw.line((x - 30, y + 3, x + 30, y + 3), fill=trim, width=4)
+
+    # Add a cleaner pirate silhouette: tricorn hat, gold trim, sash, cuffs, and boots.
+    hat = (45, 28, 25, 255)
+    hat_edge = (246, 204, 87, 255)
+    sash = (38, 91, 155, 255)
+    skin = (245, 196, 138, 255)
+    draw.polygon([(x - 58, y - 128), (x - 16, y - 150), (x + 16, y - 150), (x + 58, y - 128), (x + 30, y - 118), (x - 30, y - 118)], fill=hat, outline=(22, 14, 13, 255))
+    draw.arc((x - 48, y - 146, x + 48, y - 104), 8, 172, fill=hat_edge, width=4)
+    draw.ellipse((x - 8, y - 139, x + 8, y - 123), fill=(230, 230, 218, 255), outline=(60, 45, 38, 255), width=2)
+
+    draw.line((x - 33, y - 4, x - 86, y + 25), fill=(68, 24, 26, 255), width=16)
+    draw.line((x + 33, y - 4, x + 86, y + 25), fill=(68, 24, 26, 255), width=16)
+    draw.line((x - 32, y - 3, x - 82, y + 22), fill=coat, width=11)
+    draw.line((x + 32, y - 3, x + 82, y + 22), fill=coat, width=11)
+    draw.ellipse((x - 92, y + 17, x - 72, y + 37), fill=skin, outline=(83, 45, 30, 255), width=2)
+    draw.ellipse((x + 72, y + 17, x + 92, y + 37), fill=skin, outline=(83, 45, 30, 255), width=2)
+
+    draw.polygon([(x - 45, y - 34), (x + 45, y - 34), (x + 31, y + 62), (x - 31, y + 62)], fill=coat, outline=(67, 23, 22))
+    draw.polygon([(x - 16, y - 26), (x + 16, y - 26), (x + 9, y + 48), (x - 9, y + 48)], fill=shirt, outline=(214, 186, 139, 255))
+    draw.line((x - 36, y - 10, x + 33, y + 40), fill=sash, width=11)
+    draw.line((x - 39, y + 7, x + 39, y + 7), fill=trim, width=5)
+    draw.ellipse((x - 7, y + 1, x + 7, y + 15), fill=(255, 225, 95, 255), outline=(80, 47, 20, 255), width=2)
+
+    draw.line((x - 15, y + 60, x - 35, y + 118), fill=(42, 27, 24, 255), width=15)
+    draw.line((x + 15, y + 60, x + 35, y + 118), fill=(42, 27, 24, 255), width=15)
+    draw.line((x - 35, y + 118, x - 60, y + 118), fill=boot, width=13)
+    draw.line((x + 35, y + 118, x + 60, y + 118), fill=boot, width=13)
 
 
 def _draw_hanging_rope(draw: ImageDraw.ImageDraw, anchor: tuple[int, int], body_top: tuple[int, int]) -> None:
@@ -623,27 +764,25 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
 
     # Use the shark artwork from Resources without modifying the image file.
     shark = _build_shark_cutout((350, 300))
-    image.alpha_composite(shark, (700, 305))
-    draw = ImageDraw.Draw(image)
-    for radius in [70, 112, 152]:
-        draw.arc((820 - radius, 574 - radius // 4, 820 + radius, 574 + radius // 2), 12, 170, fill=(195, 240, 252, 185), width=5)
 
     stage = len(view.wrong)
     if stage >= view.max_wrong:
-        # Once the shark catches the player, hide the rope and show cartoon fragments instead of a whole body.
+        # Draw fragments first, then place the shark on top so the catch feels foregrounded.
         _draw_player_fragments(image, draw, (810, 455), view.player_name, view.avatar_image)
+        image.alpha_composite(shark, (700, 305))
+        draw = ImageDraw.Draw(image)
         for radius in [34, 62, 92]:
             draw.arc((810 - radius, 522 - radius // 3, 810 + radius, 522 + radius // 2), 8, 172, fill=(207, 245, 255, 225), width=5)
     else:
+        image.alpha_composite(shark, (700, 305))
+        draw = ImageDraw.Draw(image)
+        for radius in [70, 112, 152]:
+            draw.arc((820 - radius, 574 - radius // 4, 820 + radius, 574 + radius // 2), 12, 170, fill=(195, 240, 252, 185), width=5)
         progress = stage / view.max_wrong
         char_x = int(310 + progress * 430)
         char_y = int(285 + progress * 78)
         _draw_hanging_rope(draw, (char_x, 104), (char_x, char_y - 118))
         _draw_pirate_character(image, draw, char_x, char_y, view.player_name, view.avatar_image)
-        warning_x = 790
-        draw.line((warning_x, 118, warning_x, 235), fill=(245, 77, 63, 200), width=5)
-        draw.polygon([(warning_x, 240), (warning_x + 34, 278), (warning_x - 34, 278)], fill=(190, 28, 34, 255), outline=(80, 20, 20, 255))
-        _text_center(draw, (warning_x, 260), "!", load_display_font(30), (255, 245, 220, 255), stroke_fill=(80, 20, 20, 255), stroke_width=1)
 
     # HUD panels. Keep the image title removed to preserve scene space.
     big_font = load_display_font(38)
@@ -660,10 +799,12 @@ def render_pirate_board(view: PirateGuessView, *, status_text: str) -> discord.F
     draw.text((62, 450), f"剩餘容錯：{view.max_wrong - len(view.wrong)} 次", font=font, fill=(255, 255, 245, 255))
     hit_text = _truncate_to_width(draw, f"命中：{', '.join(sorted(view.guessed)) or '-'}", small_font, 445)
     miss_text = _truncate_to_width(draw, f"失誤：{', '.join(sorted(view.wrong)) or '-'}", small_font, 445)
+    story_text = _truncate_to_width(draw, f"故事：{view.category_story}", small_font, 445)
     answer_text = _truncate_to_width(draw, f"答案：{pirate_answer_reveal(view)}", small_font, 445)
     draw.text((62, 494), hit_text, font=small_font, fill=(122, 244, 163, 255))
     draw.text((62, 536), miss_text, font=small_font, fill=(255, 143, 120, 255))
-    draw.text((62, 578), answer_text, font=small_font, fill=(231, 238, 244, 255))
+    draw.text((62, 574), story_text, font=small_font, fill=(255, 220, 140, 255))
+    draw.text((62, 608), answer_text, font=small_font, fill=(231, 238, 244, 255))
 
     cleaned_status = status_text.replace("\n", " ")
     if len(cleaned_status) > 46:
@@ -687,6 +828,7 @@ def build_pirate_embed(view: PirateGuessView, *, status_text: str) -> discord.Em
     embed.add_field(name="下注金額", value=f"${view.bet_amount}", inline=True)
     embed.add_field(name="剩餘容錯", value=f"{view.max_wrong - len(view.wrong)} 次", inline=True)
     embed.add_field(name="目前題目", value=f"`{pirate_word_progress(view)}`", inline=False)
+    embed.add_field(name="故事分類提示", value=pirate_category_story_hint(view), inline=False)
     embed.add_field(name="猜測紀錄", value=pirate_word_bank_hint(view), inline=False)
     if not view.visual_mode:
         embed.add_field(name="跳板狀態", value=pirate_stage_art(view), inline=False)

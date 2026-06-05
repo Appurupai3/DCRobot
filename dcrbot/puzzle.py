@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
-from dcrbot.storage import load_data, open_account, save_data
+from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
 class PuzzleBetModal(Modal):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, menu_builder: Callable | None = None):
         super().__init__(title="🧩 解謎挑戰 - 下注並開始 2A2B")
         self.user = user
+        self.menu_builder = menu_builder
         self.bet_amount = TextInput(label="下注金額", placeholder="至少 10 金幣，需為正整數", required=True)
         self.add_item(self.bet_amount)
 
@@ -44,7 +46,7 @@ class PuzzleBetModal(Modal):
         save_data(users)
 
         secret_digits = "".join(random.sample("0123456789", 4))
-        view = PuzzleGuessView(interaction.user, secret_digits, amount)
+        view = PuzzleGuessView(interaction.user, secret_digits, amount, self.menu_builder)
         embed = build_puzzle_embed(view, status_text="輸入 4 個不重複的數字，8 次內達成 4A0B，越早猜中倍率越高！")
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -52,7 +54,7 @@ class PuzzleBetModal(Modal):
 
 
 class PuzzleGuessView(View):
-    def __init__(self, user: discord.User, secret: str, bet_amount: int):
+    def __init__(self, user: discord.User, secret: str, bet_amount: int, menu_builder: Callable | None = None):
         super().__init__(timeout=240)
         self.author_id = user.id
         self.secret = secret
@@ -62,6 +64,57 @@ class PuzzleGuessView(View):
         self.max_attempts = 8
         self.message: discord.Message | None = None
         self.resolved = False
+        self.menu_builder = menu_builder
+
+
+    def show_post_game_buttons(self) -> None:
+        self.clear_items()
+        replay_btn = Button(label="再來一次", style=discord.ButtonStyle.primary, emoji="🔁", row=0)
+        lobby_btn = Button(label="返回主畫面", style=discord.ButtonStyle.secondary, emoji="🎮", row=0)
+
+        async def replay_callback(interaction: discord.Interaction):
+            await self.replay(interaction)
+
+        async def lobby_callback(interaction: discord.Interaction):
+            await self.return_to_main(interaction)
+
+        replay_btn.callback = replay_callback
+        lobby_btn.callback = lobby_callback
+        self.add_item(replay_btn)
+        self.add_item(lobby_btn)
+
+    async def replay(self, interaction: discord.Interaction) -> None:
+        if not self.resolved:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能再來一次。", ephemeral=True)
+            return
+
+        await open_account(interaction.user)
+        users = load_data()
+        uid = str(interaction.user.id)
+        if users[uid]["wallet"] < self.bet_amount:
+            await interaction.response.send_message(f"❌ 錢包餘額不足，無法用 ${self.bet_amount} 再來一次。", ephemeral=True)
+            return
+
+        users[uid]["wallet"] -= self.bet_amount
+        save_data(users)
+
+        new_view = PuzzleGuessView(interaction.user, "".join(random.sample("0123456789", 4)), self.bet_amount, self.menu_builder)
+        embed = build_puzzle_embed(new_view, status_text=f"🔁 使用相同下注 ${self.bet_amount} 再來一次！輸入 4 個不重複的數字。")
+        await interaction.response.edit_message(embed=embed, view=new_view)
+        new_view.message = interaction.message
+        self.stop()
+
+    async def return_to_main(self, interaction: discord.Interaction) -> None:
+        if not self.resolved:
+            await interaction.response.send_message("❌ 本局還在進行中，結束後才能返回主畫面。", ephemeral=True)
+            return
+        if self.menu_builder is None:
+            await interaction.response.send_message("❌ 目前無法返回主畫面，請重新使用 /opengame。", ephemeral=True)
+            return
+
+        menu_payload = self.menu_builder(interaction.user)
+        await interaction.response.edit_message(embed=menu_payload.get("embed"), view=menu_payload.get("view"))
+        self.stop()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -70,8 +123,24 @@ class PuzzleGuessView(View):
         return True
 
     async def on_timeout(self) -> None:
-        for child in self.children:
-            child.disabled = True
+        if self.resolved:
+            return
+        self.resolved = True
+        self.show_post_game_buttons()
+        users = load_data()
+        uid = str(self.author_id)
+        if uid in users:
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="逾時",
+                bet=self.bet_amount,
+                delta=-self.bet_amount,
+                balance=users[uid].get("wallet", 0),
+                details=f"答案 {self.secret}；已猜 {self.attempts}/{self.max_attempts} 次。",
+            )
+            save_data(users)
         if self.message:
             embed = build_puzzle_embed(self, status_text="⏰ 時間到，挑戰結束！")
             await self.message.edit(embed=embed, view=self)
@@ -120,23 +189,44 @@ class PuzzleGuessModal(Modal):
             reward_multiplier = puzzle_reward_multiplier(view.attempts)
             reward = int(view.bet_amount * reward_multiplier)
             users[uid]["wallet"] += view.bet_amount + reward
+            balance = users[uid]["wallet"]
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="成功",
+                bet=view.bet_amount,
+                delta=reward,
+                balance=balance,
+                details=f"答案 {view.secret}；第 {view.attempts} 次解開。",
+            )
             save_data(users)
             status_text = (
                 f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}"
                 f"（獎勵倍率 {reward_multiplier:.2f}x）。"
             )
             view.resolved = True
-            for child in view.children:
-                child.disabled = True
         elif view.attempts >= view.max_attempts:
             status_text = f"😢 挑戰失敗，正確答案為 {view.secret}。"
-            for child in view.children:
-                child.disabled = True
+            users = load_data()
+            uid = str(interaction.user.id)
+            append_game_record(
+                users,
+                uid,
+                game_name="解謎挑戰",
+                result="失敗",
+                bet=view.bet_amount,
+                delta=-view.bet_amount,
+                balance=users[uid]["wallet"],
+                details=f"答案 {view.secret}；8 次未解開。",
+            )
+            save_data(users)
+            view.resolved = True
 
+        if view.resolved:
+            view.show_post_game_buttons()
         embed = build_puzzle_embed(view, status_text=status_text)
         await interaction.response.edit_message(embed=embed, view=view)
-        if solved or view.attempts >= view.max_attempts:
-            view.stop()
 
 
 def score_guess(secret: str, guess: str) -> tuple[int, int]:
