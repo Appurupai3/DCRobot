@@ -20,7 +20,7 @@ from dcrbot.pirate_game import PirateTreasure2Modal, PirateTreasureModal
 from dcrbot.puzzle import PuzzleBetModal
 from dcrbot.runtime import create_discord_bot, load_discord_token, patch_discord_test_stubs
 from dcrbot.solo_games import BalloonPumpModal, HorseRaceModal, resolve_dice_duel
-from dcrbot.turing_machine import NumberSearcherView
+from dcrbot.turing_machine import NumberSearcher2DifficultyView, NumberSearcherView, build_number_searcher2_difficulty_embed
 from dcrbot.valorant import ValorantSkillSelectView, build_valorant_intro_embed
 from dcrbot.storage import (
     append_game_record,
@@ -113,12 +113,13 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
         plays = int(stats.get("plays", 0) or 0)
         wrong_total = int(extra.get("wrong_total", 0) or 0)
         lines.append(f"平均失誤次數 {wrong_total / plays:.1f}" if plays else "平均失誤次數 0.0")
-    elif game_name == "數字搜尋者":
+    elif game_name.startswith("數字搜尋者"):
         lines.append(
             "｜".join(
                 [
                     f"數字線索 {int(extra.get('number_clue_count', 0) or 0)} 次",
                     f"顏色線索 {int(extra.get('color_clue_count', 0) or 0)} 次",
+                    f"圖形線索 {int(extra.get('shape_clue_count', 0) or 0)} 次",
                     f"隨機線索 {int(extra.get('random_clue_count', 0) or 0)} 次",
                 ]
             )
@@ -1991,6 +1992,15 @@ class GameMenu(View):
         await interaction.response.send_message(embed=embed, file=file, view=view)
         view.message = await interaction.original_response()
 
+    @discord.ui.button(label="數字搜尋者2", style=discord.ButtonStyle.primary, emoji="🔢", row=2)
+    async def number_searcher2(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(
+            embed=build_number_searcher2_difficulty_embed(interaction.user),
+            view=NumberSearcher2DifficultyView(interaction.user, build_game_menu),
+            ephemeral=True,
+        )
+
     @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(
@@ -2077,6 +2087,11 @@ def build_game_help_embed() -> discord.Embed:
     embed.add_field(
         name="🔢 數字搜尋者",
         value="啟動後會產生三位 0~9 隨機數字，每位背後都有黃/綠/藍顏色。可先用下拉選單選擇 1/5/10/50/100 倍或自訂倍率；費用與猜中獎金會跟著倍率放大，結束後可檢視紀錄、再來一次或返回主畫面。",
+        inline=False,
+    )
+    embed.add_field(
+        name="🔢 數字搜尋者2",
+        value="玩法與數字搜尋者相同，但新增 N0~N8 難度解鎖。後續難度會提高隨機線索/猜測費用、加入雜訊攻擊、紫色、圖形線索，以及 N8 的額外顏色或圖形猜測。",
         inline=False,
     )
     embed.add_field(
