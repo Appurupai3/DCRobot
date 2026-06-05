@@ -58,6 +58,13 @@ class Clue:
     text: str
 
 
+@dataclass(frozen=True)
+class PendingClueOffer:
+    clue_type: str
+    choices: tuple[Clue, ...]
+    cost: int
+
+
 def load_display_font(size: int) -> ImageFont.ImageFont:
     for font_path in CJK_FONT_PATHS:
         try:
@@ -202,12 +209,36 @@ def build_color_clues(code: tuple[int, int, int], colors: tuple[str, str, str]) 
         Clue("鄰居檢查", f"前兩個方塊的顏色{'相同' if colors[0] == colors[1] else '不同'}。"),
         Clue("尾端檢查", f"後兩個方塊的顏色{'相同' if colors[1] == colors[2] else '不同'}。"),
         Clue("色彩絕緣體", "、".join(f"{item}沒出現" for item in missing) if missing else "三色都有出現。"),
-        Clue("左側安全區 A", f"前兩個方塊{'有' if '黃' in colors[:2] else '沒有'}包含黃色。"),
-        Clue("左側安全區 B", f"前兩個方塊{'有' if '綠' in colors[:2] else '沒有'}包含綠色。"),
-        Clue("左側安全區 C", f"前兩個方塊{'有' if '藍' in colors[:2] else '沒有'}包含藍色。"),
-        Clue("右側安全區 A", f"後兩個方塊{'有' if '黃' in colors[1:] else '沒有'}包含黃色。"),
-        Clue("右側安全區 B", f"後兩個方塊{'有' if '綠' in colors[1:] else '沒有'}包含綠色。"),
-        Clue("右側安全區 C", f"後兩個方塊{'有' if '藍' in colors[1:] else '沒有'}包含藍色。"),
+        Clue(
+            "左側安全區 A",
+            f"前兩個方塊（第一與第二個），{'有' if '黃' in colors[:2] else '沒有'}包含黃色，"
+            f"{'有' if '綠' in colors[:2] else '沒有'}包含綠色。",
+        ),
+        Clue(
+            "左側安全區 B",
+            f"前兩個方塊（第一與第二個），{'有' if '綠' in colors[:2] else '沒有'}包含綠色，"
+            f"{'有' if '藍' in colors[:2] else '沒有'}包含藍色。",
+        ),
+        Clue(
+            "左側安全區 C",
+            f"前兩個方塊（第一與第二個），{'有' if '藍' in colors[:2] else '沒有'}包含藍色，"
+            f"{'有' if '黃' in colors[:2] else '沒有'}包含黃色。",
+        ),
+        Clue(
+            "右側安全區 A",
+            f"後兩個方塊（第二與第三個），{'有' if '黃' in colors[1:] else '沒有'}包含黃色，"
+            f"{'有' if '綠' in colors[1:] else '沒有'}包含綠色。",
+        ),
+        Clue(
+            "右側安全區 B",
+            f"後兩個方塊（第二與第三個），{'有' if '綠' in colors[1:] else '沒有'}包含綠色，"
+            f"{'有' if '藍' in colors[1:] else '沒有'}包含藍色。",
+        ),
+        Clue(
+            "右側安全區 C",
+            f"後兩個方塊（第二與第三個），{'有' if '藍' in colors[1:] else '沒有'}包含藍色，"
+            f"{'有' if '綠' in colors[1:] else '沒有'}包含綠色。",
+        ),
     ]
 
 
@@ -261,12 +292,12 @@ def clue_choice_text(clue: Clue) -> str:
         "鄰居檢查": "前兩個方塊（第一與第二個）的顏色 [相同 / 不同]。",
         "尾端檢查": "後兩個方塊（第二與第三個）的顏色 [相同 / 不同]。",
         "色彩絕緣體": "哪一種顏色在這一局裡完全沒有出現？（黃色沒出現 / 綠色沒出現 / 藍色沒出現 / 三色都有出現）。",
-        "左側安全區 A": "前兩個方塊（第一與第二個），[有 / 沒有] 包含黃色。",
-        "左側安全區 B": "前兩個方塊（第一與第二個），[有 / 沒有] 包含綠色。",
-        "左側安全區 C": "前兩個方塊（第一與第二個），[有 / 沒有] 包含藍色。",
-        "右側安全區 A": "後兩個方塊（第二與第三個），[有 / 沒有] 包含黃色。",
-        "右側安全區 B": "後兩個方塊（第二與第三個），[有 / 沒有] 包含綠色。",
-        "右側安全區 C": "後兩個方塊（第二與第三個），[有 / 沒有] 包含藍色。",
+        "左側安全區 A": "前兩個方塊（第一與第二個），[有 / 沒有] 包含黃色，[有 / 沒有] 包含綠色。",
+        "左側安全區 B": "前兩個方塊（第一與第二個），[有 / 沒有] 包含綠色，[有 / 沒有] 包含藍色。",
+        "左側安全區 C": "前兩個方塊（第一與第二個），[有 / 沒有] 包含藍色，[有 / 沒有] 包含黃色。",
+        "右側安全區 A": "後兩個方塊（第二與第三個），[有 / 沒有] 包含黃色，[有 / 沒有] 包含綠色。",
+        "右側安全區 B": "後兩個方塊（第二與第三個），[有 / 沒有] 包含綠色，[有 / 沒有] 包含藍色。",
+        "右側安全區 C": "後兩個方塊（第二與第三個），[有 / 沒有] 包含藍色，[有 / 沒有] 包含綠色。",
     }
     if clue.title.startswith("幸運號碼"):
         return f"顯示所有密碼中的數字 {clue.title.removeprefix('幸運號碼')} 的位置 [第 X 位]。"
@@ -303,6 +334,12 @@ class PendingClueChoiceView(View):
             await interaction.response.edit_message(content="✅ 本局已結束，線索選擇失效。", embed=None, view=None)
             return
 
+        offer = self.parent.pending_clue_offer
+        if offer is None or clue.title not in {choice.title for choice in offer.choices}:
+            await interaction.response.edit_message(content="✅ 這份候選清單已經選擇過或失效。", embed=None, view=None)
+            return
+
+        self.parent.pending_clue_offer = None
         self.parent.history.append(f"💡 ${self.cost}｜【{clue.title}】{clue.text}")
         embed, file = self.parent.build_embed_and_file(f"公開線索：【{clue.title}】{clue.text}")
         if self.parent.message is not None:
@@ -371,6 +408,8 @@ class NumberSearcherView(View):
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
+        self.seen_clue_titles: set[str] = set()
+        self.pending_clue_offer: PendingClueOffer | None = None
         self.ended = False
         self.message: discord.Message | None = None
         self.add_multiplier_select()
@@ -546,48 +585,91 @@ class NumberSearcherView(View):
         embed, file = self.build_embed_and_file(status_text, reveal=reveal, color=color)
         await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
 
+    def available_clues(self, pool: list[Clue]) -> list[Clue]:
+        return [clue for clue in pool if clue.title not in self.seen_clue_titles]
+
+    def sample_unseen_clues(self, pool: list[Clue], count: int) -> tuple[Clue, ...]:
+        available = self.available_clues(pool)
+        sample_size = min(count, len(available))
+        if sample_size <= 0:
+            return ()
+        sampled = tuple(random.sample(available, sample_size))
+        self.seen_clue_titles.update(clue.title for clue in sampled)
+        return sampled
+
+    def pool_for_clue_type(self, clue_type: str) -> tuple[list[Clue], int, str]:
+        if clue_type == "number":
+            return build_number_clues(self.secret), 3, "數字有關的線索"
+        if clue_type == "color":
+            return build_color_clues(self.secret, self.colors), 3, "顏色有關的線索"
+        if clue_type == "random_number":
+            return build_number_clues(self.secret), 2, "隨機數字禮包"
+        if clue_type == "random_color":
+            return build_color_clues(self.secret, self.colors), 2, "隨機顏色禮包"
+        return build_number_clues(self.secret) + build_color_clues(self.secret, self.colors), 2, "隨機線索"
+
+    def pending_offer_embed(self, offer: PendingClueOffer, *, reused: bool = False) -> discord.Embed:
+        reuse_notice = "\n這是尚未選擇的候選清單，不會再次扣款或提高價格。" if reused else ""
+        choice_embed = discord.Embed(
+            title="🧠 選擇要公開的線索",
+            description=(
+                f"已支付 ${offer.cost}，請從以下 {len(offer.choices)} 個候選線索中選擇 1 個公開。"
+                f"{reuse_notice}\n只有你看得到候選清單；選擇前不會顯示答案，遊戲紀錄只會寫入你最後選擇的效果。"
+            ),
+            color=discord.Color.blurple(),
+        )
+        for index, clue in enumerate(offer.choices, start=1):
+            choice_embed.add_field(name=f"{index}. {clue.title}", value=clue_choice_text(clue), inline=False)
+        return choice_embed
+
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
 
-        if clue_type == "number":
+        if self.pending_clue_offer is not None:
+            offer = self.pending_clue_offer
+            await interaction.response.send_message(
+                embed=self.pending_offer_embed(offer, reused=True),
+                view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
+                ephemeral=True,
+            )
+            return
+
+        pool, sample_count, clue_type_name = self.pool_for_clue_type(clue_type)
+        sampled = self.sample_unseen_clues(pool, sample_count)
+        if not sampled:
+            await interaction.response.send_message(f"✅ {clue_type_name} 的卡池已沒有未出現過的線索。", ephemeral=True)
+            return
+
+        if clue_type in {"number", "color"}:
             cost = self.clue_cost()
-            if not await self.charge_wallet(interaction, cost):
-                return
-            self.clue_count += 1
-            self.number_clue_count += 1
-            pool = build_number_clues(self.secret)
-            sampled = random.sample(pool, 3)
-        elif clue_type == "color":
-            cost = self.clue_cost()
-            if not await self.charge_wallet(interaction, cost):
-                return
-            self.clue_count += 1
-            self.color_clue_count += 1
-            pool = build_color_clues(self.secret, self.colors)
-            sampled = random.sample(pool, 3)
         else:
             cost = self.random_clue_cost()
-            if not await self.charge_wallet(interaction, cost):
-                return
-            self.random_clue_count += 1
-            mixed_pool = build_number_clues(self.secret) + build_color_clues(self.secret, self.colors)
-            sampled = random.sample(mixed_pool, 2)
+        if not await self.charge_wallet(interaction, cost):
+            self.seen_clue_titles.difference_update(clue.title for clue in sampled)
+            return
 
-        choice_embed = discord.Embed(
-            title="🧠 選擇要公開的線索",
-            description=(
-                f"已支付 ${cost}，請從以下 {len(sampled)} 個候選線索中選擇 1 個公開。\n"
-                "只有你看得到候選清單；選擇前不會顯示答案，遊戲紀錄只會寫入你最後選擇的效果。"
-            ),
-            color=discord.Color.blurple(),
-        )
-        for index, clue in enumerate(sampled, start=1):
-            choice_embed.add_field(name=f"{index}. {clue.title}", value=clue_choice_text(clue), inline=False)
+        if clue_type == "number":
+            self.clue_count += 1
+            self.number_clue_count += 1
+        elif clue_type == "color":
+            self.clue_count += 1
+            self.color_clue_count += 1
+        elif clue_type == "random_number":
+            self.random_clue_count += 1
+            self.number_clue_count += 1
+        elif clue_type == "random_color":
+            self.random_clue_count += 1
+            self.color_clue_count += 1
+        else:
+            self.random_clue_count += 1
+
+        offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost)
+        self.pending_clue_offer = offer
         await interaction.response.send_message(
-            embed=choice_embed,
-            view=PendingClueChoiceView(self, sampled, cost),
+            embed=self.pending_offer_embed(offer),
+            view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
             ephemeral=True,
         )
 
@@ -660,9 +742,13 @@ class NumberSearcherView(View):
     async def color_clue(self, interaction: discord.Interaction, button: Button):
         await self.reveal_clue(interaction, "color")
 
-    @discord.ui.button(label="隨機線索", style=discord.ButtonStyle.secondary, emoji="🎲", row=1)
-    async def random_clue(self, interaction: discord.Interaction, button: Button):
-        await self.reveal_clue(interaction, "random")
+    @discord.ui.button(label="隨機數字禮包", style=discord.ButtonStyle.secondary, emoji="🎲", row=1)
+    async def random_number_clue(self, interaction: discord.Interaction, button: Button):
+        await self.reveal_clue(interaction, "random_number")
+
+    @discord.ui.button(label="隨機顏色禮包", style=discord.ButtonStyle.secondary, emoji="🎁", row=2)
+    async def random_color_clue(self, interaction: discord.Interaction, button: Button):
+        await self.reveal_clue(interaction, "random_color")
 
     @discord.ui.button(label="檢視紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=2, custom_id=HISTORY_BUTTON_CUSTOM_ID)
     async def view_history(self, interaction: discord.Interaction, button: Button):
