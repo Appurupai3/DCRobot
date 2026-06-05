@@ -1969,6 +1969,16 @@ def build_game_help_embed() -> discord.Embed:
     return embed
 
 
+async def send_deferred_payload(interaction: discord.Interaction, payload: dict) -> None:
+    """Acknowledge slash commands before sending potentially slow menu/embed payloads."""
+
+    send_kwargs = dict(payload)
+    ephemeral = bool(send_kwargs.pop("ephemeral", False))
+    if not interaction.response.is_done():
+        await interaction.response.defer(thinking=True, ephemeral=ephemeral)
+    await interaction.followup.send(**send_kwargs, ephemeral=ephemeral)
+
+
 def build_economy_menu() -> dict:
     embed = discord.Embed(
         title="🎮 經濟遊戲 & 銀行系統",
@@ -2063,12 +2073,12 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
 
 @bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_game_menu(interaction.user))
+    await send_deferred_payload(interaction, build_game_menu(interaction.user))
 
 
 @bot.tree.command(name="openmenu", description="開啟經濟選單")
 async def openmenu_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_economy_menu())
+    await send_deferred_payload(interaction, build_economy_menu())
 
 
 @bot.tree.command(name="birthfire", description="為壽星播放 30 秒生日煙火")
@@ -2079,20 +2089,21 @@ async def birthfire_command(interaction: discord.Interaction, name: str | None =
 
 @bot.tree.command(name="ranking", description="展示經濟排行榜")
 async def ranking_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message())
 
 
 @bot.tree.command(name="portfolio", description="查看個人資訊與遊戲營利紀錄")
 @app_commands.describe(user="要查看的使用者；留空則查看自己")
 async def portfolio_command(interaction: discord.Interaction, user: discord.User | None = None):
     target = user or interaction.user
+    await interaction.response.defer(thinking=True, ephemeral=True)
     await open_account(target)
-    await interaction.response.send_message(embed=build_portfolio_embed(target), ephemeral=True)
+    await interaction.followup.send(embed=build_portfolio_embed(target), ephemeral=True)
 
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
 async def rankgame_command(interaction: discord.Interaction):
-    await interaction.response.send_message(**build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message())
 
 
 @bot.command(name="portfolio")
