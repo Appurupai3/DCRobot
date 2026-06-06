@@ -1128,6 +1128,10 @@ class NumberSearcherView(View):
     async def color_clue(self, interaction: discord.Interaction, button: Button):
         await self.reveal_clue(interaction, "color")
 
+    @discord.ui.button(label="隨機線索", style=discord.ButtonStyle.secondary, emoji="🎲", row=1)
+    async def random_clue(self, interaction: discord.Interaction, button: Button):
+        await self.reveal_clue(interaction, "random")
+
     @discord.ui.button(label="檢視紀錄", style=discord.ButtonStyle.secondary, emoji="📜", row=2, custom_id=HISTORY_BUTTON_CUSTOM_ID)
     async def view_history(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(embed=self.build_history_embed(), ephemeral=True)
