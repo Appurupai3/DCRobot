@@ -6,6 +6,10 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 from typing import Callable, Optional
 import random
+from io import BytesIO
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from dcrbot.battle import (
     BATTLE_GAMES,
@@ -636,7 +640,7 @@ def build_battle_embed(match: BattleMatch, status_text: str) -> discord.Embed:
     embed.add_field(name="彩池", value=f"${match.pot}", inline=True)
     embed.add_field(name="參戰者", value=participant_mentions, inline=False)
     embed.add_field(name="本局說明", value=game_info.get("desc", ""), inline=False)
-    embed.add_field(name="遊戲一覽 (10)" , value=format_battle_game_list(), inline=False)
+    embed.add_field(name=f"遊戲一覽 ({len(BATTLE_GAMES)})", value=format_battle_game_list(), inline=False)
     embed.set_footer(text=status_text)
     return embed
 
@@ -813,13 +817,6 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
             winners = [pid for pid, hp in scores.items() if hp == best_hp]
             details.append("\n".join(["命運左輪模擬："] + logs))
             return winners, "\n".join(details)
-        elif match.game_key == "drift":
-            base_time = random.uniform(36.0, 48.0)
-            boost = random.uniform(0, 3)
-            finish = base_time - boost
-            scores[uid] = finish
-            higher_is_better = False
-            details.append(f"<@{uid}> 完賽 {finish:.2f}s (加速 {boost:.1f}s)")
         elif match.game_key == "maze":
             path_times = [random.uniform(12, 18), random.uniform(15, 22), random.uniform(10, 25)]
             finish = min(path_times)
@@ -1764,6 +1761,244 @@ class RPSBattleView(View):
         await self.record_choice(interaction, "paper")
 
 
+GOMOKU_BOARD_SIZE = 15
+GOMOKU_CELL_SIZE = 42
+GOMOKU_MARGIN = 42
+GOMOKU_STONE_RADIUS = 16
+
+
+def load_gomoku_font(size: int) -> ImageFont.ImageFont:
+    for font_path in (
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ):
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+class GomokuMoveModal(Modal):
+    def __init__(self, view: "GomokuBattleView"):
+        super().__init__(title="⚫⚪ 五子棋落子")
+        self.gomoku_view = view
+        self.position = TextInput(
+            label="座標",
+            placeholder="例如 H8、8,8、8 8（A-O / 1-15）",
+            required=True,
+            max_length=8,
+        )
+        self.add_item(self.position)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.gomoku_view.handle_move(interaction, self.position.value)
+
+
+class GomokuBattleView(View):
+    def __init__(self, match: BattleMatch):
+        super().__init__(timeout=600)
+        self.match = match
+        self.board = np.zeros((GOMOKU_BOARD_SIZE, GOMOKU_BOARD_SIZE), dtype=np.int8)
+        self.players = match.participants[:2]
+        self.current_index = 0
+        self.last_move: tuple[int, int] | None = None
+        self.message: Optional[discord.Message] = None
+        self.move_count = 0
+
+    @property
+    def current_player(self) -> int:
+        return self.players[self.current_index]
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ 你不是這局五子棋的玩家。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if not self.match.active:
+            return
+        refund_contributions(self.match)
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed("⌛ 五子棋逾時，已退回下注。"), view=None)
+        await finalize_battle(self.match, "五子棋逾時，已退回下注。")
+
+    def parse_position(self, raw_position: str) -> tuple[int, int] | None:
+        text = raw_position.strip().upper().replace("，", ",")
+        if not text:
+            return None
+
+        if text[0].isalpha():
+            col = ord(text[0]) - ord("A")
+            row_text = text[1:].strip(" ,")
+            if not row_text.isdigit():
+                return None
+            row = int(row_text) - 1
+        else:
+            parts = [part for part in text.replace(",", " ").split() if part]
+            if len(parts) != 2 or not all(part.isdigit() for part in parts):
+                return None
+            row = int(parts[0]) - 1
+            col = int(parts[1]) - 1
+
+        if 0 <= row < GOMOKU_BOARD_SIZE and 0 <= col < GOMOKU_BOARD_SIZE:
+            return row, col
+        return None
+
+    def check_winner(self, row: int, col: int) -> bool:
+        player_value = self.board[row, col]
+        if player_value == 0:
+            return False
+
+        for dr, dc in ((1, 0), (0, 1), (1, 1), (1, -1)):
+            count = 1
+            for sign in (1, -1):
+                rr = row + dr * sign
+                cc = col + dc * sign
+                while 0 <= rr < GOMOKU_BOARD_SIZE and 0 <= cc < GOMOKU_BOARD_SIZE and self.board[rr, cc] == player_value:
+                    count += 1
+                    rr += dr * sign
+                    cc += dc * sign
+            if count >= 5:
+                return True
+        return False
+
+    def build_status_embed(self, status_text: str | None = None) -> discord.Embed:
+        black_player, white_player = self.players
+        description = (
+            f"⚫ 黑子：<@{black_player}>\n"
+            f"⚪ 白子：<@{white_player}>\n\n"
+            "按下『落子』輸入座標；字母 A-O 代表欄，數字 1-15 代表列。"
+        )
+        if self.match.active:
+            description += f"\n目前輪到：<@{self.current_player}>"
+        embed = discord.Embed(title="⚫⚪ 五子棋", description=description, color=discord.Color.dark_gold())
+        if self.last_move:
+            row, col = self.last_move
+            embed.add_field(name="上一手", value=f"{chr(ord('A') + col)}{row + 1}", inline=True)
+        embed.add_field(name="手數", value=str(self.move_count), inline=True)
+        embed.set_footer(text=status_text or "先連成五子者獲勝。")
+        return embed
+
+    def render_board_file(self) -> discord.File:
+        board_extent = (GOMOKU_BOARD_SIZE - 1) * GOMOKU_CELL_SIZE
+        width = GOMOKU_MARGIN * 2 + board_extent
+        height = width + 54
+        image = Image.new("RGB", (width, height), (238, 184, 104))
+        draw = ImageDraw.Draw(image)
+        font = load_gomoku_font(16)
+        small_font = load_gomoku_font(13)
+
+        grid_color = (79, 45, 20)
+        for idx in range(GOMOKU_BOARD_SIZE):
+            pos = GOMOKU_MARGIN + idx * GOMOKU_CELL_SIZE
+            draw.line((GOMOKU_MARGIN, pos, GOMOKU_MARGIN + board_extent, pos), fill=grid_color, width=2)
+            draw.line((pos, GOMOKU_MARGIN, pos, GOMOKU_MARGIN + board_extent), fill=grid_color, width=2)
+            label = chr(ord("A") + idx)
+            draw.text((pos - 5, 12), label, fill=grid_color, font=font)
+            draw.text((12, pos - 9), str(idx + 1), fill=grid_color, font=font)
+
+        for star_row, star_col in ((3, 3), (3, 11), (7, 7), (11, 3), (11, 11)):
+            cx = GOMOKU_MARGIN + star_col * GOMOKU_CELL_SIZE
+            cy = GOMOKU_MARGIN + star_row * GOMOKU_CELL_SIZE
+            draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=grid_color)
+
+        stone_positions = np.argwhere(self.board != 0)
+        for row, col in stone_positions:
+            cx = GOMOKU_MARGIN + int(col) * GOMOKU_CELL_SIZE
+            cy = GOMOKU_MARGIN + int(row) * GOMOKU_CELL_SIZE
+            value = int(self.board[row, col])
+            if value == 1:
+                fill = (25, 25, 25)
+                outline = (0, 0, 0)
+            else:
+                fill = (245, 245, 235)
+                outline = (120, 120, 110)
+            draw.ellipse(
+                (cx - GOMOKU_STONE_RADIUS, cy - GOMOKU_STONE_RADIUS, cx + GOMOKU_STONE_RADIUS, cy + GOMOKU_STONE_RADIUS),
+                fill=fill,
+                outline=outline,
+                width=2,
+            )
+
+        if self.last_move:
+            row, col = self.last_move
+            cx = GOMOKU_MARGIN + col * GOMOKU_CELL_SIZE
+            cy = GOMOKU_MARGIN + row * GOMOKU_CELL_SIZE
+            draw.rectangle((cx - 7, cy - 7, cx + 7, cy + 7), outline=(220, 40, 40), width=3)
+
+        draw.text((GOMOKU_MARGIN, height - 40), "座標輸入範例：H8 或 8,8｜A-O / 1-15", fill=(65, 35, 18), font=small_font)
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
+        return discord.File(buffer, filename="gomoku_board.png")
+
+    async def refresh_message(self, status_text: str | None = None) -> None:
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed(status_text), attachments=[self.render_board_file()], view=self)
+
+    async def finish_game(self, winners: list[int], detail_text: str) -> None:
+        for child in self.children:
+            child.disabled = True
+        payout_text = distribute_winnings(self.match, winners)
+        result_embed = discord.Embed(title="⚫⚪ 五子棋結果", color=discord.Color.blurple())
+        result_embed.add_field(name="棋局", value=detail_text, inline=False)
+        result_embed.add_field(name="結算", value=payout_text, inline=False)
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed("棋局已結束。"), attachments=[self.render_board_file()], view=None)
+            await self.message.channel.send(embed=result_embed)
+        await finalize_battle(self.match, payout_text)
+
+    async def handle_move(self, interaction: discord.Interaction, raw_position: str) -> None:
+        if not self.match.active:
+            await interaction.response.send_message("❌ 這局五子棋已結束。", ephemeral=True)
+            return
+        if interaction.user.id != self.current_player:
+            await interaction.response.send_message("⚠️ 還沒輪到你落子。", ephemeral=True)
+            return
+
+        parsed = self.parse_position(raw_position)
+        if parsed is None:
+            await interaction.response.send_message("❌ 座標格式錯誤，請輸入例如 H8、8,8 或 8 8。", ephemeral=True)
+            return
+
+        row, col = parsed
+        if self.board[row, col] != 0:
+            await interaction.response.send_message("❌ 這個位置已經有棋子了。", ephemeral=True)
+            return
+
+        stone_value = self.current_index + 1
+        self.board[row, col] = stone_value
+        self.last_move = (row, col)
+        self.move_count += 1
+        coordinate = f"{chr(ord('A') + col)}{row + 1}"
+
+        if self.check_winner(row, col):
+            await interaction.response.send_message(f"✅ 已在 {coordinate} 落子，形成五子連線！", ephemeral=True)
+            await self.finish_game([interaction.user.id], f"<@{interaction.user.id}> 在 {coordinate} 落子後連成五子獲勝。")
+            return
+
+        if self.move_count >= GOMOKU_BOARD_SIZE * GOMOKU_BOARD_SIZE:
+            await interaction.response.send_message(f"✅ 已在 {coordinate} 落子，棋盤已滿。", ephemeral=True)
+            await self.finish_game([], "棋盤已滿，雙方平手。")
+            return
+
+        self.current_index = 1 - self.current_index
+        await interaction.response.send_message(f"✅ 已在 {coordinate} 落子。", ephemeral=True)
+        await self.refresh_message(f"上一手 {coordinate}，輪到 <@{self.current_player}>。")
+
+    @discord.ui.button(label="落子", style=discord.ButtonStyle.primary, emoji="♟️")
+    async def place_stone(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.current_player:
+            await interaction.response.send_message("⚠️ 還沒輪到你落子。", ephemeral=True)
+            return
+        await interaction.response.send_modal(GomokuMoveModal(self))
+
+
 class BattleLobbyView(View):
     def __init__(self, match_id: int):
         super().__init__(timeout=3600)
@@ -1787,6 +2022,10 @@ class BattleLobbyView(View):
 
         if interaction.user.id in match.participants:
             await interaction.response.send_message("⚠️ 你已加入戰局。", ephemeral=True)
+            return
+
+        if len(match.participants) >= 2:
+            await interaction.response.send_message("⚠️ 這個房間上限為 2 人。", ephemeral=True)
             return
 
         await open_account(interaction.user)
@@ -1819,8 +2058,8 @@ class BattleLobbyView(View):
         if len(match.participants) < 2:
             await interaction.response.send_message("⚠️ 至少需要兩名玩家。", ephemeral=True)
             return
-        if match.game_key == "archery" and len(match.participants) != 2:
-            await interaction.response.send_message("⚠️ 命運左輪需要正好兩名決鬥者。", ephemeral=True)
+        if len(match.participants) != 2:
+            await interaction.response.send_message("⚠️ 房間上限為 2 人，且開局需要正好兩名玩家。", ephemeral=True)
             return
 
         for child in self.children:
@@ -1851,6 +2090,11 @@ class BattleLobbyView(View):
             duel_message = await interaction.followup.send(embed=prompt, view=duel_view)
             duel_view.message = duel_message
             await duel_view.begin_turn(duel_view.current_player)
+        elif match.game_key == "gomoku":
+            gomoku_view = GomokuBattleView(match)
+            file = gomoku_view.render_board_file()
+            gomoku_message = await interaction.followup.send(embed=gomoku_view.build_status_embed(), file=file, view=gomoku_view)
+            gomoku_view.message = gomoku_message
         else:
             winners, detail_text = resolve_random_contest(match)
             payout_text = distribute_winnings(match, winners)
