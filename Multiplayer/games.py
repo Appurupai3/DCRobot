@@ -20,6 +20,15 @@ BATTLE_GAMES = {
 }
 
 
+BATTLE_GAME_MAX_PLAYERS = {
+    "incan_gold": 8,
+}
+
+
+def get_battle_game_max_players(game_key: str) -> int:
+    return BATTLE_GAME_MAX_PLAYERS.get(game_key, 2)
+
+
 BATTLE_GAME_EMOJIS = {
     "rps": "✊",
     "blackjack": "🃏",

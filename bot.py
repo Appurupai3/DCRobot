@@ -11,7 +11,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES
+from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES, get_battle_game_max_players
 from Multiplayer.incan_gold import render_incan_scene, resolve_incan_gold
 
 from dcrbot.battle import (
@@ -640,8 +640,10 @@ def build_battle_embed(match: BattleMatch, status_text: str) -> discord.Embed:
         title=f"{emoji} 戰局 #{match.id}｜{game_info['name']}",
         color=discord.Color.orange(),
     )
+    max_players = get_battle_game_max_players(match.game_key)
+    room_label = "多人下注房間" if max_players > 2 else "雙人下注房間"
     embed.description = (
-        "╭── **雙人下注房間** ──╮\n"
+        f"╭── **{room_label}** ──╮\n"
         "加入房間會立即扣除下注金；開局前由房主取消可全額退回。\n"
         "開局後依本局規則結算，勝者取得彩池，平手則退回下注。\n"
         "╰────────────────╯"
@@ -649,7 +651,7 @@ def build_battle_embed(match: BattleMatch, status_text: str) -> discord.Embed:
     participant_mentions = "、".join(f"<@{uid}>" for uid in match.participants) or "尚無"
     embed.add_field(name="💰 每人下注", value=f"`${match.bet}` 金幣", inline=True)
     embed.add_field(name="🏆 目前彩池", value=f"`${match.pot}` 金幣", inline=True)
-    embed.add_field(name="👥 房間人數", value=f"`{len(match.participants)}/2`", inline=True)
+    embed.add_field(name="👥 房間人數", value=f"`{len(match.participants)}/{max_players}`", inline=True)
     embed.add_field(name="🎮 參戰者", value=participant_mentions, inline=False)
     embed.add_field(name=f"📖 {game_info['name']}玩法說明", value=build_battle_rule_text(match.game_key), inline=False)
     embed.set_footer(text=f"狀態：{status_text}")
@@ -2102,8 +2104,9 @@ class BattleLobbyView(View):
             await interaction.response.send_message("⚠️ 你已加入戰局。", ephemeral=True)
             return
 
-        if len(match.participants) >= 2:
-            await interaction.response.send_message("⚠️ 這個房間上限為 2 人。", ephemeral=True)
+        max_players = get_battle_game_max_players(match.game_key)
+        if len(match.participants) >= max_players:
+            await interaction.response.send_message(f"⚠️ 這個房間上限為 {max_players} 人。", ephemeral=True)
             return
 
         await open_account(interaction.user)
@@ -2133,11 +2136,15 @@ class BattleLobbyView(View):
             await interaction.response.send_message("❌ 只有開局者可以開始戰局。", ephemeral=True)
             return
 
+        max_players = get_battle_game_max_players(match.game_key)
         if len(match.participants) < 2:
             await interaction.response.send_message("⚠️ 至少需要兩名玩家。", ephemeral=True)
             return
-        if len(match.participants) != 2:
+        if max_players == 2 and len(match.participants) != 2:
             await interaction.response.send_message("⚠️ 房間上限為 2 人，且開局需要正好兩名玩家。", ephemeral=True)
+            return
+        if len(match.participants) > max_players:
+            await interaction.response.send_message(f"⚠️ 這個房間上限為 {max_players} 人。", ephemeral=True)
             return
 
         for child in self.children:
