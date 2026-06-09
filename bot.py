@@ -74,7 +74,7 @@ class PayModal(Modal, title='💸 轉帳中心'):
 
 
 def format_money_delta(delta: int) -> str:
-    return f"+${delta}" if delta >= 0 else f"-${abs(delta)}"
+    return f"+${delta:,}" if delta >= 0 else f"-${abs(delta):,}"
 
 
 def _money_trend_emoji(delta: int) -> str:
@@ -100,13 +100,38 @@ def _format_stat_summary(game_name: str, stats: dict) -> str:
     plays = int(stats.get("plays", 0) or 0)
     wins = int(stats.get("wins", 0) or 0)
     total_delta = int(stats.get("total_delta", 0) or 0)
-    max_profit = int(stats.get("max_profit") or 0)
-    max_loss = int(stats.get("max_loss") or 0)
+    max_profit = stats.get("max_profit")
+    max_loss = stats.get("max_loss")
     win_rate = _stat_win_rate(stats)
+    best_text = format_money_delta(int(max_profit)) if max_profit is not None else "尚無獲利"
+    worst_text = format_money_delta(int(max_loss)) if max_loss is not None else "尚無虧損"
     return (
         f"{_money_trend_emoji(total_delta)} **{game_name}**\n"
-        f"`{_progress_bar(win_rate)}` 勝率 **{win_rate:.1f}%**（{wins}/{plays}）\n"
-        f"盈虧 **{format_money_delta(total_delta)}**｜單次最高 {format_money_delta(max_profit)}｜最大虧損 {format_money_delta(max_loss)}"
+        f"`{_progress_bar(win_rate)}` 勝率 **{win_rate:.1f}%**（{wins} 勝 / {plays} 場）\n"
+        f"💹 累計盈虧 **{format_money_delta(total_delta)}**\n"
+        f"🏅 單局最佳 **{best_text}**\n"
+        f"🛡️ 最大虧損 **{worst_text}**"
+    )
+
+
+def _format_favorite_game_summary(rank: int, game_name: str, stats: dict) -> str:
+    medals = ["🥇", "🥈", "🥉"]
+    plays = int(stats.get("plays", 0) or 0)
+    wins = int(stats.get("wins", 0) or 0)
+    total_delta = int(stats.get("total_delta", 0) or 0)
+    max_profit = stats.get("max_profit")
+    max_loss = stats.get("max_loss")
+    win_rate = _stat_win_rate(stats)
+    best_text = format_money_delta(int(max_profit)) if max_profit is not None else "尚無獲利"
+    worst_text = format_money_delta(int(max_loss)) if max_loss is not None else "尚無虧損"
+    medal = medals[rank] if rank < len(medals) else "🎮"
+    return (
+        f"{medal} **{game_name}**\n"
+        f"🎮 遊玩 **{plays}** 場　🏆 **{wins}** 勝\n"
+        f"`{_progress_bar(win_rate)}` 勝率 **{win_rate:.1f}%**\n"
+        f"{_money_trend_emoji(total_delta)} 累計盈虧 **{format_money_delta(total_delta)}**\n"
+        f"🏅 最佳單局 **{best_text}**\n"
+        f"🛡️ 最大虧損 **{worst_text}**"
     )
 
 
@@ -117,20 +142,20 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
         cashout_count = int(extra.get("cashout_count", 0) or 0)
         cashout_total = int(extra.get("cashout_total", 0) or 0)
         average = cashout_total / cashout_count if cashout_count else 0
-        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜500x 次數 {int(extra.get('cashout_500x_count', 0) or 0)}")
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}，500x 次數 {int(extra.get('cashout_500x_count', 0) or 0)}")
         lines.append(f"平均打氣 {float(extra.get('pump_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
     elif game_name == "骰子決鬥":
         cashout_count = int(extra.get("cashout_count", 0) or 0)
         cashout_total = int(extra.get("cashout_total", 0) or 0)
         average = cashout_total / cashout_count if cashout_count else 0
-        lines.append(f":bar_chart: 平均提現 ${average:.0f}｜50 倍爆擊次數 {int(extra.get('crit_50x_count', 0) or 0)}")
+        lines.append(f":bar_chart: 平均提現 ${average:.0f}，50 倍爆擊次數 {int(extra.get('crit_50x_count', 0) or 0)}")
     elif game_name.startswith("海盜寶藏"):
         plays = int(stats.get("plays", 0) or 0)
         wrong_total = int(extra.get("wrong_total", 0) or 0)
         lines.append(f"平均失誤次數 {wrong_total / plays:.1f}" if plays else "平均失誤次數 0.0")
     elif game_name.startswith("數字搜尋者"):
         lines.append(
-            "｜".join(
+            "、".join(
                 [
                     f"數字線索 {int(extra.get('number_clue_count', 0) or 0)} 次",
                     f"顏色線索 {int(extra.get('color_clue_count', 0) or 0)} 次",
@@ -156,7 +181,7 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
         total_delta = int(stats.get("total_delta", 0) or 0)
         win_rate = _stat_win_rate(stats)
         embed = discord.Embed(
-            title=f"🎮 {display_name}｜{game_name}",
+            title=f"🎮 {display_name} 的 {game_name}",
             description=f"{_money_trend_emoji(total_delta)} 這裡是單一遊戲的投資績效卡。",
             color=discord.Color.green() if total_delta >= 0 else discord.Color.red(),
         )
@@ -195,12 +220,19 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     embed.add_field(name="🏆 整體勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**（{total_wins}/{total_games}）", inline=True)
 
     if summary:
-        sorted_stats = sorted(summary.items(), key=lambda item: (int(item[1].get("total_delta", 0) or 0), int(item[1].get("plays", 0) or 0)), reverse=True)
-        stat_lines = [_format_stat_summary(name, stats) for name, stats in sorted_stats[:5]]
-        embed.add_field(name="🔥 熱門遊戲績效", value="\n\n".join(stat_lines)[:1024], inline=False)
+        favorite_stats = sorted(
+            summary.items(),
+            key=lambda item: (
+                int(item[1].get("plays", 0) or 0),
+                int(item[1].get("total_delta", 0) or 0),
+            ),
+            reverse=True,
+        )
+        stat_lines = [_format_favorite_game_summary(index, name, stats) for index, (name, stats) in enumerate(favorite_stats[:3])]
+        embed.add_field(name="🎮 常玩的三個遊戲", value="\n\n".join(stat_lines)[:1024], inline=False)
         embed.add_field(name="🔎 查看單一遊戲", value="使用下方下拉選單選擇遊戲，可查看該遊戲的基礎與額外統計。", inline=False)
     else:
-        embed.add_field(name="🔥 熱門遊戲績效", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
+        embed.add_field(name="🎮 常玩的三個遊戲", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
 
     embed.set_footer(text="bank.json 只保存錢包/銀行；遊戲統計保存在 leaderboard/info 與 leaderboard/。")
     return embed
@@ -236,7 +268,7 @@ class PortfolioGameSelect(discord.ui.Select):
                     label=game_name[:100],
                     value=game_name[:100],
                     emoji="🎮",
-                    description=f"{int(stats.get('plays', 0) or 0)} 場｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}"[:100],
+                    description=f"{int(stats.get('plays', 0) or 0)} 場，盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}"[:100],
                 )
             )
         super().__init__(placeholder="選擇要查看統計的遊戲", min_values=1, max_values=1, options=options)
