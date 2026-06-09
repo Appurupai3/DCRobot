@@ -2107,14 +2107,29 @@ def build_game_help_embed() -> discord.Embed:
     return embed
 
 
-async def send_deferred_payload(interaction: discord.Interaction, payload: dict) -> None:
-    """Acknowledge slash commands before sending potentially slow menu/embed payloads."""
+async def send_deferred_payload(
+    interaction: discord.Interaction,
+    payload_or_factory: dict | Callable[[], dict],
+    *,
+    ephemeral: bool | None = None,
+) -> None:
+    """Acknowledge slash commands before building and sending menu/embed payloads."""
 
+    defer_ephemeral = ephemeral
+    if defer_ephemeral is None and isinstance(payload_or_factory, dict):
+        defer_ephemeral = bool(payload_or_factory.get("ephemeral", False))
+    defer_ephemeral = bool(defer_ephemeral)
+
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(thinking=True, ephemeral=defer_ephemeral)
+    except discord.NotFound:
+        return
+
+    payload = payload_or_factory() if callable(payload_or_factory) else payload_or_factory
     send_kwargs = dict(payload)
-    ephemeral = bool(send_kwargs.pop("ephemeral", False))
-    if not interaction.response.is_done():
-        await interaction.response.defer(thinking=True, ephemeral=ephemeral)
-    await interaction.followup.send(**send_kwargs, ephemeral=ephemeral)
+    send_ephemeral = bool(send_kwargs.pop("ephemeral", defer_ephemeral))
+    await interaction.followup.send(**send_kwargs, ephemeral=send_ephemeral)
 
 
 def build_economy_menu() -> dict:
@@ -2211,12 +2226,12 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
 
 @bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
-    await send_deferred_payload(interaction, build_game_menu(interaction.user))
+    await send_deferred_payload(interaction, lambda: build_game_menu(interaction.user), ephemeral=False)
 
 
 @bot.tree.command(name="openmenu", description="開啟經濟選單")
 async def openmenu_command(interaction: discord.Interaction):
-    await send_deferred_payload(interaction, build_economy_menu())
+    await send_deferred_payload(interaction, build_economy_menu, ephemeral=False)
 
 
 @bot.tree.command(name="birthfire", description="為壽星播放 30 秒生日煙火")
@@ -2227,7 +2242,7 @@ async def birthfire_command(interaction: discord.Interaction, name: str | None =
 
 @bot.tree.command(name="ranking", description="展示經濟排行榜")
 async def ranking_command(interaction: discord.Interaction):
-    await send_deferred_payload(interaction, build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message, ephemeral=True)
 
 
 @bot.tree.command(name="portfolio", description="查看個人資訊與遊戲營利紀錄")
@@ -2241,7 +2256,7 @@ async def portfolio_command(interaction: discord.Interaction, user: discord.User
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
 async def rankgame_command(interaction: discord.Interaction):
-    await send_deferred_payload(interaction, build_ranking_message())
+    await send_deferred_payload(interaction, build_ranking_message, ephemeral=True)
 
 
 @bot.command(name="portfolio")
