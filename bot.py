@@ -194,7 +194,6 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
         extras = _extra_stat_lines(game_name, stats)
         if extras:
             embed.add_field(name="✨ 額外統計", value="\n".join(extras), inline=False)
-        embed.set_footer(text="統計資料保存在 leaderboard/info；不保存每場過程或詳細情況。")
         return embed
 
     wallet = int(user_data.get("wallet", 0) or 0)
@@ -234,7 +233,6 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     else:
         embed.add_field(name="🎮 常玩的三個遊戲", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
 
-    embed.set_footer(text="bank.json 只保存錢包/銀行；遊戲統計保存在 leaderboard/info 與 leaderboard/。")
     return embed
 
 
@@ -247,18 +245,19 @@ def build_game_records_embed(user: discord.User, *, limit: int = 10) -> discord.
     stats = get_game_records(users, str(user.id), limit=limit)
     embed = discord.Embed(title="📜 遊戲統計紀錄", color=discord.Color.dark_gold())
     if not stats:
-        embed.description = "尚未有遊戲統計；完成任一場遊戲後會自動保存統計。"
+        embed.description = "尚未有遊戲統計；完成任一場遊戲後會自動累計。"
         return embed
 
     lines = [_format_stat_summary(str(stat.get("game", "未知遊戲")), stat) for stat in stats]
-    embed.description = "以下只顯示統計結果，不保存每場過程。"
+    embed.description = "以下顯示各遊戲的累計統計結果。"
     embed.add_field(name="統計", value="\n".join(lines)[:1024], inline=False)
     return embed
 
 
 class PortfolioGameSelect(discord.ui.Select):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, viewer: discord.User | None = None):
         self.user = user
+        self.viewer_id = (viewer or user).id
         users = load_data()
         summary = summarize_game_records(users, str(user.id))
         options = [discord.SelectOption(label="全部遊戲", value="__all__", emoji="📊", description="查看所有遊戲總覽")]
@@ -274,18 +273,18 @@ class PortfolioGameSelect(discord.ui.Select):
         super().__init__(placeholder="選擇要查看統計的遊戲", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user.id:
-            await interaction.response.send_message("❌ 這不是你的 Portfolio 選單。", ephemeral=True)
+        if interaction.user.id != self.viewer_id:
+            await interaction.response.send_message("❌ 這不是你開啟的 Portfolio 選單。", ephemeral=True)
             return
         selected = self.values[0]
         embed = build_game_stat_embed(self.user, None if selected == "__all__" else selected)
-        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user))
+        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user, interaction.user))
 
 
 class PortfolioStatsView(View):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, viewer: discord.User | None = None):
         super().__init__(timeout=180)
-        self.add_item(PortfolioGameSelect(user))
+        self.add_item(PortfolioGameSelect(user, viewer))
 
 
 class SimplePostGameView(View):
@@ -366,7 +365,7 @@ class EconomyMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
     async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user))
 
 
 async def resolve_basic_bet(
@@ -2077,7 +2076,7 @@ class GameMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
     async def portfolio(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user), ephemeral=True)
+        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user))
 
 
 def build_game_menu(user: discord.User):
@@ -2307,9 +2306,9 @@ async def ranking_command(interaction: discord.Interaction):
 @app_commands.describe(user="要查看的使用者；留空則查看自己")
 async def portfolio_command(interaction: discord.Interaction, user: discord.User | None = None):
     target = user or interaction.user
-    await interaction.response.defer(thinking=True, ephemeral=True)
+    await interaction.response.defer(thinking=True, ephemeral=False)
     await open_account(target)
-    await interaction.followup.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target), ephemeral=True)
+    await interaction.followup.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target, interaction.user), ephemeral=False)
 
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
@@ -2318,9 +2317,10 @@ async def rankgame_command(interaction: discord.Interaction):
 
 
 @bot.command(name="portfolio")
-async def portfolio_prefix(ctx):
-    await open_account(ctx.author)
-    await ctx.send(embed=build_portfolio_embed(ctx.author), view=PortfolioStatsView(ctx.author))
+async def portfolio_prefix(ctx, user: Optional[discord.User] = None):
+    target = user or ctx.author
+    await open_account(target)
+    await ctx.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target, ctx.author))
 
 
 @bot.command()
