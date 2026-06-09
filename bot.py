@@ -11,6 +11,9 @@ from io import BytesIO
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES
+from Multiplayer.incan_gold import render_incan_scene, resolve_incan_gold
+
 from dcrbot.battle import (
     BATTLE_GAMES,
     BattleMatch,
@@ -621,105 +624,6 @@ class BattleBetModal(Modal):
 
 
 
-BATTLE_GAME_EMOJIS = {
-    "rps": "✊",
-    "blackjack": "🃏",
-    "dice_duel": "🎲",
-    "archery": "🔫",
-    "gomoku": "⚫",
-    "maze": "🧭",
-    "cookoff": "🍳",
-    "quiz": "⚡",
-    "sprint": "🏃",
-    "space": "🚀",
-}
-
-
-BATTLE_GAME_RULES = {
-    "rps": (
-        "**玩法流程**\n"
-        "・開局後雙方會看到出拳面板，請在 40 秒內選擇石頭、剪刀或布。\n"
-        "・雙方都出拳後立即公開結果；若有人未出拳，系統會依已出拳狀態處理。\n\n"
-        "**勝負判定**\n"
-        "・石頭勝剪刀、剪刀勝布、布勝石頭。\n"
-        "・雙方同手勢為平手，退回所有下注。"
-    ),
-    "blackjack": (
-        "**玩法流程**\n"
-        "・每位玩家起手 2 張牌，首張公開、其餘蓋牌。\n"
-        "・輪流使用「加牌」「停止加牌」或「投降」；可用「目前點數」私下查看自己的總和。\n\n"
-        "**勝負判定**\n"
-        "・目標是盡量接近 21 點但不能超過。A 會依情況計為 11 或 1。\n"
-        "・爆牌或投降無法獲勝；最高未爆牌點數贏得彩池，同分則平分。"
-    ),
-    "dice_duel": (
-        "**玩法流程**\n"
-        "・使用 6 顆骰子推進分數，得分骰會被暫時保留，剩餘骰繼續擲。\n"
-        "・若所有骰子都得分，會刷新為 6 顆骰繼續衝分。\n\n"
-        "**計分重點**\n"
-        "・1 = 100 分、5 = 50 分；三/四/五/六條給 300/500/1500/3000 分。\n"
-        "・擲出無得分骰會爆掉歸零；突破 3000 分門檻者優先比較高分。"
-    ),
-    "archery": (
-        "**玩法流程**\n"
-        "・雙方以 3 實彈、2 空包彈的彈巢輪流行動，可朝對手或自己開槍。\n"
-        "・道具會改變資訊、傷害或回合節奏，請觀察彈藥與血量做選擇。\n\n"
-        "**勝負判定**\n"
-        "・血量歸零者落敗；若時間結束，依剩餘血量判定。\n"
-        "・朝自己打出空包彈通常能取得節奏優勢，但實彈風險也更高。"
-    ),
-    "gomoku": (
-        "**玩法流程**\n"
-        "・本局限 2 人：黑子先手、白子後手，輪流按「落子」輸入座標。\n"
-        "・棋盤為 15×15，欄位 A-O、列數 1-15；可輸入 `H8`、`8,8` 或 `8 8`。\n"
-        "・每次落子後會用 Pillow 重新繪製棋盤，紅框標示上一手。\n\n"
-        "**勝負判定**\n"
-        "・任一方率先在橫線、直線或斜線連成 5 子即獲勝。\n"
-        "・棋盤填滿仍無五連則平手，系統退回下注。"
-    ),
-    "maze": (
-        "**玩法流程**\n"
-        "・每位玩家會抽到 3 條隱藏路線，每條路線都有不同通關時間。\n"
-        "・系統會取你的最快路線作為最終成績。\n\n"
-        "**勝負判定**\n"
-        "・耗時越短越好；最快抵達出口者贏得彩池。\n"
-        "・若最快時間相同，視為平手並退回下注。"
-    ),
-    "cookoff": (
-        "**玩法流程**\n"
-        "・每位玩家會抽到味覺分與創意分，各為 1-10 分。\n"
-        "・兩項加總成為料理總分，代表本場端出的菜色完成度。\n\n"
-        "**勝負判定**\n"
-        "・料理總分最高者勝出並拿下彩池。\n"
-        "・總分相同則平手，所有下注退回。"
-    ),
-    "quiz": (
-        "**玩法流程**\n"
-        "・每位玩家會獲得一個 40-100 的搶答速度分數。\n"
-        "・分數代表反應、判斷與按鈴時機的綜合表現。\n\n"
-        "**勝負判定**\n"
-        "・搶答速度最高者獲勝。\n"
-        "・若最高分相同，視為同時搶答成功並退回下注。"
-    ),
-    "sprint": (
-        "**玩法流程**\n"
-        "・每位玩家會抽到起跑反應時間與衝刺完賽時間。\n"
-        "・兩者加總為最終百米成績。\n\n"
-        "**勝負判定**\n"
-        "・總完賽時間越短越好；最快衝線者贏得彩池。\n"
-        "・若成績相同則平手，退回下注。"
-    ),
-    "space": (
-        "**玩法流程**\n"
-        "・每位玩家會抽到火箭品質與燃料倍率。\n"
-        "・兩者相乘得到本次太空航程。\n\n"
-        "**勝負判定**\n"
-        "・航程越遠越好；飛得最遠者成為本場勝者。\n"
-        "・若最遠距離相同則平手，所有下注退回。"
-    ),
-}
-
-
 def format_battle_game_list() -> str:
     return "\n".join(f"• {info['name']}: {info['desc']}" for info in BATTLE_GAMES.values())
 
@@ -924,12 +828,6 @@ def resolve_random_contest(match: BattleMatch) -> tuple[list[int], str]:
             winners = [pid for pid, hp in scores.items() if hp == best_hp]
             details.append("\n".join(["命運左輪模擬："] + logs))
             return winners, "\n".join(details)
-        elif match.game_key == "maze":
-            path_times = [random.uniform(12, 18), random.uniform(15, 22), random.uniform(10, 25)]
-            finish = min(path_times)
-            scores[uid] = finish
-            higher_is_better = False
-            details.append(f"<@{uid}> 最快路線 {finish:.2f}s")
         elif match.game_key == "cookoff":
             taste = random.randint(1, 10)
             creative = random.randint(1, 10)
@@ -2276,6 +2174,14 @@ class BattleLobbyView(View):
             file = gomoku_view.render_board_file()
             gomoku_message = await interaction.followup.send(embed=gomoku_view.build_status_embed(), file=file, view=gomoku_view)
             gomoku_view.message = gomoku_message
+        elif match.game_key == "incan_gold":
+            winners, detail_text, incan_results = resolve_incan_gold(match.participants)
+            payout_text = distribute_winnings(match, winners)
+            summary = discord.Embed(title="💎 印加寶藏結果", color=discord.Color.gold())
+            summary.add_field(name="神殿探險", value=detail_text or "--", inline=False)
+            summary.add_field(name="結算", value=payout_text, inline=False)
+            await interaction.followup.send(embed=summary, file=render_incan_scene(incan_results))
+            await finalize_battle(match, payout_text)
         else:
             winners, detail_text = resolve_random_contest(match)
             payout_text = distribute_winnings(match, winners)

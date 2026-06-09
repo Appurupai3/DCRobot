@@ -9,25 +9,7 @@ import discord
 
 from dcrbot.storage import load_data, open_account, save_data
 
-
-BATTLE_GAMES = {
-    "rps": {"name": "剪刀石頭布", "desc": "每人出拳一次，出拳克制對手即可全拿彩池，平局退回所有下注。"},
-    "blackjack": {"name": "21 點", "desc": "每人隨機抽牌，最接近 21 且不爆牌者獲勝，若全員爆牌則退回下注。"},
-    "dice_duel": {
-        "name": "貪婪骰",
-        "desc": "Farkle：6 顆骰子推進分數，1=100、5=50，三/四/五/六條得分 300/500/1500/3000，收分後突破 3000 分即決勝。",
-    },
-    "archery": {
-        "name": "命運左輪：死之交涉",
-        "desc": "3 實 2 空的彈巢，輪流選擇朝對手或自己開槍並用道具鬥智，血量歸零者輸。",
-    },
-    "gomoku": {"name": "五子棋", "desc": "雙人輪流落子，先在橫、直或斜線連成五子者贏。"},
-    "maze": {"name": "迷宮衝刺", "desc": "隨機 3 條路線耗時，耗時最短者先抵達出口。"},
-    "cookoff": {"name": "廚神對決", "desc": "每人抽到 1-10 味覺分與 1-10 創意分，總和最高獲勝。"},
-    "quiz": {"name": "快問快答", "desc": "模擬搶答速度 1-100，速度越快越可能拿下彩池。"},
-    "sprint": {"name": "百米衝刺", "desc": "每人獲得起跑反應與衝刺力，計算終點時間，最短者贏。"},
-    "space": {"name": "太空競賽", "desc": "火箭品質 50-100 與燃料 1-5 倍影響距離，最遠航程稱王。"},
-}
+from Multiplayer.games import BATTLE_GAMES
 
 
 @dataclass
