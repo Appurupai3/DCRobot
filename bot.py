@@ -77,6 +77,19 @@ def format_money_delta(delta: int) -> str:
     return f"+${delta}" if delta >= 0 else f"-${abs(delta)}"
 
 
+def _money_trend_emoji(delta: int) -> str:
+    if delta > 0:
+        return "📈"
+    if delta < 0:
+        return "📉"
+    return "➖"
+
+
+def _progress_bar(percent: float, *, size: int = 10) -> str:
+    filled = round(max(0, min(100, percent)) / 100 * size)
+    return "▰" * filled + "▱" * (size - filled)
+
+
 def _stat_win_rate(stats: dict) -> float:
     plays = int(stats.get("plays", 0) or 0)
     wins = int(stats.get("wins", 0) or 0)
@@ -86,12 +99,14 @@ def _stat_win_rate(stats: dict) -> float:
 def _format_stat_summary(game_name: str, stats: dict) -> str:
     plays = int(stats.get("plays", 0) or 0)
     wins = int(stats.get("wins", 0) or 0)
+    total_delta = int(stats.get("total_delta", 0) or 0)
     max_profit = int(stats.get("max_profit") or 0)
     max_loss = int(stats.get("max_loss") or 0)
+    win_rate = _stat_win_rate(stats)
     return (
-        f"**{game_name}**｜盈虧 {format_money_delta(int(stats.get('total_delta', 0) or 0))}｜"
-        f"獲勝 {wins}/{plays}｜勝率 {_stat_win_rate(stats):.1f}%｜"
-        f"單次最高 {format_money_delta(max_profit)}｜最大虧損 {format_money_delta(max_loss)}"
+        f"{_money_trend_emoji(total_delta)} **{game_name}**\n"
+        f"`{_progress_bar(win_rate)}` 勝率 **{win_rate:.1f}%**（{wins}/{plays}）\n"
+        f"盈虧 **{format_money_delta(total_delta)}**｜單次最高 {format_money_delta(max_profit)}｜最大虧損 {format_money_delta(max_loss)}"
     )
 
 
@@ -131,18 +146,30 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
 def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
     users = load_data()
     uid = str(user.id)
-    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_stats": {}})
+    user_data = users.get(uid, {"wallet": 0, "bank": 0})
     summary = summarize_game_records(users, uid)
     display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
+    avatar = getattr(getattr(user, "display_avatar", None), "url", None)
 
     if game_name and game_name in summary:
         stats = summary[game_name]
-        embed = discord.Embed(title=f"📊 {display_name}｜{game_name} 統計", color=discord.Color.blurple())
-        embed.add_field(name="基礎統計", value=_format_stat_summary(game_name, stats), inline=False)
+        total_delta = int(stats.get("total_delta", 0) or 0)
+        win_rate = _stat_win_rate(stats)
+        embed = discord.Embed(
+            title=f"🎮 {display_name}｜{game_name}",
+            description=f"{_money_trend_emoji(total_delta)} 這裡是單一遊戲的投資績效卡。",
+            color=discord.Color.green() if total_delta >= 0 else discord.Color.red(),
+        )
+        if avatar:
+            embed.set_thumbnail(url=avatar)
+        embed.add_field(name="🏆 勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**", inline=True)
+        embed.add_field(name="🎲 場次", value=f"**{int(stats.get('plays', 0) or 0)}** 場", inline=True)
+        embed.add_field(name="💹 累計盈虧", value=f"**{format_money_delta(total_delta)}**", inline=True)
+        embed.add_field(name="📌 摘要", value=_format_stat_summary(game_name, stats), inline=False)
         extras = _extra_stat_lines(game_name, stats)
         if extras:
-            embed.add_field(name="額外統計", value="\n".join(extras), inline=False)
-        embed.set_footer(text="只保存統計資料，不保存每場過程或每場詳細情況。")
+            embed.add_field(name="✨ 額外統計", value="\n".join(extras), inline=False)
+        embed.set_footer(text="統計資料保存在 leaderboard/info；不保存每場過程或詳細情況。")
         return embed
 
     wallet = int(user_data.get("wallet", 0) or 0)
@@ -153,30 +180,29 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     total_wins = sum(int(stats.get("wins", 0) or 0) for stats in summary.values())
     win_rate = total_wins / total_games * 100 if total_games else 0
 
-    embed = discord.Embed(title=f"📊 {display_name} 的 Portfolio", color=discord.Color.gold())
-    embed.add_field(
-        name="個人資訊",
-        value=(
-            f"錢包：${wallet}\n"
-            f"銀行：${bank}\n"
-            f"總資產：${net_worth}\n"
-            f"累計遊戲盈虧：{format_money_delta(total_delta)}\n"
-            f"獲勝場次：{total_wins}\n"
-            f"總遊戲次數：{total_games}\n"
-            f"整體勝率：{win_rate:.1f}%"
-        ),
-        inline=False,
+    embed = discord.Embed(
+        title=f"💼 {display_name} 的 Portfolio",
+        description="你的資產與遊戲績效總覽，一眼看出錢包、勝率與盈虧趨勢。",
+        color=discord.Color.gold() if total_delta >= 0 else discord.Color.orange(),
     )
+    if avatar:
+        embed.set_thumbnail(url=avatar)
+    embed.add_field(name="💵 錢包", value=f"**${wallet:,}**", inline=True)
+    embed.add_field(name="🏦 銀行", value=f"**${bank:,}**", inline=True)
+    embed.add_field(name="💎 總資產", value=f"**${net_worth:,}**", inline=True)
+    embed.add_field(name="💹 累計盈虧", value=f"{_money_trend_emoji(total_delta)} **{format_money_delta(total_delta)}**", inline=True)
+    embed.add_field(name="🎮 總遊戲次數", value=f"**{total_games}** 場", inline=True)
+    embed.add_field(name="🏆 整體勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**（{total_wins}/{total_games}）", inline=True)
 
     if summary:
         sorted_stats = sorted(summary.items(), key=lambda item: (int(item[1].get("total_delta", 0) or 0), int(item[1].get("plays", 0) or 0)), reverse=True)
-        stat_lines = [_format_stat_summary(name, stats) for name, stats in sorted_stats[:8]]
-        embed.add_field(name="所有遊戲統計總覽", value="\n".join(stat_lines)[:1024], inline=False)
-        embed.add_field(name="查看單一遊戲", value="使用下方下拉選單選擇遊戲，可查看該遊戲的基礎與額外統計。", inline=False)
+        stat_lines = [_format_stat_summary(name, stats) for name, stats in sorted_stats[:5]]
+        embed.add_field(name="🔥 熱門遊戲績效", value="\n\n".join(stat_lines)[:1024], inline=False)
+        embed.add_field(name="🔎 查看單一遊戲", value="使用下方下拉選單選擇遊戲，可查看該遊戲的基礎與額外統計。", inline=False)
     else:
-        embed.add_field(name="所有遊戲統計總覽", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
+        embed.add_field(name="🔥 熱門遊戲績效", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
 
-    embed.set_footer(text="紀錄保存在本機 bank.json 與 leaderboard/；只保存統計，不保存每場過程。")
+    embed.set_footer(text="bank.json 只保存錢包/銀行；遊戲統計保存在 leaderboard/info 與 leaderboard/。")
     return embed
 
 

@@ -12,6 +12,8 @@ from typing import Dict, Any
 BANK_DATA_PATH = "bank.json"
 LEADERBOARD_DIR = Path("leaderboard")
 LEADERBOARD_INDEX_PATH = LEADERBOARD_DIR / "index.json"
+LEADERBOARD_INFO_DIR = LEADERBOARD_DIR / "info"
+USER_INFO_PATH = LEADERBOARD_INFO_DIR / "users.json"
 MAX_GAME_RECORDS = 100
 
 
@@ -19,6 +21,12 @@ def ensure_leaderboard_dir() -> None:
     """Create the categorized leaderboard directory used for per-game records."""
 
     LEADERBOARD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_leaderboard_info_dir() -> None:
+    """Create the metadata directory used for non-money user information."""
+
+    LEADERBOARD_INFO_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _safe_leaderboard_name(game_name: str) -> str:
@@ -43,9 +51,45 @@ def _load_json_list(path: Path) -> list[Dict[str, Any]]:
 
 
 def _write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+
+def _money_only_user_data(user_data: Dict[str, Any] | None) -> Dict[str, int]:
+    """Return only the money fields allowed to be persisted in bank.json."""
+
+    if not isinstance(user_data, dict):
+        user_data = {}
+    return {
+        "wallet": int(user_data.get("wallet", 0) or 0),
+        "bank": int(user_data.get("bank", 0) or 0),
+    }
+
+
+def _load_user_info() -> Dict[str, Any]:
+    ensure_leaderboard_info_dir()
+    if not USER_INFO_PATH.exists():
+        return {}
+    try:
+        with USER_INFO_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_user_info(info: Dict[str, Any]) -> None:
+    _write_json(USER_INFO_PATH, info)
+
+
+def _ensure_user_info(info: Dict[str, Any], uid: str) -> Dict[str, Any]:
+    user_info = info.setdefault(uid, {})
+    if not isinstance(user_info, dict):
+        user_info = {}
+        info[uid] = user_info
+    user_info.setdefault("game_stats", {})
+    return user_info
 
 
 def ensure_bank_data_file() -> None:
@@ -59,19 +103,34 @@ def ensure_bank_data_file() -> None:
 
 
 def load_data() -> Dict[str, Any]:
-    """Load bank data from disk, creating the file on first startup."""
+    """Load money-only bank data from disk, creating the file on first startup."""
 
     ensure_bank_data_file()
 
     with open(BANK_DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        return {}
+
+    migrated_or_sanitized = False
+    for uid, user_data in data.items():
+        if isinstance(user_data, dict) and set(user_data) - {"wallet", "bank"}:
+            _migrate_user_info_from_legacy_bank(data, str(uid))
+            migrated_or_sanitized = True
+
+    money_data = {str(uid): _money_only_user_data(user_data) for uid, user_data in data.items()}
+    if migrated_or_sanitized:
+        save_data(money_data)
+    return money_data
 
 
 def save_data(users: Dict[str, Any]) -> None:
-    """Persist bank data to disk with indentation for readability."""
+    """Persist only wallet/bank balances to bank.json."""
 
+    money_data = {str(uid): _money_only_user_data(user_data) for uid, user_data in users.items()}
     with open(BANK_DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=4, ensure_ascii=False)
+        json.dump(money_data, f, indent=4, ensure_ascii=False)
 
 
 def _empty_game_stat(game_name: str) -> Dict[str, Any]:
@@ -147,15 +206,14 @@ def _apply_game_stat(
     return game_stat
 
 
-def _migrate_record_list_to_stats(user_data: Dict[str, Any]) -> None:
+def _migrate_record_list_to_stats(user_data: Dict[str, Any], stats: Dict[str, Any]) -> bool:
     """Convert legacy per-round rows into compact per-game statistics once."""
 
     records = user_data.get("game_records")
     if not records or user_data.get("game_records_migrated"):
-        user_data.setdefault("game_records", [])
-        return
+        return False
 
-    stats = user_data.setdefault("game_stats", {})
+    migrated = False
     for record in records:
         if not isinstance(record, dict):
             continue
@@ -167,19 +225,41 @@ def _migrate_record_list_to_stats(user_data: Dict[str, Any]) -> None:
             delta=int(record.get("delta", 0) or 0),
             played_at=str(record.get("played_at", "")),
         )
-    user_data["game_records"] = []
-    user_data["game_records_migrated"] = True
+        migrated = True
+    return migrated
+
+
+def _migrate_user_info_from_legacy_bank(users: Dict[str, Any], uid: str) -> None:
+    """Move legacy non-money fields out of bank.json and into leaderboard/info."""
+
+    user_data = users.get(uid)
+    if not isinstance(user_data, dict):
+        return
+
+    legacy_stats = user_data.get("game_stats")
+    legacy_records = user_data.get("game_records")
+    if not legacy_stats and not legacy_records:
+        return
+
+    info = _load_user_info()
+    user_info = _ensure_user_info(info, uid)
+    stats = user_info.setdefault("game_stats", {})
+    if isinstance(legacy_stats, dict):
+        for game_name, game_stat in legacy_stats.items():
+            if isinstance(game_stat, dict) and str(game_name) not in stats:
+                stats[str(game_name)] = game_stat
+    _migrate_record_list_to_stats(user_data, stats)
+    _save_user_info(info)
 
 
 def ensure_user_data(users: Dict[str, Any], uid: str) -> Dict[str, Any]:
-    """Ensure an existing user dictionary has all economy/stat keys."""
+    """Ensure an existing user dictionary has money keys only."""
 
     user_data = users.setdefault(uid, {})
-    user_data.setdefault("wallet", 0)
-    user_data.setdefault("bank", 0)
-    user_data.setdefault("game_stats", {})
-    _migrate_record_list_to_stats(user_data)
-    return user_data
+    _migrate_user_info_from_legacy_bank(users, uid)
+    money_data = _money_only_user_data(user_data)
+    users[uid] = money_data
+    return money_data
 
 
 def append_leaderboard_record(record: Dict[str, Any]) -> None:
@@ -237,9 +317,11 @@ def append_game_record(
 ) -> None:
     """Update compact game statistics; no per-round situation rows are stored."""
 
-    user_data = ensure_user_data(users, uid)
+    ensure_user_data(users, uid)
     played_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    stats = user_data.setdefault("game_stats", {})
+    info = _load_user_info()
+    user_info = _ensure_user_info(info, uid)
+    stats = user_info.setdefault("game_stats", {})
     _apply_game_stat(
         stats,
         game_name=game_name,
@@ -249,7 +331,7 @@ def append_game_record(
         played_at=played_at,
         extra_stats=extra_stats,
     )
-    user_data["game_records"] = []
+    _save_user_info(info)
 
     append_leaderboard_record(
         {
@@ -267,7 +349,7 @@ def append_game_record(
 def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[Dict[str, Any]]:
     """Return compact per-game statistics sorted by latest play time."""
 
-    stats = ensure_user_data(users, uid).get("game_stats", {})
+    stats = summarize_game_records(users, uid)
     records = [value for value in stats.values() if isinstance(value, dict)]
     records.sort(key=lambda item: str(item.get("last_played_at", "")), reverse=True)
     return records[:limit]
@@ -276,7 +358,9 @@ def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[D
 def summarize_game_records(users: Dict[str, Any], uid: str) -> dict[str, Dict[str, Any]]:
     """Return a user's compact per-game statistics for portfolio/stat views."""
 
-    stats = ensure_user_data(users, uid).get("game_stats", {})
+    ensure_user_data(users, uid)
+    info = _load_user_info()
+    stats = _ensure_user_info(info, uid).get("game_stats", {})
     return {str(game): dict(value) for game, value in stats.items() if isinstance(value, dict)}
 
 
