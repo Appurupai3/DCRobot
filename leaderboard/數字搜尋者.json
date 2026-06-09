@@ -1,0 +1,62 @@
+{
+    "437224959291686924": {
+        "game": "數字搜尋者",
+        "plays": 4,
+        "wins": 0,
+        "losses": 4,
+        "evens": 0,
+        "total_delta": 0,
+        "total_bet": 0,
+        "max_profit": null,
+        "max_loss": null,
+        "last_played_at": "2026-06-06T08:51:50+00:00",
+        "extra": {
+            "number_clue_count": 0,
+            "color_clue_count": 0,
+            "shape_clue_count": 0,
+            "random_clue_count": 0,
+            "guess_total": 0,
+            "difficulty": 0
+        }
+    },
+    "750622206438146120": {
+        "game": "數字搜尋者",
+        "plays": 2,
+        "wins": 1,
+        "losses": 1,
+        "evens": 0,
+        "total_delta": 251300,
+        "total_bet": 248700,
+        "max_profit": 255000,
+        "max_loss": -3700,
+        "last_played_at": "2026-06-08T05:42:20+00:00",
+        "extra": {
+            "number_clue_count": 5,
+            "color_clue_count": 6,
+            "shape_clue_count": 0,
+            "random_clue_count": 1,
+            "guess_total": 3,
+            "difficulty": 0
+        }
+    },
+    "727118190039269398": {
+        "game": "數字搜尋者",
+        "plays": 1,
+        "wins": 0,
+        "losses": 1,
+        "evens": 0,
+        "total_delta": -200,
+        "total_bet": 200,
+        "max_profit": null,
+        "max_loss": -200,
+        "last_played_at": "2026-06-06T07:28:49+00:00",
+        "extra": {
+            "number_clue_count": 0,
+            "color_clue_count": 1,
+            "shape_clue_count": 0,
+            "random_clue_count": 0,
+            "guess_total": 1,
+            "difficulty": 0
+        }
+    }
+}
