@@ -1960,11 +1960,8 @@ class GomokuBattleView(View):
         colors = ((40, 40, 48), (238, 238, 228)) if uid == self.players[0] else ((238, 238, 228), (40, 40, 48))
         avatar = Image.new("RGB", (128, 128), colors[0])
         draw = ImageDraw.Draw(avatar)
-        draw.ellipse((10, 10, 118, 118), fill=colors[1])
-        font = load_gomoku_font(34)
-        label = str(uid)[-2:]
-        bbox = draw.textbbox((0, 0), label, font=font)
-        draw.text(((128 - (bbox[2] - bbox[0])) / 2, (128 - (bbox[3] - bbox[1])) / 2 - 4), label, fill=colors[0], font=font)
+        draw.ellipse((42, 26, 86, 70), fill=colors[1])
+        draw.ellipse((25, 70, 103, 138), fill=colors[1])
         return avatar
 
     def parse_position(self, raw_position: str) -> tuple[int, int] | None:
@@ -2018,60 +2015,50 @@ class GomokuBattleView(View):
         embed.add_field(name="手數", value=str(self.move_count), inline=True)
         return embed
 
-    def draw_avatar_badge(
+    def draw_avatar_disc(
         self,
         image: Image.Image,
         avatar: Image.Image,
         center: tuple[int, int],
-        label: str,
-        stone_fill: tuple[int, int, int],
-        label_fill: tuple[int, int, int],
+        ring_fill: tuple[int, int, int],
     ) -> None:
         draw = ImageDraw.Draw(image)
-        size = 86
+        size = 92
         x = center[0] - size // 2
         y = center[1] - size // 2
         avatar = avatar.resize((size, size))
         mask = Image.new("L", (size, size), 0)
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.ellipse((0, 0, size - 1, size - 1), fill=255)
-        draw.ellipse((x - 6, y - 6, x + size + 6, y + size + 6), fill=stone_fill, outline=(70, 40, 20), width=3)
+        draw.ellipse((x - 7, y - 7, x + size + 7, y + size + 7), fill=ring_fill, outline=(70, 40, 20), width=4)
         image.paste(avatar, (x, y), mask)
-        font = load_gomoku_font(18)
-        bbox = draw.textbbox((0, 0), label, font=font)
-        draw.rounded_rectangle(
-            (center[0] - (bbox[2] - bbox[0]) / 2 - 12, y + size + 8, center[0] + (bbox[2] - bbox[0]) / 2 + 12, y + size + 34),
-            radius=10,
-            fill=(255, 239, 196),
-            outline=(120, 78, 34),
-            width=2,
-        )
-        draw.text((center[0] - (bbox[2] - bbox[0]) / 2, y + size + 9), label, fill=label_fill, font=font)
+
 
     def render_board_file(self) -> discord.File:
         board_extent = (GOMOKU_BOARD_SIZE - 1) * GOMOKU_CELL_SIZE
         board_left = 58
-        board_top = 126
+        board_top = 134
         board_right = board_left + board_extent
         board_bottom = board_top + board_extent
-        width = board_right + 176
+        width = board_right + 58
         height = board_bottom + 38
         image = Image.new("RGB", (width, height), (238, 184, 104))
         draw = ImageDraw.Draw(image)
         font = load_gomoku_font(16)
-        vs_font = load_gomoku_font(28)
+        vs_font = load_gomoku_font(44)
 
         black_avatar = self.avatar_images.get(self.players[0], self.build_avatar_placeholder(self.players[0]))
         white_avatar = self.avatar_images.get(self.players[1], self.build_avatar_placeholder(self.players[1]))
-        self.draw_avatar_badge(image, black_avatar, ((board_left + board_right) // 2, 48), "黑棋", (24, 24, 24), (25, 25, 25))
-        self.draw_avatar_badge(image, white_avatar, (board_right + 108, (board_top + board_bottom) // 2), "白棋", (245, 245, 235), (50, 50, 45))
+        avatar_y = 58
+        self.draw_avatar_disc(image, black_avatar, (board_left + 72, avatar_y), (24, 24, 24))
+        self.draw_avatar_disc(image, white_avatar, (board_right - 72, avatar_y), (245, 245, 235))
 
         vs_text = "VS"
-        vs_bbox = draw.textbbox((0, 0), vs_text, font=vs_font)
-        vs_x = board_right + 108 - (vs_bbox[2] - vs_bbox[0]) / 2
-        vs_y = board_top + 12
-        draw.text((vs_x + 2, vs_y + 2), vs_text, fill=(111, 59, 24), font=vs_font)
-        draw.text((vs_x, vs_y), vs_text, fill=(255, 248, 218), font=vs_font)
+        vs_bbox = draw.textbbox((0, 0), vs_text, font=vs_font, stroke_width=2)
+        vs_x = (width - (vs_bbox[2] - vs_bbox[0])) / 2
+        vs_y = avatar_y - (vs_bbox[3] - vs_bbox[1]) / 2 - 4
+        draw.text((vs_x + 3, vs_y + 3), vs_text, fill=(111, 59, 24), font=vs_font, stroke_width=2, stroke_fill=(111, 59, 24))
+        draw.text((vs_x, vs_y), vs_text, fill=(255, 248, 218), font=vs_font, stroke_width=2, stroke_fill=(70, 40, 20))
 
         grid_color = (79, 45, 20)
         for idx in range(GOMOKU_BOARD_SIZE):

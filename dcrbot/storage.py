@@ -31,6 +31,14 @@ def _safe_leaderboard_name(game_name: str) -> str:
     return (cleaned or "unknown_game").replace(" ", "_")[:80]
 
 
+
+def _is_multiplayer_game_stat(game_name: str, value: Dict[str, Any] | None = None) -> bool:
+    """Return True when a compact stat belongs to multiplayer battles hidden from bank views."""
+
+    stat_game = str((value or {}).get("game", game_name))
+    return game_name.startswith("多人遊戲：") or stat_game.startswith("多人遊戲：")
+
+
 def _load_json_list(path: Path) -> list[Dict[str, Any]]:
     if not path.exists():
         return []
@@ -268,7 +276,11 @@ def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[D
     """Return compact per-game statistics sorted by latest play time."""
 
     stats = ensure_user_data(users, uid).get("game_stats", {})
-    records = [value for value in stats.values() if isinstance(value, dict)]
+    records = [
+        value
+        for game_name, value in stats.items()
+        if isinstance(value, dict) and not _is_multiplayer_game_stat(str(game_name), value)
+    ]
     records.sort(key=lambda item: str(item.get("last_played_at", "")), reverse=True)
     return records[:limit]
 
@@ -277,7 +289,11 @@ def summarize_game_records(users: Dict[str, Any], uid: str) -> dict[str, Dict[st
     """Return a user's compact per-game statistics for portfolio/stat views."""
 
     stats = ensure_user_data(users, uid).get("game_stats", {})
-    return {str(game): dict(value) for game, value in stats.items() if isinstance(value, dict)}
+    return {
+        str(game): dict(value)
+        for game, value in stats.items()
+        if isinstance(value, dict) and not _is_multiplayer_game_stat(str(game), value)
+    }
 
 
 def get_profit_loss_records(users: Dict[str, Any], uid: str, limit: int = 5) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
