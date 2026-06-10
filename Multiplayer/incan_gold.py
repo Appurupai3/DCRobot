@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from io import BytesIO
+import os
+from pathlib import Path
 import random
 from typing import Iterable
 
@@ -19,13 +21,6 @@ HAZARD_CARDS = [
 ]
 HAZARD_LABELS = {key: label for key, label, _name in HAZARD_CARDS}
 HAZARD_NAMES = {key: name for key, _label, name in HAZARD_CARDS}
-HAZARD_EN_NAMES = {
-    "spider": "Spider",
-    "snake": "Snake",
-    "mummy": "Mummy",
-    "fire": "Fire",
-    "rockslide": "Rock",
-}
 GEM_VALUES = [1, 2, 3, 4, 5, 5, 7, 7, 8, 9, 10, 11, 11, 13, 13, 14, 15, 17]
 ARTIFACT_COUNT = 5
 ARTIFACT_VALUE = 10
@@ -77,12 +72,12 @@ class IncanGoldGame:
         for player in self.players.values():
             player.pack = 0
             player.active = True
-        self.log.append(f"Round {self.round_number}: dungeon entrance opens.")
+        self.log.append(f"第 {self.round_number} 回合：地下城入口開啟。")
 
     def return_to_tent(self, leavers: Iterable[int]) -> str:
         leaver_list = [uid for uid in leavers if self.players[uid].active]
         if not leaver_list:
-            return "No explorer returned to camp."
+            return "沒有人回到帳篷。"
         share = self.floor_gems // len(leaver_list)
         remainder = self.floor_gems % len(leaver_list)
         self.floor_gems = remainder
@@ -91,14 +86,14 @@ class IncanGoldGame:
             player.banked += player.pack + share
             player.pack = 0
             player.active = False
-        return f"{len(leaver_list)} explorer(s) returned: each took floor {share}, left {remainder}."
+        return f"{len(leaver_list)} 人回到帳篷：每人分到地上寶石 {share}，留下 {remainder}。"
 
     def draw_next_card(self) -> str:
         if not self.active_players:
-            return "No active explorers remain."
+            return "沒有玩家留在地下城。"
         if not self.deck:
-            self.end_round("Deck empty.")
-            return "Deck empty; round ends."
+            self.end_round("牌庫耗盡。")
+            return "牌庫耗盡，本回合結束。"
 
         card_type, label, value = self.deck.pop(0)
         if card_type == "gem":
@@ -111,12 +106,12 @@ class IncanGoldGame:
             self.floor_gems += remainder
             card_label = f"G{gems}"
             self.path_cards.append(card_label)
-            message = f"Gem {gems}: each active explorer gains {share}, floor keeps {remainder}."
+            message = f"寶石 {gems}：每位場上玩家分到 {share}，地上留下 {remainder}。"
         elif card_type == "artifact":
             self.floor_gems += ARTIFACT_VALUE
             card_label = f"A{ARTIFACT_VALUE}"
             self.path_cards.append(card_label)
-            message = f"Artifact: {ARTIFACT_VALUE} treasure added to the floor."
+            message = f"神器：地上新增 {ARTIFACT_VALUE} 顆寶石。"
         else:
             hazard_key = str(value)
             card_label = label
@@ -129,20 +124,20 @@ class IncanGoldGame:
                 self.floor_gems = 0
                 self.removed_hazards.append(hazard_key)
                 self.awaiting_hazard_confirm = True
-                self.pending_round_end_reason = f"Duplicate hazard {label}: active explorers bust and lose carried gems."
+                self.pending_round_end_reason = f"重複怪物 {HAZARD_NAMES.get(hazard_key, label)}：場上玩家被解決，背包寶石歸零。"
                 message = self.pending_round_end_reason
                 self.log.append(message)
                 return message
             self.hazards_seen.add(hazard_key)
-            message = f"Hazard {label}: danger increases."
+            message = f"怪物 {HAZARD_NAMES.get(hazard_key, label)} 出現，危險升高。"
         self.log.append(message)
         return message
 
     def resolve_choices(self, choices: dict[int, str]) -> str:
         if self.finished:
-            return "Game already finished."
+            return "遊戲已經結束。"
         if self.awaiting_hazard_confirm:
-            return "Waiting for a busted explorer to confirm the next round."
+            return "等待被怪物解決的玩家確認下一場。"
         leavers = [uid for uid, choice in choices.items() if choice == "return"]
         messages = []
         if leavers:
@@ -151,8 +146,8 @@ class IncanGoldGame:
         if advancers:
             messages.append(self.draw_next_card())
         if not self.active_players and not self.finished and not self.awaiting_hazard_confirm:
-            self.end_round("All explorers are back at camp.")
-            messages.append("Round ended because nobody remains inside.")
+            self.end_round("所有玩家都回到帳篷。")
+            messages.append("地下城內沒有玩家，本回合結束。")
         return "\n".join(message for message in messages if message)
 
     def end_round(self, reason: str) -> None:
@@ -167,15 +162,15 @@ class IncanGoldGame:
 
     def confirm_hazard_round_end(self, uid: int) -> str:
         if not self.awaiting_hazard_confirm:
-            return "No hazard confirmation is pending."
+            return "目前沒有等待確認的怪物事件。"
         if uid not in self.last_busted_players:
-            return "Only an explorer defeated by the monster may confirm the next round."
-        reason = self.pending_round_end_reason or "Hazard confirmed."
+            return "只有被怪物解決的玩家可以確認下一場。"
+        reason = self.pending_round_end_reason or "怪物事件已確認。"
         self.awaiting_hazard_confirm = False
         self.pending_round_end_reason = None
         self.last_busted_players = []
         self.end_round(reason)
-        return "Hazard confirmed; moving to the next round."
+        return "已確認怪物事件，進入下一場。"
 
     def winners(self) -> list[int]:
         best_score = max(player.banked for player in self.players.values()) if self.players else 0
@@ -189,7 +184,10 @@ class IncanGoldGame:
 
 
 def load_scene_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
-    candidates = []
+    project_font_dir = Path("Resources") / "fonts"
+    env_font = os.getenv("DCRBOT_CJK_FONT")
+    candidates = [path for path in [env_font] if path]
+    candidates.extend(str(path) for path in project_font_dir.glob("*.tt*") if path.is_file())
     if bold:
         candidates.extend(
             [
@@ -247,6 +245,17 @@ def build_incan_deck() -> list[Card]:
 def draw_text_center(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
     bbox = draw.textbbox((0, 0), text, font=font)
     draw.text((xy[0] - (bbox[2] - bbox[0]) / 2, xy[1] - (bbox[3] - bbox[1]) / 2), text, font=font, fill=fill)
+
+
+def format_card_label(card: str) -> str:
+    hazard_icons = {"SP": "🕷️蜘蛛", "SN": "🐍毒蛇", "MU": "🗿木乃伊", "FI": "🔥火災", "RO": "🪨落石"}
+    if card in hazard_icons:
+        return hazard_icons[card]
+    if card.startswith("G"):
+        return f"💎{card[1:]}"
+    if card.startswith("A"):
+        return f"✨{card[1:]}"
+    return card
 
 
 def build_avatar_placeholder(uid: int) -> Image.Image:
@@ -314,7 +323,7 @@ def draw_card_icon(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], ca
         draw_text_center(draw, (cx, cy + 1), card[1:], font, (20, 42, 56))
         return
     if is_hazard:
-        draw_text_center(draw, (cx, y2 - 10), card, font, text_fill)
+        return
 
 
 def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | None = None, display_names: dict[int, str] | None = None) -> discord.File:
@@ -329,15 +338,15 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
     card_font = load_scene_font(15, bold=True)
     score_font = load_scene_font(22, bold=True)
 
-    title = safe_label(title_font, "印加寶藏", "INCAN GOLD")
-    entrance = safe_label(font, "地下城入口", "Dungeon Entrance")
-    active_title = safe_label(font, "場上玩家", "ACTIVE")
-    floor_label = safe_label(font, "地上寶石", "Floor gems")
-    hazard_label = safe_label(font, "已出現災難", "Hazards seen")
-    removed_title = safe_label(font, "移除怪物", "REMOVED")
-    choose_label = safe_label(font, "選擇：前進 或 回帳篷", "Choose: ADVANCE or TENT")
-    tent_label = safe_label(small_font, "帳篷", "Tent")
-    pack_label = safe_label(small_font, "背包", "Pack")
+    title = safe_label(title_font, "印加寶藏", "印加寶藏")
+    entrance = safe_label(font, "地下城入口", "地下城入口")
+    active_title = safe_label(font, "場上玩家", "場上玩家")
+    floor_label = safe_label(font, "地上寶石", "地上寶石")
+    hazard_label = safe_label(font, "已出現怪物", "已出現怪物")
+    removed_title = safe_label(font, "移除怪物", "移除怪物")
+    choose_label = safe_label(font, "選擇：前進 或 回帳篷", "選擇：前進 或 回帳篷")
+    tent_label = safe_label(small_font, "帳篷", "帳篷")
+    pack_label = safe_label(small_font, "背包", "背包")
 
     # Jungle ruin background and temple entrance.
     draw.rectangle((0, 0, width, height), fill=(15, 42, 28))
@@ -363,14 +372,14 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         x = 50 + (idx % 2) * 92
         y = 154 + (idx // 2) * 96
         draw_avatar(image, avatars.get(uid, build_avatar_placeholder(uid)), x, y, True)
-        draw.text((x - 8, y + 58), safe_label(small_font, display_names.get(uid, f"P{idx + 1}"), f"P{idx + 1}")[:10], font=small_font, fill=(221, 221, 165))
+        draw.text((x - 8, y + 58), safe_label(small_font, display_names.get(uid, f"玩家{idx + 1}"), f"玩家{idx + 1}")[:10], font=small_font, fill=(221, 221, 165))
 
     # Center path panel.
     draw.rounded_rectangle((342, 196, 978, 384), radius=20, fill=(20, 55, 38), outline=(176, 193, 95), width=3)
     draw.text((366, 218), f"{floor_label}: {game.floor_gems}", font=font, fill=(123, 235, 255))
     draw.text((602, 218), f"{hazard_label}: {len(game.hazards_seen)}", font=font, fill=(255, 175, 142))
     if game.awaiting_hazard_confirm:
-        warn = safe_label(font, "怪物解決玩家！請任一被解決玩家按確認。", "Monster attack! A busted explorer must confirm.")
+        warn = safe_label(font, "怪物解決玩家！請任一被解決玩家按確認。", "怪物解決玩家！請任一被解決玩家按確認。")
         draw_text_center(draw, (660, 255), warn, font, (255, 117, 101))
     elif not game.path_cards:
         draw_text_center(draw, (660, 294), choose_label, font, (238, 235, 167))
@@ -387,7 +396,7 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         x = 1044 + (idx % 2) * 68
         y = 154 + (idx // 2) * 68
         draw_card_icon(draw, (x, y, x + 54, y + 42), label, card_font)
-        name = safe_label(small_font, HAZARD_NAMES.get(hazard_key, ""), HAZARD_EN_NAMES.get(hazard_key, hazard_key))
+        name = safe_label(small_font, HAZARD_NAMES.get(hazard_key, ""), HAZARD_NAMES.get(hazard_key, hazard_key))
         draw.text((x - 2, y + 46), name[:8], font=small_font, fill=(221, 221, 165))
 
     # Bottom score board for up to 8 players.
@@ -404,15 +413,15 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         y2 = y1 + panel_h
         fill = (26, 69, 46) if player.active else (38, 54, 43)
         draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=fill, outline=(142, 164, 86), width=2)
-        draw.text((x1 + 12, y1 + 10), safe_label(small_font, display_names.get(uid, f"P{idx + 1}"), f"P{idx + 1}")[:18], font=small_font, fill=(236, 231, 177))
+        draw.text((x1 + 12, y1 + 10), safe_label(small_font, display_names.get(uid, f"玩家{idx + 1}"), f"玩家{idx + 1}")[:18], font=small_font, fill=(236, 231, 177))
         draw.text((x1 + 12, y1 + 36), f"{tent_label} {player.banked}", font=small_font, fill=(129, 230, 150))
         draw.text((x1 + 118, y1 + 36), f"{pack_label} {player.pack}", font=small_font, fill=(104, 233, 255))
-        status = "IN" if player.active else "OUT"
+        status = safe_label(score_font, "場上", "場上") if player.active else safe_label(score_font, "帳篷", "帳篷")
         if game.awaiting_hazard_confirm and uid in game.last_busted_players:
-            status = "KO"
-        draw.text((x2 - 54, y1 + 22), status, font=score_font, fill=(129, 230, 150) if player.active else (255, 117, 101) if status == "KO" else (175, 160, 138))
+            status = safe_label(score_font, "倒下", "倒下")
+        draw.text((x2 - 54, y1 + 22), status, font=score_font, fill=(129, 230, 150) if player.active else (255, 117, 101) if game.awaiting_hazard_confirm and uid in game.last_busted_players else (175, 160, 138))
 
-    last_log = game.log[-1] if game.log else "Choose your action."
+    last_log = game.log[-1] if game.log else "請選擇行動。"
     draw.rounded_rectangle((300, 694, 1090, 756), radius=14, fill=(20, 55, 38), outline=(176, 193, 95), width=2)
     draw.text((322, 714), last_log[:98], font=font, fill=(238, 235, 167))
 

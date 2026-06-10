@@ -11,7 +11,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES, get_battle_game_max_players
-from Multiplayer.incan_gold import IncanGoldGame, build_avatar_placeholder as build_incan_avatar_placeholder, render_incan_scene
+from Multiplayer.incan_gold import IncanGoldGame, build_avatar_placeholder as build_incan_avatar_placeholder, format_card_label, render_incan_scene
 
 from dcrbot.battle import (
     BATTLE_GAMES,
@@ -2137,12 +2137,20 @@ class IncanGoldBattleView(View):
         )
         embed.add_field(name="洞內活人", value=active_mentions, inline=False)
         embed.add_field(name="地上寶石", value=str(self.game.floor_gems), inline=True)
-        embed.add_field(name="已選擇", value=f"{len(self.choices)}/{len(self.game.active_players)}", inline=True)
+        if self.choices:
+            choice_lines = []
+            for uid, choice in self.choices.items():
+                choice_name = "前進" if choice == "advance" else "回帳篷"
+                choice_lines.append(f"{self.display_names.get(uid, f'<@{uid}>')}：{choice_name}")
+            choice_text = "\n".join(choice_lines)
+        else:
+            choice_text = "尚未有人選擇"
+        embed.add_field(name=f"已選擇 {len(self.choices)}/{len(self.game.active_players)}", value=choice_text[:1024], inline=True)
         if self.game.awaiting_hazard_confirm:
             busted_mentions = "、".join(f"<@{uid}>" for uid in self.game.last_busted_players) or "剛剛在洞內的玩家"
             embed.add_field(name="怪物襲擊", value=f"{busted_mentions} 任一人按『確認下一場』後進入下一回合。", inline=False)
         if self.game.path_cards:
-            embed.add_field(name="目前路徑", value=" ".join(self.game.path_cards[-12:]), inline=False)
+            embed.add_field(name="目前路徑", value=" ".join(format_card_label(card) for card in self.game.path_cards[-12:]), inline=False)
         return embed
 
     def render_file(self) -> discord.File:
@@ -2179,17 +2187,17 @@ class IncanGoldBattleView(View):
             await interaction.response.send_message("⚠️ 你已經回到帳篷或本回合出局，請等待下一回合。", ephemeral=True)
             return
         self.choices[interaction.user.id] = choice
-        label = "前進" if choice == "advance" else "回到帳篷"
-        await interaction.response.send_message(f"✅ 已選擇：{label}", ephemeral=True)
         if len(self.choices) >= len(self.game.active_players):
             self.game.resolve_choices(self.choices)
             self.choices = {}
+            self.sync_controls()
             if self.game.finished:
+                await interaction.response.defer(thinking=False)
                 await self.finish_game(self.game.winners(), self.game.result_text())
             else:
-                await self.refresh_message()
+                await interaction.response.edit_message(embed=self.build_status_embed(), attachments=[self.render_file()], view=self)
         else:
-            await self.refresh_message()
+            await interaction.response.edit_message(embed=self.build_status_embed(), attachments=[self.render_file()], view=self)
 
     async def finish_game(self, winners: list[int], detail_text: str) -> None:
         for child in self.children:
