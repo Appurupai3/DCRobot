@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES, get_battle_game_max_players
-from Multiplayer.incan_gold import render_incan_scene, resolve_incan_gold
+from Multiplayer.incan_gold import IncanGoldGame, build_avatar_placeholder as build_incan_avatar_placeholder, render_incan_scene
 
 from dcrbot.battle import (
     BATTLE_GAMES,
@@ -2079,6 +2079,114 @@ class GomokuBattleView(View):
         await self.finish_game([winner], f"<@{interaction.user.id}> 投降，<@{winner}> 獲勝。")
 
 
+class IncanGoldBattleView(View):
+    def __init__(self, match: BattleMatch):
+        super().__init__(timeout=900)
+        self.match = match
+        self.game = IncanGoldGame(match.participants[:])
+        self.message: Optional[discord.Message] = None
+        self.choices: dict[int, str] = {}
+        self.avatar_images: dict[int, Image.Image] = {}
+
+    async def load_player_avatars(self) -> None:
+        for uid in self.game.participants:
+            if uid in self.avatar_images:
+                continue
+            user = bot.get_user(uid)
+            if user is None:
+                try:
+                    user = await bot.fetch_user(uid)
+                except Exception:
+                    user = None
+            if user is None:
+                self.avatar_images[uid] = build_incan_avatar_placeholder(uid)
+                continue
+            try:
+                avatar_bytes = await user.display_avatar.replace(size=96, format="png").read()
+                avatar = Image.open(BytesIO(avatar_bytes)).convert("RGB")
+            except Exception:
+                avatar = build_incan_avatar_placeholder(uid)
+            self.avatar_images[uid] = avatar
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.game.participants:
+            await interaction.response.send_message("❌ 你不是這局印加寶藏的玩家。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if not self.match.active:
+            return
+        winners = self.game.winners()
+        await self.finish_game(winners, "印加寶藏逾時，依目前帳篷寶藏結算。")
+
+    def build_status_embed(self) -> discord.Embed:
+        active_mentions = "、".join(f"<@{uid}>" for uid in self.game.active_players) or "無"
+        embed = discord.Embed(
+            title=f"💎 印加寶藏｜第 {self.game.round_number}/5 回合",
+            description=(
+                "每個回合所有活人選擇：**前進** 或 **回到帳篷**。\n"
+                "前進會翻 1 張卡；寶石會平均分給洞內活人，餘數留在地上。\n"
+                "回帳篷會把背包寶石帶回，並與同時回去的人平分地上寶石。"
+            ),
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="洞內活人", value=active_mentions, inline=False)
+        embed.add_field(name="地上寶石", value=str(self.game.floor_gems), inline=True)
+        embed.add_field(name="已選擇", value=f"{len(self.choices)}/{len(self.game.active_players)}", inline=True)
+        if self.game.path_cards:
+            embed.add_field(name="目前路徑", value=" ".join(self.game.path_cards[-12:]), inline=False)
+        return embed
+
+    def render_file(self) -> discord.File:
+        return render_incan_scene(self.game, self.avatar_images)
+
+    async def refresh_message(self) -> None:
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed(), attachments=[self.render_file()], view=self)
+
+    async def record_choice(self, interaction: discord.Interaction, choice: str) -> None:
+        if not self.match.active or self.game.finished:
+            await interaction.response.send_message("❌ 這局印加寶藏已結束。", ephemeral=True)
+            return
+        if interaction.user.id not in self.game.active_players:
+            await interaction.response.send_message("⚠️ 你已經回到帳篷或本回合出局，請等待下一回合。", ephemeral=True)
+            return
+        self.choices[interaction.user.id] = choice
+        label = "前進" if choice == "advance" else "回到帳篷"
+        await interaction.response.send_message(f"✅ 已選擇：{label}", ephemeral=True)
+        if len(self.choices) >= len(self.game.active_players):
+            self.game.resolve_choices(self.choices)
+            self.choices = {}
+            if self.game.finished:
+                await self.finish_game(self.game.winners(), self.game.result_text())
+            else:
+                await self.refresh_message()
+        else:
+            await self.refresh_message()
+
+    async def finish_game(self, winners: list[int], detail_text: str) -> None:
+        for child in self.children:
+            child.disabled = True
+        payout_text = distribute_winnings(self.match, winners)
+        self.match.active = False
+        result_embed = discord.Embed(title="💎 印加寶藏結果", color=discord.Color.gold())
+        result_embed.add_field(name="探險結算", value=detail_text or self.game.result_text(), inline=False)
+        result_embed.add_field(name="結算", value=payout_text, inline=False)
+        if self.message:
+            await self.message.edit(embed=self.build_status_embed(), attachments=[self.render_file()], view=None)
+            await self.message.channel.send(embed=result_embed)
+        await finalize_battle(self.match, payout_text)
+
+    @discord.ui.button(label="前進", style=discord.ButtonStyle.primary, emoji="➡️")
+    async def advance(self, interaction: discord.Interaction, button: Button):
+        await self.record_choice(interaction, "advance")
+
+    @discord.ui.button(label="回到帳篷", style=discord.ButtonStyle.success, emoji="⛺")
+    async def return_to_tent(self, interaction: discord.Interaction, button: Button):
+        await self.record_choice(interaction, "return")
+
+
 class BattleLobbyView(View):
     def __init__(self, match_id: int):
         super().__init__(timeout=3600)
@@ -2182,13 +2290,10 @@ class BattleLobbyView(View):
             gomoku_message = await interaction.followup.send(embed=gomoku_view.build_status_embed(), file=file, view=gomoku_view)
             gomoku_view.message = gomoku_message
         elif match.game_key == "incan_gold":
-            winners, detail_text, incan_results = resolve_incan_gold(match.participants)
-            payout_text = distribute_winnings(match, winners)
-            summary = discord.Embed(title="💎 印加寶藏結果", color=discord.Color.gold())
-            summary.add_field(name="神殿探險", value=detail_text or "--", inline=False)
-            summary.add_field(name="結算", value=payout_text, inline=False)
-            await interaction.followup.send(embed=summary, file=render_incan_scene(incan_results))
-            await finalize_battle(match, payout_text)
+            incan_view = IncanGoldBattleView(match)
+            await incan_view.load_player_avatars()
+            incan_message = await interaction.followup.send(embed=incan_view.build_status_embed(), file=incan_view.render_file(), view=incan_view)
+            incan_view.message = incan_message
         else:
             winners, detail_text = resolve_random_contest(match)
             payout_text = distribute_winnings(match, winners)
