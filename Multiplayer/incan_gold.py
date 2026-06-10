@@ -184,10 +184,11 @@ class IncanGoldGame:
 
 
 def load_scene_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
-    project_font_dir = Path("Resources") / "fonts"
+    project_font_dirs = [Path("font"), Path("Resources") / "fonts"]
     env_font = os.getenv("DCRBOT_CJK_FONT")
-    candidates = [path for path in [env_font] if path]
-    candidates.extend(str(path) for path in project_font_dir.glob("*.tt*") if path.is_file())
+    candidates = [path for path in [env_font, "font/GenSekiGothic2.ttc"] if path]
+    for project_font_dir in project_font_dirs:
+        candidates.extend(str(path) for path in project_font_dir.glob("*.tt*") if path.is_file())
     if bold:
         candidates.extend(
             [
@@ -209,7 +210,8 @@ def load_scene_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     for font_path in candidates:
         try:
             font = ImageFont.truetype(font_path, size)
-            setattr(font, "_supports_cjk", any(token in font_path.lower() for token in ("cjk", "wqy", "sourcehan")))
+            lowered_path = font_path.lower()
+            setattr(font, "_supports_cjk", any(token in lowered_path for token in ("cjk", "wqy", "sourcehan", "genseki", "gothic")))
             return font
         except OSError:
             continue
@@ -227,9 +229,9 @@ def font_supports_text(font: ImageFont.ImageFont, text: str) -> bool:
 
 
 def safe_label(font: ImageFont.ImageFont, zh: str, fallback: str) -> str:
-    if any(ord(char) > 127 for char in zh) and not getattr(font, "_supports_cjk", False):
-        return fallback
-    return zh if font_supports_text(font, zh) else fallback
+    if font_supports_text(font, zh):
+        return zh
+    return fallback
 
 
 def build_incan_deck() -> list[Card]:
