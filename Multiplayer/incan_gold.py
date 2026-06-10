@@ -317,10 +317,11 @@ def draw_card_icon(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], ca
         draw_text_center(draw, (cx, y2 - 10), card, font, text_fill)
 
 
-def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | None = None) -> discord.File:
+def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | None = None, display_names: dict[int, str] | None = None) -> discord.File:
     avatars = avatars or {}
+    display_names = display_names or {}
     width, height = 1220, 790
-    image = Image.new("RGB", (width, height), (29, 22, 18))
+    image = Image.new("RGB", (width, height), (14, 35, 24))
     draw = ImageDraw.Draw(image)
     title_font = load_scene_font(42, bold=True)
     font = load_scene_font(20)
@@ -338,52 +339,56 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
     tent_label = safe_label(small_font, "帳篷", "Tent")
     pack_label = safe_label(small_font, "背包", "Pack")
 
-    # Background and temple entrance.
-    draw.rectangle((0, 0, width, height), fill=(37, 28, 21))
-    for y in range(0, height, 22):
-        shade = 30 + (y // 22) % 2 * 5
-        draw.rectangle((0, y, width, y + 11), fill=(shade, 24, 20))
-    draw.polygon((278, 166, 660, 44, 1042, 166), fill=(132, 86, 43), outline=(231, 171, 83))
-    draw.rectangle((318, 166, 1002, 655), fill=(92, 61, 38), outline=(231, 171, 83), width=5)
+    # Jungle ruin background and temple entrance.
+    draw.rectangle((0, 0, width, height), fill=(15, 42, 28))
+    for y in range(0, height, 26):
+        shade = 24 + (y // 26) % 2 * 8
+        draw.rectangle((0, y, width, y + 13), fill=(shade, 62, 36))
+    for x in range(-80, width, 150):
+        draw.ellipse((x, -70, x + 230, 135), fill=(29, 87, 47))
+        draw.ellipse((x + 55, 25, x + 265, 210), fill=(19, 73, 41))
+    draw.polygon((278, 166, 660, 44, 1042, 166), fill=(94, 111, 58), outline=(205, 181, 95))
+    draw.rectangle((318, 166, 1002, 655), fill=(64, 83, 55), outline=(205, 181, 95), width=5)
     for x in range(342, 988, 86):
-        draw.rectangle((x, 166, x + 38, 655), fill=(118, 79, 49), outline=(64, 43, 31), width=2)
-    draw.rectangle((548, 278, 772, 655), fill=(24, 19, 17), outline=(219, 180, 101), width=4)
-    draw_text_center(draw, (660, 84), title, title_font, (255, 225, 141))
-    draw_text_center(draw, (660, 126), f"{entrance}  {game.round_number}/{TOTAL_ROUNDS}", font, (244, 196, 110))
+        draw.rectangle((x, 166, x + 38, 655), fill=(82, 103, 65), outline=(37, 55, 36), width=2)
+        draw.line((x + 5, 185, x + 26, 630), fill=(35, 89, 45), width=3)
+    draw.rectangle((548, 278, 772, 655), fill=(14, 27, 22), outline=(205, 181, 95), width=4)
+    draw_text_center(draw, (660, 84), title, title_font, (255, 237, 151))
+    draw_text_center(draw, (660, 126), f"{entrance}  {game.round_number}/{TOTAL_ROUNDS}", font, (232, 219, 142))
 
     # Left active avatars.
-    draw.rounded_rectangle((24, 86, 258, 665), radius=22, fill=(47, 35, 28), outline=(219, 160, 77), width=3)
-    draw.text((48, 108), active_title, font=font, fill=(255, 230, 171))
+    draw.rounded_rectangle((24, 86, 258, 665), radius=22, fill=(22, 63, 41), outline=(176, 193, 95), width=3)
+    draw.text((48, 108), active_title, font=font, fill=(238, 235, 167))
     for idx, uid in enumerate(game.active_players[:8]):
         x = 50 + (idx % 2) * 92
         y = 154 + (idx // 2) * 96
         draw_avatar(image, avatars.get(uid, build_avatar_placeholder(uid)), x, y, True)
-        draw.text((x, y + 58), f"...{str(uid)[-4:]}", font=small_font, fill=(226, 205, 168))
+        draw.text((x - 8, y + 58), safe_label(small_font, display_names.get(uid, f"P{idx + 1}"), f"P{idx + 1}")[:10], font=small_font, fill=(221, 221, 165))
 
     # Center path panel.
-    draw.rounded_rectangle((342, 196, 978, 384), radius=20, fill=(43, 32, 25), outline=(219, 160, 77), width=3)
+    draw.rounded_rectangle((342, 196, 978, 384), radius=20, fill=(20, 55, 38), outline=(176, 193, 95), width=3)
     draw.text((366, 218), f"{floor_label}: {game.floor_gems}", font=font, fill=(123, 235, 255))
     draw.text((602, 218), f"{hazard_label}: {len(game.hazards_seen)}", font=font, fill=(255, 175, 142))
     if game.awaiting_hazard_confirm:
         warn = safe_label(font, "怪物解決玩家！請任一被解決玩家按確認。", "Monster attack! A busted explorer must confirm.")
         draw_text_center(draw, (660, 255), warn, font, (255, 117, 101))
     elif not game.path_cards:
-        draw_text_center(draw, (660, 294), choose_label, font, (255, 229, 170))
+        draw_text_center(draw, (660, 294), choose_label, font, (238, 235, 167))
     for idx, card in enumerate(game.path_cards[-18:]):
         cx = 366 + (idx % 9) * 66
         cy = 262 + (idx // 9) * 54
         draw_card_icon(draw, (cx, cy, cx + 52, cy + 38), card, card_font)
 
     # Right removed monsters.
-    draw.rounded_rectangle((1018, 86, 1190, 384), radius=20, fill=(47, 35, 28), outline=(219, 160, 77), width=3)
-    draw.text((1040, 108), removed_title, font=font, fill=(255, 230, 171))
+    draw.rounded_rectangle((1018, 86, 1190, 384), radius=20, fill=(22, 63, 41), outline=(176, 193, 95), width=3)
+    draw.text((1040, 108), removed_title, font=font, fill=(238, 235, 167))
     for idx, hazard_key in enumerate(game.removed_hazards[-5:]):
         label = HAZARD_LABELS.get(hazard_key, "??")
         x = 1044 + (idx % 2) * 68
         y = 154 + (idx // 2) * 68
         draw_card_icon(draw, (x, y, x + 54, y + 42), label, card_font)
         name = safe_label(small_font, HAZARD_NAMES.get(hazard_key, ""), HAZARD_EN_NAMES.get(hazard_key, hazard_key))
-        draw.text((x - 2, y + 46), name[:8], font=small_font, fill=(226, 205, 168))
+        draw.text((x - 2, y + 46), name[:8], font=small_font, fill=(221, 221, 165))
 
     # Bottom score board for up to 8 players.
     panel_w, panel_h = 256, 78
@@ -397,9 +402,9 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         y1 = start_y + row * (panel_h + gap_y)
         x2 = x1 + panel_w
         y2 = y1 + panel_h
-        fill = (48, 35, 28) if player.active else (38, 38, 34)
-        draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=fill, outline=(180, 128, 68), width=2)
-        draw.text((x1 + 12, y1 + 10), f"P{idx + 1} ...{str(uid)[-4:]}", font=small_font, fill=(255, 232, 184))
+        fill = (26, 69, 46) if player.active else (38, 54, 43)
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=fill, outline=(142, 164, 86), width=2)
+        draw.text((x1 + 12, y1 + 10), safe_label(small_font, display_names.get(uid, f"P{idx + 1}"), f"P{idx + 1}")[:18], font=small_font, fill=(236, 231, 177))
         draw.text((x1 + 12, y1 + 36), f"{tent_label} {player.banked}", font=small_font, fill=(129, 230, 150))
         draw.text((x1 + 118, y1 + 36), f"{pack_label} {player.pack}", font=small_font, fill=(104, 233, 255))
         status = "IN" if player.active else "OUT"
@@ -408,8 +413,8 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         draw.text((x2 - 54, y1 + 22), status, font=score_font, fill=(129, 230, 150) if player.active else (255, 117, 101) if status == "KO" else (175, 160, 138))
 
     last_log = game.log[-1] if game.log else "Choose your action."
-    draw.rounded_rectangle((300, 694, 1090, 756), radius=14, fill=(42, 31, 25), outline=(219, 160, 77), width=2)
-    draw.text((322, 714), last_log[:98], font=font, fill=(255, 229, 170))
+    draw.rounded_rectangle((300, 694, 1090, 756), radius=14, fill=(20, 55, 38), outline=(176, 193, 95), width=2)
+    draw.text((322, 714), last_log[:98], font=font, fill=(238, 235, 167))
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")

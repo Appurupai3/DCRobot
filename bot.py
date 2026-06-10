@@ -8,7 +8,6 @@ from typing import Callable, Optional
 import random
 from io import BytesIO
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES, get_battle_game_max_players
@@ -1807,7 +1806,7 @@ class GomokuBattleView(View):
     def __init__(self, match: BattleMatch):
         super().__init__(timeout=600)
         self.match = match
-        self.board = np.zeros((GOMOKU_BOARD_SIZE, GOMOKU_BOARD_SIZE), dtype=np.int8)
+        self.board = [[0 for _ in range(GOMOKU_BOARD_SIZE)] for _ in range(GOMOKU_BOARD_SIZE)]
         self.players = match.participants[:2]
         self.current_index = 0
         self.last_move: tuple[int, int] | None = None
@@ -1887,7 +1886,7 @@ class GomokuBattleView(View):
         return None
 
     def check_winner(self, row: int, col: int) -> bool:
-        player_value = self.board[row, col]
+        player_value = self.board[row][col]
         if player_value == 0:
             return False
 
@@ -1896,7 +1895,7 @@ class GomokuBattleView(View):
             for sign in (1, -1):
                 rr = row + dr * sign
                 cc = col + dc * sign
-                while 0 <= rr < GOMOKU_BOARD_SIZE and 0 <= cc < GOMOKU_BOARD_SIZE and self.board[rr, cc] == player_value:
+                while 0 <= rr < GOMOKU_BOARD_SIZE and 0 <= cc < GOMOKU_BOARD_SIZE and self.board[rr][cc] == player_value:
                     count += 1
                     rr += dr * sign
                     cc += dc * sign
@@ -1980,11 +1979,11 @@ class GomokuBattleView(View):
             cy = board_top + star_row * GOMOKU_CELL_SIZE
             draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=grid_color)
 
-        stone_positions = np.argwhere(self.board != 0)
+        stone_positions = [(row, col) for row in range(GOMOKU_BOARD_SIZE) for col in range(GOMOKU_BOARD_SIZE) if self.board[row][col] != 0]
         for row, col in stone_positions:
             cx = board_left + int(col) * GOMOKU_CELL_SIZE
             cy = board_top + int(row) * GOMOKU_CELL_SIZE
-            value = int(self.board[row, col])
+            value = int(self.board[row][col])
             if value == 1:
                 fill = (25, 25, 25)
                 outline = (0, 0, 0)
@@ -2040,13 +2039,13 @@ class GomokuBattleView(View):
             return
 
         row, col = parsed
-        if self.board[row, col] != 0:
+        if self.board[row][col] != 0:
             await interaction.response.send_message("❌ 這個位置已經有棋子了。", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=False)
         stone_value = self.current_index + 1
-        self.board[row, col] = stone_value
+        self.board[row][col] = stone_value
         self.last_move = (row, col)
         self.move_count += 1
         coordinate = f"{chr(ord('A') + col)}{row + 1}"
@@ -2087,12 +2086,17 @@ class IncanGoldBattleView(View):
         self.message: Optional[discord.Message] = None
         self.choices: dict[int, str] = {}
         self.avatar_images: dict[int, Image.Image] = {}
+        self.display_names: dict[int, str] = {}
+        self.sync_controls()
 
     async def load_player_avatars(self) -> None:
-        for uid in self.game.participants:
+        guild = self.match.message.guild if self.match.message and self.match.message.guild else None
+        for idx, uid in enumerate(self.game.participants, start=1):
+            member = guild.get_member(uid) if guild else None
+            self.display_names[uid] = getattr(member, "display_name", None) or f"玩家{idx}"
             if uid in self.avatar_images:
                 continue
-            user = bot.get_user(uid)
+            user = member or bot.get_user(uid)
             if user is None:
                 try:
                     user = await bot.fetch_user(uid)
@@ -2142,9 +2146,25 @@ class IncanGoldBattleView(View):
         return embed
 
     def render_file(self) -> discord.File:
-        return render_incan_scene(self.game, self.avatar_images)
+        return render_incan_scene(self.game, self.avatar_images, self.display_names)
+
+    def sync_controls(self) -> None:
+        self.clear_items()
+        if self.game.awaiting_hazard_confirm:
+            confirm_button = Button(label="確認下一場", style=discord.ButtonStyle.secondary, emoji="✅")
+            confirm_button.callback = self.confirm_next_round_pressed
+            self.add_item(confirm_button)
+            return
+
+        advance_button = Button(label="前進", style=discord.ButtonStyle.primary, emoji="➡️")
+        return_button = Button(label="回到帳篷", style=discord.ButtonStyle.success, emoji="⛺")
+        advance_button.callback = self.advance_pressed
+        return_button.callback = self.return_to_tent_pressed
+        self.add_item(advance_button)
+        self.add_item(return_button)
 
     async def refresh_message(self) -> None:
+        self.sync_controls()
         if self.message:
             await self.message.edit(embed=self.build_status_embed(), attachments=[self.render_file()], view=self)
 
@@ -2184,17 +2204,13 @@ class IncanGoldBattleView(View):
             await self.message.channel.send(embed=result_embed)
         await finalize_battle(self.match, payout_text)
 
-    @discord.ui.button(label="前進", style=discord.ButtonStyle.primary, emoji="➡️")
-    async def advance(self, interaction: discord.Interaction, button: Button):
+    async def advance_pressed(self, interaction: discord.Interaction):
         await self.record_choice(interaction, "advance")
 
-    @discord.ui.button(label="回到帳篷", style=discord.ButtonStyle.success, emoji="⛺")
-    async def return_to_tent(self, interaction: discord.Interaction, button: Button):
+    async def return_to_tent_pressed(self, interaction: discord.Interaction):
         await self.record_choice(interaction, "return")
 
-
-    @discord.ui.button(label="確認下一場", style=discord.ButtonStyle.secondary, emoji="✅")
-    async def confirm_next_round(self, interaction: discord.Interaction, button: Button):
+    async def confirm_next_round_pressed(self, interaction: discord.Interaction):
         if not self.match.active or self.game.finished:
             await interaction.response.send_message("❌ 這局印加寶藏已結束。", ephemeral=True)
             return
@@ -2206,11 +2222,12 @@ class IncanGoldBattleView(View):
             return
         self.game.confirm_hazard_round_end(interaction.user.id)
         self.choices = {}
-        await interaction.response.send_message("✅ 已確認，進入下一場。", ephemeral=True)
+        self.sync_controls()
         if self.game.finished:
+            await interaction.response.defer(thinking=False)
             await self.finish_game(self.game.winners(), self.game.result_text())
         else:
-            await self.refresh_message()
+            await interaction.response.edit_message(embed=self.build_status_embed(), attachments=[self.render_file()], view=self)
 
 
 class BattleLobbyView(View):
