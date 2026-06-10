@@ -2134,6 +2134,9 @@ class IncanGoldBattleView(View):
         embed.add_field(name="洞內活人", value=active_mentions, inline=False)
         embed.add_field(name="地上寶石", value=str(self.game.floor_gems), inline=True)
         embed.add_field(name="已選擇", value=f"{len(self.choices)}/{len(self.game.active_players)}", inline=True)
+        if self.game.awaiting_hazard_confirm:
+            busted_mentions = "、".join(f"<@{uid}>" for uid in self.game.last_busted_players) or "剛剛在洞內的玩家"
+            embed.add_field(name="怪物襲擊", value=f"{busted_mentions} 任一人按『確認下一場』後進入下一回合。", inline=False)
         if self.game.path_cards:
             embed.add_field(name="目前路徑", value=" ".join(self.game.path_cards[-12:]), inline=False)
         return embed
@@ -2148,6 +2151,9 @@ class IncanGoldBattleView(View):
     async def record_choice(self, interaction: discord.Interaction, choice: str) -> None:
         if not self.match.active or self.game.finished:
             await interaction.response.send_message("❌ 這局印加寶藏已結束。", ephemeral=True)
+            return
+        if self.game.awaiting_hazard_confirm:
+            await interaction.response.send_message("⚠️ 怪物剛解決了玩家，請被解決的任一玩家按『確認下一場』。", ephemeral=True)
             return
         if interaction.user.id not in self.game.active_players:
             await interaction.response.send_message("⚠️ 你已經回到帳篷或本回合出局，請等待下一回合。", ephemeral=True)
@@ -2185,6 +2191,26 @@ class IncanGoldBattleView(View):
     @discord.ui.button(label="回到帳篷", style=discord.ButtonStyle.success, emoji="⛺")
     async def return_to_tent(self, interaction: discord.Interaction, button: Button):
         await self.record_choice(interaction, "return")
+
+
+    @discord.ui.button(label="確認下一場", style=discord.ButtonStyle.secondary, emoji="✅")
+    async def confirm_next_round(self, interaction: discord.Interaction, button: Button):
+        if not self.match.active or self.game.finished:
+            await interaction.response.send_message("❌ 這局印加寶藏已結束。", ephemeral=True)
+            return
+        if not self.game.awaiting_hazard_confirm:
+            await interaction.response.send_message("⚠️ 目前沒有需要確認的怪物事件。", ephemeral=True)
+            return
+        if interaction.user.id not in self.game.last_busted_players:
+            await interaction.response.send_message("⚠️ 只有剛剛還在場上並被怪物解決的玩家可以確認。", ephemeral=True)
+            return
+        self.game.confirm_hazard_round_end(interaction.user.id)
+        self.choices = {}
+        await interaction.response.send_message("✅ 已確認，進入下一場。", ephemeral=True)
+        if self.game.finished:
+            await self.finish_game(self.game.winners(), self.game.result_text())
+        else:
+            await self.refresh_message()
 
 
 class BattleLobbyView(View):
