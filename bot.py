@@ -8,7 +8,7 @@ from typing import Callable, Optional
 import random
 from io import BytesIO
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from Multiplayer.games import BATTLE_GAME_EMOJIS, BATTLE_GAME_RULES, get_battle_game_max_players
 from Multiplayer.incan_gold import IncanGoldGame, build_avatar_placeholder as build_incan_avatar_placeholder, format_card_label, render_incan_scene
@@ -40,6 +40,44 @@ from dcrbot.storage import (
 
 patch_discord_test_stubs()
 bot = create_discord_bot()
+
+
+async def load_discord_avatar_image(user: discord.abc.User, size: int = 128) -> Image.Image:
+    """Load a Discord user's avatar as a Pillow image with robust CDN format fallbacks."""
+    assets = [
+        asset
+        for asset in (
+            getattr(user, "display_avatar", None),
+            getattr(user, "avatar", None),
+            getattr(user, "default_avatar", None),
+        )
+        if asset is not None
+    ]
+    seen_urls: set[str] = set()
+    for asset in assets:
+        variants = []
+        try:
+            variants.append(asset.with_size(size).with_static_format("png"))
+        except Exception:
+            pass
+        try:
+            variants.append(asset.replace(size=size, format="png", static_format="png"))
+        except Exception:
+            pass
+        variants.append(asset)
+        for variant in variants:
+            url = getattr(variant, "url", repr(variant))
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            try:
+                avatar_bytes = await variant.read()
+                avatar = Image.open(BytesIO(avatar_bytes))
+                avatar.load()
+                return ImageOps.exif_transpose(avatar).convert("RGB")
+            except Exception:
+                continue
+    raise ValueError("無法讀取 Discord 頭像")
 
 
 # ===========================
@@ -1836,10 +1874,17 @@ class GomokuBattleView(View):
         await finalize_battle(self.match, "五子棋逾時，已退回下注。")
 
     async def load_player_avatars(self) -> None:
+        guild = self.match.message.guild if self.match.message and self.match.message.guild else None
         for uid in self.players:
             if uid in self.avatar_images:
                 continue
-            user = bot.get_user(uid)
+            member = guild.get_member(uid) if guild else None
+            if member is None and guild is not None:
+                try:
+                    member = await guild.fetch_member(uid)
+                except Exception:
+                    member = None
+            user = member or bot.get_user(uid)
             if user is None:
                 try:
                     user = await bot.fetch_user(uid)
@@ -1849,8 +1894,7 @@ class GomokuBattleView(View):
                 self.avatar_images[uid] = self.build_avatar_placeholder(uid)
                 continue
             try:
-                avatar_bytes = await user.display_avatar.replace(size=128, format="png").read()
-                avatar = Image.open(BytesIO(avatar_bytes)).convert("RGB")
+                avatar = await load_discord_avatar_image(user, size=128)
             except Exception:
                 avatar = self.build_avatar_placeholder(uid)
             self.avatar_images[uid] = avatar
@@ -2111,8 +2155,7 @@ class IncanGoldBattleView(View):
                 self.avatar_images[uid] = build_incan_avatar_placeholder(uid)
                 continue
             try:
-                avatar_bytes = await user.display_avatar.replace(size=96, format="png").read()
-                avatar = Image.open(BytesIO(avatar_bytes)).convert("RGB")
+                avatar = await load_discord_avatar_image(user, size=128)
             except Exception:
                 avatar = build_incan_avatar_placeholder(uid)
             self.avatar_images[uid] = avatar
