@@ -175,7 +175,7 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
 def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
     users = load_data()
     uid = str(user.id)
-    user_data = users.get(uid, {"wallet": 0, "bank": 0, "game_stats": {}})
+    user_data = users.get(uid, {"wallet": 0, "bank": 0})
     summary = summarize_game_records(users, uid)
     display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
 
