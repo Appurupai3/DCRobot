@@ -2093,15 +2093,20 @@ class IncanGoldBattleView(View):
         guild = self.match.message.guild if self.match.message and self.match.message.guild else None
         for idx, uid in enumerate(self.game.participants, start=1):
             member = guild.get_member(uid) if guild else None
-            self.display_names[uid] = getattr(member, "display_name", None) or f"玩家{idx}"
-            if uid in self.avatar_images:
-                continue
+            if member is None and guild is not None:
+                try:
+                    member = await guild.fetch_member(uid)
+                except Exception:
+                    member = None
             user = member or bot.get_user(uid)
             if user is None:
                 try:
                     user = await bot.fetch_user(uid)
                 except Exception:
                     user = None
+            self.display_names[uid] = getattr(member, "display_name", None) or getattr(user, "display_name", None) or getattr(user, "name", None) or f"玩家{idx}"
+            if uid in self.avatar_images:
+                continue
             if user is None:
                 self.avatar_images[uid] = build_incan_avatar_placeholder(uid)
                 continue
@@ -2131,18 +2136,15 @@ class IncanGoldBattleView(View):
             description=(
                 "每個回合所有活人選擇：**前進** 或 **回到帳篷**。\n"
                 "前進會翻 1 張卡；寶石會平均分給洞內活人，餘數留在地上。\n"
-                "回帳篷會把背包寶石帶回，並與同時回去的人平分地上寶石。"
+                "回帳篷會把背包寶石帶回，並與同時回去的人平分地上寶石；神器只有單獨回帳篷才能帶走。"
             ),
             color=discord.Color.gold(),
         )
         embed.add_field(name="洞內活人", value=active_mentions, inline=False)
         embed.add_field(name="地上寶石", value=str(self.game.floor_gems), inline=True)
+        embed.add_field(name="地上神器", value=str(self.game.floor_artifacts), inline=True)
         if self.choices:
-            choice_lines = []
-            for uid, choice in self.choices.items():
-                choice_name = "前進" if choice == "advance" else "回帳篷"
-                choice_lines.append(f"{self.display_names.get(uid, f'<@{uid}>')}：{choice_name}")
-            choice_text = "\n".join(choice_lines)
+            choice_text = "、".join(self.display_names.get(uid, f"<@{uid}>") for uid in self.choices)
         else:
             choice_text = "尚未有人選擇"
         embed.add_field(name=f"已選擇 {len(self.choices)}/{len(self.game.active_players)}", value=choice_text[:1024], inline=True)
@@ -2158,10 +2160,13 @@ class IncanGoldBattleView(View):
 
     def sync_controls(self) -> None:
         self.clear_items()
+        treasure_button = Button(label="查看寶藏", style=discord.ButtonStyle.secondary, emoji="💰")
+        treasure_button.callback = self.show_treasure_pressed
         if self.game.awaiting_hazard_confirm:
             confirm_button = Button(label="確認下一場", style=discord.ButtonStyle.secondary, emoji="✅")
             confirm_button.callback = self.confirm_next_round_pressed
             self.add_item(confirm_button)
+            self.add_item(treasure_button)
             return
 
         advance_button = Button(label="前進", style=discord.ButtonStyle.primary, emoji="➡️")
@@ -2170,6 +2175,7 @@ class IncanGoldBattleView(View):
         return_button.callback = self.return_to_tent_pressed
         self.add_item(advance_button)
         self.add_item(return_button)
+        self.add_item(treasure_button)
 
     async def refresh_message(self) -> None:
         self.sync_controls()
@@ -2217,6 +2223,18 @@ class IncanGoldBattleView(View):
 
     async def return_to_tent_pressed(self, interaction: discord.Interaction):
         await self.record_choice(interaction, "return")
+
+    async def show_treasure_pressed(self, interaction: discord.Interaction):
+        player = self.game.players.get(interaction.user.id)
+        if player is None:
+            await interaction.response.send_message("❌ 找不到你的探險資料。", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"💰 你的帳篷寶石：{player.banked}\n"
+            f"🎒 你的背包寶石：{player.pack}\n"
+            f"💎 地上寶石：{self.game.floor_gems}｜✨ 地上神器：{self.game.floor_artifacts}",
+            ephemeral=True,
+        )
 
     async def confirm_next_round_pressed(self, interaction: discord.Interaction):
         if not self.match.active or self.game.finished:

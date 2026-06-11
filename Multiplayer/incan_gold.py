@@ -43,6 +43,7 @@ class IncanGoldGame:
     round_number: int = 1
     deck: list[Card] = field(default_factory=list)
     floor_gems: int = 0
+    floor_artifacts: int = 0
     hazards_seen: set[str] = field(default_factory=set)
     removed_hazards: list[str] = field(default_factory=list)
     path_cards: list[str] = field(default_factory=list)
@@ -64,6 +65,7 @@ class IncanGoldGame:
     def start_round(self) -> None:
         self.deck = build_incan_deck()
         self.floor_gems = 0
+        self.floor_artifacts = 0
         self.hazards_seen = set()
         self.path_cards = []
         self.awaiting_hazard_confirm = False
@@ -80,13 +82,21 @@ class IncanGoldGame:
             return "沒有人回到帳篷。"
         share = self.floor_gems // len(leaver_list)
         remainder = self.floor_gems % len(leaver_list)
+        artifact_gain = 0
+        artifact_message = ""
+        if self.floor_artifacts and len(leaver_list) == 1:
+            artifact_gain = self.floor_artifacts * ARTIFACT_VALUE
+            artifact_message = f"，並帶走 {self.floor_artifacts} 件神器"
+            self.floor_artifacts = 0
+        elif self.floor_artifacts and len(leaver_list) > 1:
+            artifact_message = f"；{self.floor_artifacts} 件神器無法平分，繼續留在地上"
         self.floor_gems = remainder
         for uid in leaver_list:
             player = self.players[uid]
-            player.banked += player.pack + share
+            player.banked += player.pack + share + artifact_gain
             player.pack = 0
             player.active = False
-        return f"{len(leaver_list)} 人回到帳篷：每人分到地上寶石 {share}，留下 {remainder}。"
+        return f"{len(leaver_list)} 人回到帳篷：每人分到地上寶石 {share}，留下 {remainder}{artifact_message}。"
 
     def draw_next_card(self) -> str:
         if not self.active_players:
@@ -108,10 +118,10 @@ class IncanGoldGame:
             self.path_cards.append(card_label)
             message = f"寶石 {gems}：每位場上玩家分到 {share}，地上留下 {remainder}。"
         elif card_type == "artifact":
-            self.floor_gems += ARTIFACT_VALUE
+            self.floor_artifacts += 1
             card_label = f"A{ARTIFACT_VALUE}"
             self.path_cards.append(card_label)
-            message = f"神器：地上新增 {ARTIFACT_VALUE} 顆寶石。"
+            message = f"神器出現：地上新增 1 件神器，只有單獨回帳篷的人能帶走。"
         else:
             hazard_key = str(value)
             card_label = label
@@ -122,6 +132,7 @@ class IncanGoldGame:
                     self.players[uid].pack = 0
                     self.players[uid].active = False
                 self.floor_gems = 0
+                self.floor_artifacts = 0
                 self.removed_hazards.append(hazard_key)
                 self.awaiting_hazard_confirm = True
                 self.pending_round_end_reason = f"重複怪物 {HAZARD_NAMES.get(hazard_key, label)}：場上玩家被解決，背包寶石歸零。"
@@ -184,9 +195,10 @@ class IncanGoldGame:
 
 
 def load_scene_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
-    project_font_dirs = [Path("font"), Path("Resources") / "fonts"]
+    repo_root = Path(__file__).resolve().parents[1]
+    project_font_dirs = [repo_root / "font", repo_root / "Resources" / "fonts", Path("font"), Path("Resources") / "fonts"]
     env_font = os.getenv("DCRBOT_CJK_FONT")
-    candidates = [path for path in [env_font, "font/GenSekiGothic2.ttc"] if path]
+    candidates = [path for path in [env_font, str(repo_root / "font" / "GenSekiGothic2.ttc"), "font/GenSekiGothic2.ttc"] if path]
     for project_font_dir in project_font_dirs:
         candidates.extend(str(path) for path in project_font_dir.glob("*.tt*") if path.is_file())
     if bold:
@@ -344,10 +356,10 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
     entrance = safe_label(font, "地下城入口", "地下城入口")
     active_title = safe_label(font, "場上玩家", "場上玩家")
     floor_label = safe_label(font, "地上寶石", "地上寶石")
+    artifact_label = safe_label(font, "地上神器", "地上神器")
     hazard_label = safe_label(font, "已出現怪物", "已出現怪物")
     removed_title = safe_label(font, "移除怪物", "移除怪物")
     choose_label = safe_label(font, "選擇：前進 或 回帳篷", "選擇：前進 或 回帳篷")
-    tent_label = safe_label(small_font, "帳篷", "帳篷")
     pack_label = safe_label(small_font, "背包", "背包")
 
     # Jungle ruin background and temple entrance.
@@ -379,7 +391,8 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
     # Center path panel.
     draw.rounded_rectangle((342, 196, 978, 384), radius=20, fill=(20, 55, 38), outline=(176, 193, 95), width=3)
     draw.text((366, 218), f"{floor_label}: {game.floor_gems}", font=font, fill=(123, 235, 255))
-    draw.text((602, 218), f"{hazard_label}: {len(game.hazards_seen)}", font=font, fill=(255, 175, 142))
+    draw.text((552, 218), f"{artifact_label}: {game.floor_artifacts}", font=font, fill=(255, 226, 115))
+    draw.text((742, 218), f"{hazard_label}: {len(game.hazards_seen)}", font=font, fill=(255, 175, 142))
     if game.awaiting_hazard_confirm:
         warn = safe_label(font, "怪物解決玩家！請任一被解決玩家按確認。", "怪物解決玩家！請任一被解決玩家按確認。")
         draw_text_center(draw, (660, 255), warn, font, (255, 117, 101))
@@ -416,8 +429,7 @@ def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | No
         fill = (26, 69, 46) if player.active else (38, 54, 43)
         draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=fill, outline=(142, 164, 86), width=2)
         draw.text((x1 + 12, y1 + 10), safe_label(small_font, display_names.get(uid, f"玩家{idx + 1}"), f"玩家{idx + 1}")[:18], font=small_font, fill=(236, 231, 177))
-        draw.text((x1 + 12, y1 + 36), f"{tent_label} {player.banked}", font=small_font, fill=(129, 230, 150))
-        draw.text((x1 + 118, y1 + 36), f"{pack_label} {player.pack}", font=small_font, fill=(104, 233, 255))
+        draw.text((x1 + 12, y1 + 36), f"{pack_label} {player.pack}", font=small_font, fill=(104, 233, 255))
         status = safe_label(score_font, "場上", "場上") if player.active else safe_label(score_font, "帳篷", "帳篷")
         if game.awaiting_hazard_confirm and uid in game.last_busted_players:
             status = safe_label(score_font, "倒下", "倒下")
