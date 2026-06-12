@@ -507,6 +507,107 @@ class PendingClueChoiceView(View):
         self.stop()
 
 
+class NumberSearcherDigitMarkModal(Modal):
+    def __init__(self, marker_view: "NumberSearcherMarkerView"):
+        super().__init__(title="📌 設定數字標記")
+        self.marker_view = marker_view
+        current = ",".join("".join(str(digit) for digit in marks) for marks in marker_view.parent.digit_marks)
+        self.marks = TextInput(
+            label="三格數字標記",
+            placeholder="例如 132,5,56（逗號分隔第 1/2/3 位；留空清除該位）",
+            default=current,
+            required=False,
+            max_length=40,
+        )
+        self.add_item(self.marks)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.marker_view.set_digit_marks(interaction, self.marks.value)
+
+
+class NumberSearcherMarkerView(View):
+    def __init__(self, parent: "NumberSearcherView"):
+        super().__init__(timeout=180)
+        self.parent = parent
+        self.rebuild_items()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.user.id:
+            await interaction.response.send_message("❌ 這不是你的標記介面。", ephemeral=True)
+            return False
+        return True
+
+    def build_embed(self, status_text: str | None = None) -> discord.Embed:
+        embed = discord.Embed(
+            title="📌 數字搜尋者標記",
+            description=status_text or "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。",
+            color=discord.Color.blurple(),
+        )
+        digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.parent.digit_marks)
+        color_text = " / ".join(COLOR_NAMES.get(value, "-") if value else "-" for value in self.parent.color_marks)
+        shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
+        embed.add_field(name="數字標記", value=digit_text, inline=False)
+        embed.add_field(name="已同步顏色", value=color_text, inline=False)
+        if self.parent.has_shapes:
+            embed.add_field(name="已同步圖形", value=shape_text, inline=False)
+        return embed
+
+    def rebuild_items(self) -> None:
+        self.clear_items()
+        digit_button = Button(label="設定數字標記", style=discord.ButtonStyle.primary, emoji="🔢", row=0)
+
+        async def digit_callback(interaction: discord.Interaction):
+            await interaction.response.send_modal(NumberSearcherDigitMarkModal(self))
+
+        digit_button.callback = digit_callback
+        self.add_item(digit_button)
+
+        clear_digit_button = Button(label="清除數字標記", style=discord.ButtonStyle.secondary, emoji="🧹", row=0)
+
+        async def clear_digit_callback(interaction: discord.Interaction):
+            await self.clear_digit_marks(interaction)
+
+        clear_digit_button.callback = clear_digit_callback
+        self.add_item(clear_digit_button)
+
+    def parse_digit_marks(self, raw_marks: str) -> list[list[int]] | None:
+        normalized = raw_marks.strip().replace("，", ",").replace("、", ",").replace("/", ",")
+        parts = normalized.split(",") if normalized else []
+        if len(parts) > CODE_LENGTH:
+            return None
+        marks: list[list[int]] = []
+        for part in parts:
+            compact = "".join(char for char in part if char.isdigit())
+            if compact != part.strip().replace(" ", ""):
+                return None
+
+            digits = []
+            for char in compact:
+                digit = int(char)
+                if digit not in digits:
+                    digits.append(digit)
+            marks.append(digits)
+        while len(marks) < CODE_LENGTH:
+            marks.append([])
+        return marks
+
+    async def set_digit_marks(self, interaction: discord.Interaction, raw_marks: str) -> None:
+        marks = self.parse_digit_marks(raw_marks)
+        if marks is None:
+            await interaction.response.send_message("❌ 格式錯誤，請用 132,5,56 這種格式輸入三格數字標記。", ephemeral=True)
+            return
+        self.parent.digit_marks = marks
+        await self.parent.update_board_from_child(interaction, "📌 已更新數字標記。")
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新數字標記並同步到主畫面。"), view=self)
+
+    async def clear_digit_marks(self, interaction: discord.Interaction) -> None:
+        self.parent.digit_marks = [[] for _ in range(CODE_LENGTH)]
+        await self.parent.update_board_from_child(interaction, "📌 已清除數字標記。")
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed("✅ 已清除數字標記並同步到主畫面。"), view=self)
+
+
 class NumberSearcherGuessModal(Modal):
     def __init__(self, view: "NumberSearcherView"):
         super().__init__(title="🔢 猜測三位數字")
@@ -751,6 +852,9 @@ class NumberSearcherView(View):
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
+        self.digit_marks: list[list[int]] = [[] for _ in range(CODE_LENGTH)]
+        self.color_marks: list[str | None] = [None] * CODE_LENGTH
+        self.shape_marks: list[str | None] = [None] * CODE_LENGTH
         self.seen_clue_titles: set[str] = set()
         self.pending_clue_offer: PendingClueOffer | None = None
         self.ended = False
@@ -814,6 +918,15 @@ class NumberSearcherView(View):
 
             test_button.callback = test_callback
             self.add_item(test_button)
+
+        marker_button = Button(label="標記", style=discord.ButtonStyle.secondary, emoji="📌", row=2)
+
+        async def marker_callback(interaction: discord.Interaction):
+            marker_view = NumberSearcherMarkerView(self)
+            await interaction.response.send_message(embed=marker_view.build_embed(), view=marker_view, ephemeral=True)
+
+        marker_button.callback = marker_callback
+        self.add_item(marker_button)
 
     def configure_guess_button(self) -> None:
         if not self.requires_extra_guess:
@@ -936,6 +1049,69 @@ class NumberSearcherView(View):
         self.refresh_multiplier_select()
         return None
 
+
+    async def update_board_from_child(self, interaction: discord.Interaction, status_text: str) -> None:
+        if self.message is None:
+            return
+        embed, file = self.build_embed_and_file(status_text)
+        await self.message.edit(embed=embed, attachments=[file], view=self)
+
+    def marker_summary(self) -> str:
+        parts = []
+        digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.digit_marks)
+        if digit_text != "-,-,-":
+            parts.append(f"數字 {digit_text}")
+        color_text = "/".join(COLOR_NAMES.get(value, "-") if value else "-" for value in self.color_marks)
+        if color_text != "-/-/-":
+            parts.append(f"顏色 {color_text}")
+        if self.has_shapes:
+            shape_text = "/".join(value or "-" for value in self.shape_marks)
+            if shape_text != "-/-/-":
+                parts.append(f"圖形 {shape_text}")
+        return "｜".join(parts) if parts else "尚無標記"
+
+    def apply_certain_clue_markers(self, clue: Clue) -> list[str]:
+        applied: list[str] = []
+        color_radar = {"黃色雷達": "黃", "綠色雷達": "綠", "藍色雷達": "藍", "紫色雷達": "紫"}
+        if clue.title in color_radar:
+            color = color_radar[clue.title]
+            indexes = [index for index, value in enumerate(self.colors) if value == color]
+            for index in indexes:
+                self.color_marks[index] = color
+            if indexes:
+                applied.append(f"{COLOR_NAMES[color]}：{positions_text(indexes)}")
+        color_open = {"首位開榜": 0, "中位開榜": 1, "末位開榜": 2}
+        if clue.title in color_open:
+            index = color_open[clue.title]
+            self.color_marks[index] = self.colors[index]
+            applied.append(f"第 {index + 1} 位顏色：{COLOR_NAMES[self.colors[index]]}")
+
+        shape_radar = {"圓形雷達": "圓形", "三角形雷達": "三角形", "長方形雷達": "長方形", "五邊形雷達": "五邊形"}
+        if self.has_shapes and clue.title in shape_radar:
+            shape = shape_radar[clue.title]
+            indexes = [index for index, value in enumerate(self.shapes) if value == shape]
+            for index in indexes:
+                self.shape_marks[index] = shape
+            if indexes:
+                applied.append(f"{shape}：{positions_text(indexes)}")
+        shape_open = {"首位開榜（雙規）": 0, "中位開榜（雙規）": 1, "末位開榜（雙規）": 2}
+        if self.has_shapes and clue.title in shape_open:
+            index = shape_open[clue.title]
+            self.color_marks[index] = self.colors[index]
+            self.shape_marks[index] = self.shapes[index]
+            applied.append(f"第 {index + 1} 位：{COLOR_NAMES[self.colors[index]]}、{self.shapes[index]}")
+
+        if clue.title.startswith("幸運號碼"):
+            raw_digit = clue.title.removeprefix("幸運號碼")
+            if raw_digit.isdigit():
+                digit = int(raw_digit)
+                indexes = [index for index, value in enumerate(self.secret) if value == digit]
+                for index in indexes:
+                    self.digit_marks[index] = [digit]
+                if indexes:
+                    applied.append(f"數字 {digit}：{positions_text(indexes)}")
+        return applied
+
     async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
         error = await self.spend_wallet(interaction.user, cost)
         if error:
@@ -1005,10 +1181,13 @@ class NumberSearcherView(View):
                 result_lines = [f"【{result.title}】{result.text}" for result in pack_results]
                 joined_results = "\n".join(result_lines)
                 self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，公開 {len(pack_results)} 個{pool_name}線索")
+                marker_lines = []
                 for result in pack_results:
                     self.history.append(f"💡 禮包｜【{result.title}】{result.text}")
+                    marker_lines.extend(self.apply_certain_clue_markers(result))
+                marker_text = f"\n📌 已同步標記：{'；'.join(marker_lines)}" if marker_lines else ""
                 return (
-                    f"觸發【{clue.title}】，隨機公開 {len(pack_results)} 個{pool_name}有關的線索：\n{joined_results}",
+                    f"觸發【{clue.title}】，隨機公開 {len(pack_results)} 個{pool_name}有關的線索：\n{joined_results}{marker_text}",
                     f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。",
                 )
             self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，但{pool_name}線索卡池已沒有未出現過的線索")
@@ -1017,8 +1196,12 @@ class NumberSearcherView(View):
                 f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。",
             )
 
+        marker_lines = self.apply_certain_clue_markers(clue)
+        marker_text = f"\n📌 已同步標記：{'；'.join(marker_lines)}" if marker_lines else ""
         self.history.append(f"💡 ${cost}｜【{clue.title}】{clue.text}")
-        return f"公開線索：【{clue.title}】{clue.text}", f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+        if marker_lines:
+            self.history.append(f"📌 自動標記｜{'；'.join(marker_lines)}")
+        return f"公開線索：【{clue.title}】{clue.text}{marker_text}", f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
 
     def pool_for_clue_type(self, clue_type: str) -> tuple[list[Clue], int, str]:
         if clue_type == "number":
@@ -1645,6 +1828,7 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
     for index in range(CODE_LENGTH):
         x = start_x + index * 200
         y = 140
+        digit_mark = view.digit_marks[index] if not reveal else []
         if reveal:
             fill = COLOR_RGB[view.colors[index]]
             outline = (245, 245, 245)
@@ -1653,16 +1837,33 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         else:
             fill = (100, 108, 118)
             outline = (170, 178, 188)
-            text = "?"
+            text = str(digit_mark[0]) if len(digit_mark) == 1 else "?"
             text_fill = (245, 245, 245)
         if reveal and view.has_shapes:
             draw_filled_shape(draw, view.shapes[index], (x + 75, y + 76), 70, fill, outline)
         else:
             draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
+            if not reveal:
+                marker_badges = []
+                if view.color_marks[index]:
+                    marker_badges.append((view.color_marks[index], COLOR_RGB[view.color_marks[index]]))
+                if view.shape_marks[index]:
+                    marker_badges.append((view.shape_marks[index][:1], (225, 235, 245)))
+                for badge_index, (badge, badge_fill) in enumerate(marker_badges[:2]):
+                    bx = x + 10 + badge_index * 42
+                    draw.rounded_rectangle((bx, y + 10, bx + 34, y + 36), radius=8, fill=(28, 34, 44), outline=badge_fill, width=2)
+                    badge_text = safe_text(small_font, badge, badge)
+                    badge_bbox = draw.textbbox((0, 0), badge_text, font=small_font)
+                    draw.text((bx + 17 - (badge_bbox[2] - badge_bbox[0]) / 2, y + 14), badge_text, fill=badge_fill, font=small_font)
         bbox = draw.textbbox((0, 0), text, font=box_font)
         draw.text((x + 75 - (bbox[2] - bbox[0]) / 2, y + 75 - (bbox[3] - bbox[1]) / 2 - 8), text, fill=text_fill, font=box_font)
+        multi_mark_text = "".join(str(digit) for digit in digit_mark) if len(digit_mark) > 1 else ""
+        if multi_mark_text:
+            mark_bbox = draw.textbbox((0, 0), multi_mark_text, font=body_font)
+            draw.text((x + 75 - (mark_bbox[2] - mark_bbox[0]) / 2, y + 292), multi_mark_text, fill=(235, 214, 154), font=body_font)
         label = safe_text(small_font, f"第 {index + 1} 位", f"Slot {index + 1}")
-        draw.text((x + 44, y + 166), label, fill=(210, 220, 230), font=small_font)
+        label_y = y + 316 if multi_mark_text else y + 166
+        draw.text((x + 44, label_y), label, fill=(210, 220, 230), font=small_font)
 
     draw.rounded_rectangle((52, 334, 708, 390), radius=14, fill=(18, 24, 31), outline=(80, 150, 190), width=2)
     status = f"{view.multiplier} 倍｜猜測 {view.guess_count} 次｜線索 {view.clue_count} 次｜已花費 ${view.total_spent}｜猜中 +${view.guess_reward()}"
