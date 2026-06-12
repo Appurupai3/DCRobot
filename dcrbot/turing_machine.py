@@ -545,7 +545,7 @@ class NumberSearcherMarkerView(View):
             color=discord.Color.blurple(),
         )
         digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.parent.digit_marks)
-        color_text = " / ".join(COLOR_NAMES.get(value, "-") if value else "-" for value in self.parent.color_marks)
+        color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.parent.color_marks)
         shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
         embed.add_field(name="目前位置", value=f"第 {self.selected_slot + 1} 位", inline=True)
         embed.add_field(name="數字標記", value=digit_text, inline=False)
@@ -597,7 +597,7 @@ class NumberSearcherMarkerView(View):
         for color in self.parent.available_colors:
             color_button = Button(
                 label=COLOR_NAMES[color],
-                style=discord.ButtonStyle.success if self.parent.color_marks[self.selected_slot] == color else discord.ButtonStyle.secondary,
+                style=discord.ButtonStyle.success if color in self.parent.color_marks[self.selected_slot] else discord.ButtonStyle.secondary,
                 emoji="🎨",
                 row=2,
             )
@@ -629,10 +629,16 @@ class NumberSearcherMarkerView(View):
         await interaction.response.edit_message(embed=self.build_embed(f"已切換到第 {slot + 1} 位標記。"), view=self)
 
     async def set_color_mark(self, interaction: discord.Interaction, color: str) -> None:
-        self.parent.color_marks[self.selected_slot] = color
-        await self.parent.update_board_from_child(interaction, f"📌 已標記第 {self.selected_slot + 1} 位顏色：{COLOR_NAMES[color]}。")
+        slot_colors = self.parent.color_marks[self.selected_slot]
+        if color in slot_colors:
+            slot_colors.remove(color)
+            action_text = f"已移除第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
+        else:
+            slot_colors.append(color)
+            action_text = f"已加入第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
+        await self.parent.update_board_from_child(interaction, f"📌 {action_text}。")
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已標記第 {self.selected_slot + 1} 位顏色：{COLOR_NAMES[color]}。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ {action_text}。"), view=self)
 
     async def set_shape_mark(self, interaction: discord.Interaction, shape: str) -> None:
         if not self.parent.has_shapes:
@@ -645,7 +651,7 @@ class NumberSearcherMarkerView(View):
 
     async def reset_slot_marks(self, interaction: discord.Interaction) -> None:
         self.parent.digit_marks[self.selected_slot] = []
-        self.parent.color_marks[self.selected_slot] = None
+        self.parent.color_marks[self.selected_slot] = []
         self.parent.shape_marks[self.selected_slot] = None
         await self.parent.update_board_from_child(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
         self.rebuild_items()
@@ -934,7 +940,7 @@ class NumberSearcherView(View):
         self.settlement_reward = 0
         self.history: list[str] = []
         self.digit_marks: list[list[int]] = [[] for _ in range(CODE_LENGTH)]
-        self.color_marks: list[str | None] = [None] * CODE_LENGTH
+        self.color_marks: list[list[str]] = [[] for _ in range(CODE_LENGTH)]
         self.shape_marks: list[str | None] = [None] * CODE_LENGTH
         self.seen_clue_titles: set[str] = set()
         self.pending_clue_offer: PendingClueOffer | None = None
@@ -1143,7 +1149,7 @@ class NumberSearcherView(View):
         digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.digit_marks)
         if digit_text != "-,-,-":
             parts.append(f"數字 {digit_text}")
-        color_text = "/".join(COLOR_NAMES.get(value, "-") if value else "-" for value in self.color_marks)
+        color_text = "/".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
         if color_text != "-/-/-":
             parts.append(f"顏色 {color_text}")
         if self.has_shapes:
@@ -1159,13 +1165,13 @@ class NumberSearcherView(View):
             color = color_radar[clue.title]
             indexes = [index for index, value in enumerate(self.colors) if value == color]
             for index in indexes:
-                self.color_marks[index] = color
+                self.color_marks[index] = [color]
             if indexes:
                 applied.append(f"{COLOR_NAMES[color]}：{positions_text(indexes)}")
         color_open = {"首位開榜": 0, "中位開榜": 1, "末位開榜": 2}
         if clue.title in color_open:
             index = color_open[clue.title]
-            self.color_marks[index] = self.colors[index]
+            self.color_marks[index] = [self.colors[index]]
             applied.append(f"第 {index + 1} 位顏色：{COLOR_NAMES[self.colors[index]]}")
 
         shape_radar = {"圓形雷達": "圓形", "三角形雷達": "三角形", "長方形雷達": "長方形", "五邊形雷達": "五邊形"}
@@ -1179,7 +1185,7 @@ class NumberSearcherView(View):
         shape_open = {"首位開榜（雙規）": 0, "中位開榜（雙規）": 1, "末位開榜（雙規）": 2}
         if self.has_shapes and clue.title in shape_open:
             index = shape_open[clue.title]
-            self.color_marks[index] = self.colors[index]
+            self.color_marks[index] = [self.colors[index]]
             self.shape_marks[index] = self.shapes[index]
             applied.append(f"第 {index + 1} 位：{COLOR_NAMES[self.colors[index]]}、{self.shapes[index]}")
 
@@ -1892,6 +1898,66 @@ def draw_filled_shape(
         draw.line(points + [points[0]], fill=outline, width=4)
 
 
+
+
+def draw_vertical_color_splits(
+    image: Image.Image,
+    mask: Image.Image,
+    bounds: tuple[int, int, int, int],
+    colors: list[str],
+) -> None:
+    if not colors:
+        return
+    layer = Image.new("RGB", image.size, (0, 0, 0))
+    layer_draw = ImageDraw.Draw(layer)
+    left, top, right, bottom = bounds
+    width = right - left
+    for index, color in enumerate(colors):
+        segment_left = left + width * index // len(colors)
+        segment_right = left + width * (index + 1) // len(colors)
+        layer_draw.rectangle((segment_left, top, segment_right, bottom), fill=COLOR_RGB[color])
+    image.paste(layer, mask=mask)
+
+
+def draw_split_rounded_rectangle(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    bounds: tuple[int, int, int, int],
+    radius: int,
+    colors: list[str],
+    outline: tuple[int, int, int],
+) -> None:
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle(bounds, radius=radius, fill=255)
+    draw_vertical_color_splits(image, mask, bounds, colors)
+    draw.rounded_rectangle(bounds, radius=radius, outline=outline, width=4)
+
+
+def draw_split_shape(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    shape: str,
+    center: tuple[int, int],
+    size: int,
+    colors: list[str],
+    outline: tuple[int, int, int],
+) -> None:
+    cx, cy = center
+    bounds = (cx - size, cy - size, cx + size, cy + size)
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    if shape == "圓形":
+        mask_draw.ellipse(bounds, fill=255)
+        draw_vertical_color_splits(image, mask, bounds, colors)
+        draw.ellipse(bounds, outline=outline, width=4)
+    else:
+        points = shape_points(shape, center, size)
+        mask_draw.polygon(points, fill=255)
+        draw_vertical_color_splits(image, mask, bounds, colors)
+        draw.line(points + [points[0]], fill=outline, width=4)
+
+
 def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = False) -> io.BytesIO:
     width, height = 760, 440
     image = Image.new("RGB", (width, height), (22, 28, 36))
@@ -1911,7 +1977,7 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         x = start_x + index * 200
         y = 140
         digit_mark = view.digit_marks[index] if not reveal else []
-        marked_color = view.color_marks[index] if not reveal else None
+        marked_colors = view.color_marks[index] if not reveal else []
         marked_shape = view.shape_marks[index] if not reveal else None
         if reveal:
             fill = COLOR_RGB[view.colors[index]]
@@ -1919,14 +1985,19 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
             text = str(view.secret[index])
             text_fill = (20, 24, 30)
         else:
-            fill = COLOR_RGB[marked_color] if marked_color else (100, 108, 118)
-            outline = (245, 245, 245) if marked_color or marked_shape else (170, 178, 188)
+            fill = COLOR_RGB[marked_colors[0]] if len(marked_colors) == 1 else (100, 108, 118)
+            outline = (245, 245, 245) if marked_colors or marked_shape else (170, 178, 188)
             text = str(digit_mark[0]) if len(digit_mark) == 1 else "?"
-            text_fill = (20, 24, 30) if marked_color else (245, 245, 245)
+            text_fill = (20, 24, 30) if marked_colors else (245, 245, 245)
         if reveal and view.has_shapes:
             draw_filled_shape(draw, view.shapes[index], (x + 75, y + 76), 70, fill, outline)
         elif marked_shape:
-            draw_filled_shape(draw, marked_shape, (x + 75, y + 76), 70, fill, outline)
+            if marked_colors:
+                draw_split_shape(image, draw, marked_shape, (x + 75, y + 76), 70, marked_colors, outline)
+            else:
+                draw_filled_shape(draw, marked_shape, (x + 75, y + 76), 70, fill, outline)
+        elif marked_colors:
+            draw_split_rounded_rectangle(image, draw, (x, y, x + 150, y + 150), 18, marked_colors, outline)
         else:
             draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
         bbox = draw.textbbox((0, 0), text, font=box_font)
