@@ -529,6 +529,7 @@ class NumberSearcherMarkerView(View):
     def __init__(self, parent: "NumberSearcherView"):
         super().__init__(timeout=180)
         self.parent = parent
+        self.selected_slot = 0
         self.rebuild_items()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -546,10 +547,11 @@ class NumberSearcherMarkerView(View):
         digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.parent.digit_marks)
         color_text = " / ".join(COLOR_NAMES.get(value, "-") if value else "-" for value in self.parent.color_marks)
         shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
+        embed.add_field(name="目前位置", value=f"第 {self.selected_slot + 1} 位", inline=True)
         embed.add_field(name="數字標記", value=digit_text, inline=False)
-        embed.add_field(name="已同步顏色", value=color_text, inline=False)
+        embed.add_field(name="顏色標記", value=color_text, inline=False)
         if self.parent.has_shapes:
-            embed.add_field(name="已同步圖形", value=shape_text, inline=False)
+            embed.add_field(name="圖形標記", value=shape_text, inline=False)
         return embed
 
     def rebuild_items(self) -> None:
@@ -562,13 +564,92 @@ class NumberSearcherMarkerView(View):
         digit_button.callback = digit_callback
         self.add_item(digit_button)
 
-        clear_digit_button = Button(label="清除數字標記", style=discord.ButtonStyle.secondary, emoji="🧹", row=0)
+        clear_digit_button = Button(label="清除全部數字", style=discord.ButtonStyle.secondary, emoji="🧹", row=0)
 
         async def clear_digit_callback(interaction: discord.Interaction):
             await self.clear_digit_marks(interaction)
 
         clear_digit_button.callback = clear_digit_callback
         self.add_item(clear_digit_button)
+
+        reset_slot_button = Button(label=f"重製第 {self.selected_slot + 1} 位", style=discord.ButtonStyle.danger, emoji="🔄", row=0)
+
+        async def reset_slot_callback(interaction: discord.Interaction):
+            await self.reset_slot_marks(interaction)
+
+        reset_slot_button.callback = reset_slot_callback
+        self.add_item(reset_slot_button)
+
+        for index in range(CODE_LENGTH):
+            slot_button = Button(
+                label=f"第 {index + 1} 位",
+                style=discord.ButtonStyle.success if index == self.selected_slot else discord.ButtonStyle.secondary,
+                emoji="📍",
+                row=1,
+            )
+
+            async def slot_callback(interaction: discord.Interaction, slot=index):
+                await self.select_slot(interaction, slot)
+
+            slot_button.callback = slot_callback
+            self.add_item(slot_button)
+
+        for color in self.parent.available_colors:
+            color_button = Button(
+                label=COLOR_NAMES[color],
+                style=discord.ButtonStyle.success if self.parent.color_marks[self.selected_slot] == color else discord.ButtonStyle.secondary,
+                emoji="🎨",
+                row=2,
+            )
+
+            async def color_callback(interaction: discord.Interaction, selected=color):
+                await self.set_color_mark(interaction, selected)
+
+            color_button.callback = color_callback
+            self.add_item(color_button)
+
+        if self.parent.has_shapes:
+            for shape in SHAPES:
+                shape_button = Button(
+                    label=shape,
+                    style=discord.ButtonStyle.success if self.parent.shape_marks[self.selected_slot] == shape else discord.ButtonStyle.secondary,
+                    emoji="🔷",
+                    row=3,
+                )
+
+                async def shape_callback(interaction: discord.Interaction, selected=shape):
+                    await self.set_shape_mark(interaction, selected)
+
+                shape_button.callback = shape_callback
+                self.add_item(shape_button)
+
+    async def select_slot(self, interaction: discord.Interaction, slot: int) -> None:
+        self.selected_slot = slot
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"已切換到第 {slot + 1} 位標記。"), view=self)
+
+    async def set_color_mark(self, interaction: discord.Interaction, color: str) -> None:
+        self.parent.color_marks[self.selected_slot] = color
+        await self.parent.update_board_from_child(interaction, f"📌 已標記第 {self.selected_slot + 1} 位顏色：{COLOR_NAMES[color]}。")
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已標記第 {self.selected_slot + 1} 位顏色：{COLOR_NAMES[color]}。"), view=self)
+
+    async def set_shape_mark(self, interaction: discord.Interaction, shape: str) -> None:
+        if not self.parent.has_shapes:
+            await interaction.response.send_message("❌ 目前難度沒有圖形標記。", ephemeral=True)
+            return
+        self.parent.shape_marks[self.selected_slot] = shape
+        await self.parent.update_board_from_child(interaction, f"📌 已標記第 {self.selected_slot + 1} 位圖形：{shape}。")
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已標記第 {self.selected_slot + 1} 位圖形：{shape}。"), view=self)
+
+    async def reset_slot_marks(self, interaction: discord.Interaction) -> None:
+        self.parent.digit_marks[self.selected_slot] = []
+        self.parent.color_marks[self.selected_slot] = None
+        self.parent.shape_marks[self.selected_slot] = None
+        await self.parent.update_board_from_child(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已重製第 {self.selected_slot + 1} 位的數字、顏色與圖形標記。"), view=self)
 
     def parse_digit_marks(self, raw_marks: str) -> list[list[int]] | None:
         normalized = raw_marks.strip().replace("，", ",").replace("、", ",").replace("/", ",")
@@ -685,7 +766,7 @@ class NumberSearcherAnswerGuessView(View):
     def build_embed(self, status_text: str | None = None) -> discord.Embed:
         number_text = format_code(self.number_guess) if self.number_guess is not None else "未輸入"
         description = status_text or f"先輸入三位數字，再依序按下方{self.kind_label()}按鈕；先按的會先排到第 1 格，最後按確定送出。"
-        embed = discord.Embed(title="🧩 猜謎底", description=description, color=discord.Color.dark_teal())
+        embed = discord.Embed(title=f"🧩 猜謎底（{self.kind_label()}）", description=description, color=discord.Color.dark_teal())
         embed.add_field(name="數字", value=number_text, inline=True)
         embed.add_field(name=f"已選{self.kind_label()}", value=self.ordered_extra_text(), inline=False)
         embed.add_field(name="本次送出費用", value=f"${self.parent.guess_cost()}", inline=True)
@@ -933,7 +1014,8 @@ class NumberSearcherView(View):
             return
         for child in self.children:
             if getattr(child, "label", "") == "猜數字":
-                child.label = "猜謎底"
+                kind_label = "顏色" if self.extra_guess_kind == "color" else "圖形"
+                child.label = f"猜謎底（{kind_label}）"
                 child.emoji = "🧩"
                 break
 
@@ -1829,32 +1911,24 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         x = start_x + index * 200
         y = 140
         digit_mark = view.digit_marks[index] if not reveal else []
+        marked_color = view.color_marks[index] if not reveal else None
+        marked_shape = view.shape_marks[index] if not reveal else None
         if reveal:
             fill = COLOR_RGB[view.colors[index]]
             outline = (245, 245, 245)
             text = str(view.secret[index])
             text_fill = (20, 24, 30)
         else:
-            fill = (100, 108, 118)
-            outline = (170, 178, 188)
+            fill = COLOR_RGB[marked_color] if marked_color else (100, 108, 118)
+            outline = (245, 245, 245) if marked_color or marked_shape else (170, 178, 188)
             text = str(digit_mark[0]) if len(digit_mark) == 1 else "?"
-            text_fill = (245, 245, 245)
+            text_fill = (20, 24, 30) if marked_color else (245, 245, 245)
         if reveal and view.has_shapes:
             draw_filled_shape(draw, view.shapes[index], (x + 75, y + 76), 70, fill, outline)
+        elif marked_shape:
+            draw_filled_shape(draw, marked_shape, (x + 75, y + 76), 70, fill, outline)
         else:
             draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
-            if not reveal:
-                marker_badges = []
-                if view.color_marks[index]:
-                    marker_badges.append((view.color_marks[index], COLOR_RGB[view.color_marks[index]]))
-                if view.shape_marks[index]:
-                    marker_badges.append((view.shape_marks[index][:1], (225, 235, 245)))
-                for badge_index, (badge, badge_fill) in enumerate(marker_badges[:2]):
-                    bx = x + 10 + badge_index * 42
-                    draw.rounded_rectangle((bx, y + 10, bx + 34, y + 36), radius=8, fill=(28, 34, 44), outline=badge_fill, width=2)
-                    badge_text = safe_text(small_font, badge, badge)
-                    badge_bbox = draw.textbbox((0, 0), badge_text, font=small_font)
-                    draw.text((bx + 17 - (badge_bbox[2] - badge_bbox[0]) / 2, y + 14), badge_text, fill=badge_fill, font=small_font)
         bbox = draw.textbbox((0, 0), text, font=box_font)
         draw.text((x + 75 - (bbox[2] - bbox[0]) / 2, y + 75 - (bbox[3] - bbox[1]) / 2 - 8), text, fill=text_fill, font=box_font)
         multi_mark_text = "".join(str(digit) for digit in digit_mark) if len(digit_mark) > 1 else ""
