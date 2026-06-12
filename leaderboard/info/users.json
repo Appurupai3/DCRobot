@@ -1,0 +1,161 @@
+{
+    "437224959291686924": {
+        "game_stats": {
+            "骰子決鬥": {
+                "game": "骰子決鬥",
+                "plays": 5,
+                "wins": 2,
+                "losses": 3,
+                "evens": 0,
+                "total_delta": 199500,
+                "total_bet": 100300,
+                "max_profit": 100000,
+                "max_loss": -200,
+                "last_played_at": "2026-06-05T17:41:58+00:00",
+                "extra": {
+                    "cashout_total": 0,
+                    "cashout_count": 0,
+                    "crit_50x_count": 0
+                }
+            },
+            "打氣球": {
+                "game": "打氣球",
+                "plays": 3,
+                "wins": 1,
+                "losses": 2,
+                "evens": 0,
+                "total_delta": -1350,
+                "total_bet": 1500,
+                "max_profit": 3000,
+                "max_loss": -3850,
+                "last_played_at": "2026-06-05T15:12:13+00:00",
+                "extra": {}
+            },
+            "數字搜尋者": {
+                "game": "數字搜尋者",
+                "plays": 5,
+                "wins": 0,
+                "losses": 5,
+                "evens": 0,
+                "total_delta": 0,
+                "total_bet": 0,
+                "max_profit": null,
+                "max_loss": null,
+                "last_played_at": "2026-06-06T08:51:50+00:00",
+                "extra": {
+                    "number_clue_count": 0,
+                    "color_clue_count": 0,
+                    "shape_clue_count": 0,
+                    "random_clue_count": 0,
+                    "guess_total": 0,
+                    "difficulty": 0
+                }
+            },
+            "拋硬幣挑戰": {
+                "game": "拋硬幣挑戰",
+                "plays": 2,
+                "wins": 1,
+                "losses": 1,
+                "evens": 0,
+                "total_delta": 5000,
+                "total_bet": 10000,
+                "max_profit": 10000,
+                "max_loss": -5000,
+                "last_played_at": "2026-06-05T17:41:54+00:00",
+                "extra": {}
+            },
+            "數字搜尋者2": {
+                "game": "數字搜尋者2",
+                "plays": 15,
+                "wins": 6,
+                "losses": 9,
+                "evens": 0,
+                "total_delta": 11100,
+                "total_bet": 19900,
+                "max_profit": 4200,
+                "max_loss": -4450,
+                "last_played_at": "2026-06-06T09:19:12+00:00",
+                "extra": {
+                    "number_clue_count": 14,
+                    "color_clue_count": 28,
+                    "shape_clue_count": 0,
+                    "random_clue_count": 7,
+                    "guess_total": 8,
+                    "difficulty": 32
+                }
+            }
+        }
+    },
+    "713583495695433768": {
+        "game_stats": {
+            "數字搜尋者2": {
+                "game": "數字搜尋者2",
+                "plays": 6,
+                "wins": 5,
+                "losses": 1,
+                "evens": 0,
+                "total_delta": 12450,
+                "total_bet": 12550,
+                "max_profit": 3600,
+                "max_loss": -100,
+                "last_played_at": "2026-06-06T09:02:10+00:00",
+                "extra": {
+                    "number_clue_count": 5,
+                    "color_clue_count": 2,
+                    "shape_clue_count": 0,
+                    "random_clue_count": 24,
+                    "guess_total": 8,
+                    "difficulty": 10
+                }
+            }
+        }
+    },
+    "727118190039269398": {
+        "game_stats": {
+            "數字搜尋者": {
+                "game": "數字搜尋者",
+                "plays": 1,
+                "wins": 0,
+                "losses": 1,
+                "evens": 0,
+                "total_delta": -200,
+                "total_bet": 200,
+                "max_profit": null,
+                "max_loss": -200,
+                "last_played_at": "2026-06-06T07:28:49+00:00",
+                "extra": {
+                    "number_clue_count": 0,
+                    "color_clue_count": 1,
+                    "shape_clue_count": 0,
+                    "random_clue_count": 0,
+                    "guess_total": 1,
+                    "difficulty": 0
+                }
+            }
+        }
+    },
+    "750622206438146120": {
+        "game_stats": {
+            "數字搜尋者": {
+                "game": "數字搜尋者",
+                "plays": 2,
+                "wins": 1,
+                "losses": 1,
+                "evens": 0,
+                "total_delta": 251300,
+                "total_bet": 248700,
+                "max_profit": 255000,
+                "max_loss": -3700,
+                "last_played_at": "2026-06-08T05:42:20+00:00",
+                "extra": {
+                    "number_clue_count": 5,
+                    "color_clue_count": 6,
+                    "shape_clue_count": 0,
+                    "random_clue_count": 1,
+                    "guess_total": 3,
+                    "difficulty": 0
+                }
+            }
+        }
+    }
+}
