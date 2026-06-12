@@ -1,0 +1,28 @@
+{
+    "437224959291686924": {
+        "game": "多人遊戲：印加寶藏",
+        "plays": 1,
+        "wins": 1,
+        "losses": 0,
+        "evens": 0,
+        "total_delta": 10,
+        "total_bet": 10,
+        "max_profit": 10,
+        "max_loss": null,
+        "last_played_at": "2026-06-12T10:26:16+00:00",
+        "extra": {}
+    },
+    "1059120867994513448": {
+        "game": "多人遊戲：印加寶藏",
+        "plays": 1,
+        "wins": 0,
+        "losses": 1,
+        "evens": 0,
+        "total_delta": -10,
+        "total_bet": 10,
+        "max_profit": null,
+        "max_loss": -10,
+        "last_played_at": "2026-06-12T10:26:16+00:00",
+        "extra": {}
+    }
+}

@@ -1,5 +1,11 @@
 [
     {
+        "game": "多人遊戲：印加寶藏",
+        "file": "leaderboard\\多人遊戲：印加寶藏.json",
+        "players": 2,
+        "updated_at": "2026-06-12T10:26:16+00:00"
+    },
+    {
         "game": "拋硬幣挑戰",
         "file": "leaderboard\\拋硬幣挑戰.json",
         "players": 1,
