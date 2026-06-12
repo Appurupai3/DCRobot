@@ -542,6 +542,120 @@ class NumberSearcherExtraGuessModal(Modal):
         await self.view_ref.handle_extra_guess(interaction, self.guess.value)
 
 
+class NumberSearcherAnswerNumberModal(Modal):
+    def __init__(self, answer_view: "NumberSearcherAnswerGuessView"):
+        super().__init__(title="🔢 輸入謎底數字")
+        self.answer_view = answer_view
+        self.guess = TextInput(label="三位數字", placeholder="例如 407（三位數字 0~9）", required=True, max_length=12)
+        self.add_item(self.guess)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.answer_view.set_number_guess(interaction, self.guess.value)
+
+
+class NumberSearcherAnswerGuessView(View):
+    def __init__(self, parent: "NumberSearcherView"):
+        super().__init__(timeout=120)
+        self.parent = parent
+        self.number_guess: tuple[int, int, int] | None = None
+        self.extra_guesses: list[str | None] = [None] * CODE_LENGTH
+        self.extra_options = tuple(parent.available_colors) if parent.extra_guess_kind == "color" else SHAPES
+        self.rebuild_items()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.user.id:
+            await interaction.response.send_message("❌ 這不是你的謎底猜測介面。", ephemeral=True)
+            return False
+        return True
+
+    def kind_label(self) -> str:
+        return "顏色" if self.parent.extra_guess_kind == "color" else "圖形"
+
+    def display_extra_value(self, value: str | None) -> str:
+        if value is None:
+            return "未選"
+        return COLOR_NAMES.get(value, value)
+
+    def build_embed(self, status_text: str | None = None) -> discord.Embed:
+        number_text = format_code(self.number_guess) if self.number_guess is not None else "未輸入"
+        extra_text = " / ".join(self.display_extra_value(value) for value in self.extra_guesses)
+        description = status_text or "請先輸入三位數字，再用下方按鈕選擇每一格的額外規格，最後按確定送出。"
+        embed = discord.Embed(title="🧩 猜謎底", description=description, color=discord.Color.dark_teal())
+        embed.add_field(name="數字", value=number_text, inline=True)
+        embed.add_field(name=self.kind_label(), value=extra_text, inline=True)
+        embed.add_field(name="本次送出費用", value=f"${self.parent.guess_cost()}", inline=True)
+        return embed
+
+    def rebuild_items(self) -> None:
+        self.clear_items()
+
+        number_label = f"輸入數字：{format_code(self.number_guess)}" if self.number_guess is not None else "輸入數字"
+        number_button = Button(label=number_label, style=discord.ButtonStyle.primary, emoji="🔢", row=0)
+
+        async def number_callback(interaction: discord.Interaction):
+            await interaction.response.send_modal(NumberSearcherAnswerNumberModal(self))
+
+        number_button.callback = number_callback
+        self.add_item(number_button)
+
+        for index in range(CODE_LENGTH):
+            value = self.extra_guesses[index]
+            button = Button(
+                label=f"第 {index + 1} 格：{self.display_extra_value(value)}",
+                style=discord.ButtonStyle.success if value is not None else discord.ButtonStyle.secondary,
+                emoji="🎨" if self.parent.extra_guess_kind == "color" else "🔷",
+                row=1,
+            )
+
+            async def option_callback(interaction: discord.Interaction, slot=index):
+                await self.cycle_extra_guess(interaction, slot)
+
+            button.callback = option_callback
+            self.add_item(button)
+
+        submit_button = Button(label="確定送出猜測", style=discord.ButtonStyle.danger, emoji="✅", row=2)
+
+        async def submit_callback(interaction: discord.Interaction):
+            await self.submit_guess(interaction)
+
+        submit_button.callback = submit_callback
+        self.add_item(submit_button)
+
+    async def set_number_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
+        try:
+            self.number_guess = parse_code(raw_guess)
+        except ValueError:
+            await interaction.response.send_message("❌ 請輸入剛好三位 0~9 數字，例如 407。", ephemeral=True)
+            return
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新謎底數字，請繼續選擇額外規格或送出。"), view=self)
+
+    async def cycle_extra_guess(self, interaction: discord.Interaction, slot: int) -> None:
+        current = self.extra_guesses[slot]
+        if current not in self.extra_options:
+            next_value = self.extra_options[0]
+        else:
+            next_value = self.extra_options[(self.extra_options.index(current) + 1) % len(self.extra_options)]
+        self.extra_guesses[slot] = next_value
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"已設定第 {slot + 1} 格{self.kind_label()}：{self.display_extra_value(next_value)}。"), view=self)
+
+    async def submit_guess(self, interaction: discord.Interaction) -> None:
+        if self.parent.ended:
+            await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
+            return
+        if self.number_guess is None or any(value is None for value in self.extra_guesses):
+            await interaction.response.send_message("❌ 請先完成三位數字與三格額外規格後再送出。", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.parent.handle_answer_guess(
+            interaction,
+            self.number_guess,
+            tuple(value for value in self.extra_guesses if value is not None),
+            source_view=self,
+        )
+
+
 class NumberSearcherCustomMultiplierModal(Modal):
     def __init__(self, view: "NumberSearcherView"):
         super().__init__(title="🔢 自訂數字搜尋者倍率")
@@ -624,6 +738,7 @@ class NumberSearcherView(View):
         self.ended = False
         self.message: discord.Message | None = None
         self.add_advanced_buttons()
+        self.configure_guess_button()
         self.add_multiplier_select()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -682,13 +797,14 @@ class NumberSearcherView(View):
             test_button.callback = test_callback
             self.add_item(test_button)
 
-            extra_button = Button(label="猜額外規格", style=discord.ButtonStyle.primary, emoji="🧩", row=2)
-
-            async def extra_callback(interaction: discord.Interaction):
-                await interaction.response.send_modal(NumberSearcherExtraGuessModal(self))
-
-            extra_button.callback = extra_callback
-            self.add_item(extra_button)
+    def configure_guess_button(self) -> None:
+        if not self.requires_extra_guess:
+            return
+        for child in self.children:
+            if getattr(child, "label", "") == "猜數字":
+                child.label = "猜謎底"
+                child.emoji = "🧩"
+                break
 
     def add_multiplier_select(self) -> None:
         options = [
@@ -790,17 +906,23 @@ class NumberSearcherView(View):
         lobby_button.callback = lobby_callback
         self.add_item(lobby_button)
 
-    async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
-        await open_account(interaction.user)
+    async def spend_wallet(self, user: discord.User, cost: int) -> str | None:
+        await open_account(user)
         users = load_data()
-        uid = str(interaction.user.id)
+        uid = str(user.id)
         if users[uid]["wallet"] < cost:
-            await interaction.response.send_message(f"❌ 錢包餘額不足，本次需要 ${cost}。", ephemeral=True)
-            return False
+            return f"❌ 錢包餘額不足，本次需要 ${cost}。"
         users[uid]["wallet"] -= cost
         save_data(users)
         self.total_spent += cost
         self.refresh_multiplier_select()
+        return None
+
+    async def charge_wallet(self, interaction: discord.Interaction, cost: int) -> bool:
+        error = await self.spend_wallet(interaction.user, cost)
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return False
         return True
 
     def build_embed_and_file(self, status_text: str, *, reveal: bool = False, color: discord.Color | None = None) -> tuple[discord.Embed, discord.File]:
@@ -1019,7 +1141,14 @@ class NumberSearcherView(View):
         users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = next_unlocked
         set_number_searcher2_unlocked(uid, next_unlocked)
 
-    async def complete_success(self, interaction: discord.Interaction, cost: int, guess_text: str) -> None:
+    async def complete_success(
+        self,
+        interaction: discord.Interaction,
+        cost: int,
+        guess_text: str,
+        *,
+        update_message: discord.Message | None = None,
+    ) -> None:
         users = load_data()
         uid = str(self.user.id)
         reward = self.guess_reward()
@@ -1046,14 +1175,20 @@ class NumberSearcherView(View):
         self.show_post_game_controls()
         profit = self.settlement_profit()
         self.history.append(f"✅ ${cost}｜猜測 {guess_text}｜正確，獲得 ${reward}｜營利 {format_money_delta(profit)}")
-        await self.refresh(
-            interaction,
+        status_text = (
             f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${reward}。\n"
             f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
-            f"目前錢包餘額：${balance}",
-            reveal=True,
-            color=discord.Color.green(),
+            f"目前錢包餘額：${balance}"
         )
+        if update_message is not None:
+            embed, file = self.build_embed_and_file(status_text, reveal=True, color=discord.Color.green())
+            await update_message.edit(embed=embed, attachments=[file], view=self)
+            if interaction.response.is_done():
+                await interaction.followup.send(status_text, ephemeral=True)
+            else:
+                await interaction.response.send_message(status_text, ephemeral=True)
+            return
+        await self.refresh(interaction, status_text, reveal=True, color=discord.Color.green())
 
     async def handle_number_test(self, interaction: discord.Interaction, raw_guess: str) -> None:
         if self.ended:
@@ -1099,6 +1234,55 @@ class NumberSearcherView(View):
         self.history.append(f"❌ ${cost}｜額外規格 {raw_guess}｜錯誤")
         await self.refresh(interaction, "額外規格猜測錯誤，請繼續推理。")
 
+    async def handle_answer_guess(
+        self,
+        interaction: discord.Interaction,
+        number_guess: tuple[int, int, int],
+        extra_guess: tuple[str, ...],
+        *,
+        source_view: NumberSearcherAnswerGuessView | None = None,
+    ) -> None:
+        if self.ended:
+            await interaction.followup.send("✅ 本局已結束。", ephemeral=True)
+            return
+        if len(extra_guess) != CODE_LENGTH:
+            await interaction.followup.send("❌ 請完成三格額外規格後再送出。", ephemeral=True)
+            return
+
+        cost = self.guess_cost()
+        error = await self.spend_wallet(interaction.user, cost)
+        if error:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+
+        self.guess_count += 1
+        target = self.colors if self.extra_guess_kind == "color" else self.shapes
+        number_text = format_code(number_guess)
+        extra_text = "、".join(COLOR_NAMES.get(value, value) for value in extra_guess)
+        if number_guess == self.secret and tuple(extra_guess) == tuple(target):
+            self.digits_solved = True
+            self.extra_guess_solved = True
+            await self.complete_success(
+                interaction,
+                cost,
+                f"{number_text}+{extra_text}",
+                update_message=self.message,
+            )
+            if source_view is not None:
+                source_view.stop()
+            return
+
+        self.history.append(f"❌ ${cost}｜猜謎底 {number_text}+{extra_text}｜錯誤")
+        status_text = f"猜謎底 {number_text}+{extra_text} 錯誤，請繼續推理。"
+        if self.message is not None:
+            embed, file = self.build_embed_and_file(status_text)
+            await self.message.edit(embed=embed, attachments=[file], view=self)
+        if source_view is not None:
+            source_view.rebuild_items()
+            await interaction.edit_original_response(embed=source_view.build_embed(f"❌ {status_text}"), view=source_view)
+        else:
+            await interaction.followup.send(status_text, ephemeral=True)
+
     async def handle_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
@@ -1131,6 +1315,10 @@ class NumberSearcherView(View):
     async def guess_number(self, interaction: discord.Interaction, button: Button):
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
+            return
+        if self.requires_extra_guess:
+            answer_view = NumberSearcherAnswerGuessView(self)
+            await interaction.response.send_message(embed=answer_view.build_embed(), view=answer_view, ephemeral=True)
             return
         await interaction.response.send_modal(NumberSearcherGuessModal(self))
 
@@ -1430,8 +1618,9 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
             text = "?"
             text_fill = (245, 245, 245)
         draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
-        if reveal and view.has_shapes:
-            draw_shape_icon(draw, view.shapes[index], (x + 75, y + 106), 25, (35, 38, 48))
+        if view.has_shapes:
+            shape_fill = (35, 38, 48) if reveal else (225, 235, 245)
+            draw_shape_icon(draw, view.shapes[index], (x + 75, y + 106), 25, shape_fill)
         bbox = draw.textbbox((0, 0), text, font=box_font)
         draw.text((x + 75 - (bbox[2] - bbox[0]) / 2, y + 75 - (bbox[3] - bbox[1]) / 2 - 8), text, fill=text_fill, font=box_font)
         label = safe_text(small_font, f"第 {index + 1} 位", f"Slot {index + 1}")
