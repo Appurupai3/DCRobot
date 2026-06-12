@@ -1,23 +1,25 @@
 {
     "437224959291686924": {
         "game": "數字搜尋者2",
-        "plays": 15,
-        "wins": 6,
+        "plays": 8,
+        "wins": 7,
         "losses": 9,
         "evens": 0,
-        "total_delta": 11100,
-        "total_bet": 19900,
+        "total_delta": 14250,
+        "total_bet": 21750,
         "max_profit": 4200,
         "max_loss": -4450,
-        "last_played_at": "2026-06-06T09:19:12+00:00",
+        "last_played_at": "2026-06-12T17:51:37+00:00",
         "extra": {
             "number_clue_count": 14,
-            "color_clue_count": 28,
+            "color_clue_count": 32,
             "shape_clue_count": 0,
-            "random_clue_count": 7,
-            "guess_total": 8,
-            "difficulty": 32
-        }
+            "random_clue_count": 8,
+            "guess_total": 9,
+            "difficulty": 32,
+            "highest_cleared_difficulty": 0
+        },
+        "unlocked_level": 8
     },
     "713583495695433768": {
         "game": "數字搜尋者2",
@@ -37,6 +39,7 @@
             "random_clue_count": 24,
             "guess_total": 8,
             "difficulty": 10
-        }
+        },
+        "unlocked_level": 5
     }
 }
