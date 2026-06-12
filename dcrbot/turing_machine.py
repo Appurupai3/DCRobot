@@ -507,15 +507,25 @@ class PendingClueChoiceView(View):
         self.stop()
 
 
+def format_digit_marks_for_input(digit_marks: list[list[int]]) -> str:
+    """Return a modal-friendly comma string preserving empty slots."""
+
+    slots = ["".join(str(digit) for digit in marks) for marks in digit_marks[:CODE_LENGTH]]
+    while len(slots) < CODE_LENGTH:
+        slots.append("")
+    return ",".join(slots)
+
+
 class NumberSearcherDigitMarkModal(Modal):
     def __init__(self, marker_view: "NumberSearcherMarkerView"):
         super().__init__(title="📌 設定數字標記")
         self.marker_view = marker_view
-        current = ",".join("".join(str(digit) for digit in marks) for marks in marker_view.parent.digit_marks)
+        current = format_digit_marks_for_input(marker_view.parent.digit_marks)
+        placeholder = current if any(slot for slot in current.split(",")) else "例如 132,5,56（逗號分隔第 1/2/3 位；留空清除該位）"
         self.marks = TextInput(
             label="三格數字標記",
-            placeholder="例如 132,5,56（逗號分隔第 1/2/3 位；留空清除該位）",
-            default=current,
+            placeholder=placeholder,
+            default=current if any(slot for slot in current.split(",")) else None,
             required=False,
             max_length=40,
         )
@@ -544,7 +554,7 @@ class NumberSearcherMarkerView(View):
             description=status_text or "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。",
             color=discord.Color.blurple(),
         )
-        digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.parent.digit_marks)
+        digit_text = " / ".join(slot or "-" for slot in format_digit_marks_for_input(self.parent.digit_marks).split(","))
         color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.parent.color_marks)
         shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
         embed.add_field(name="目前位置", value=f"第 {self.selected_slot + 1} 位", inline=True)
@@ -1146,8 +1156,8 @@ class NumberSearcherView(View):
 
     def marker_summary(self) -> str:
         parts = []
-        digit_text = ",".join("".join(str(digit) for digit in marks) or "-" for marks in self.digit_marks)
-        if digit_text != "-,-,-":
+        digit_text = "/".join(slot or "-" for slot in format_digit_marks_for_input(self.digit_marks).split(","))
+        if digit_text != "-/-/-":
             parts.append(f"數字 {digit_text}")
         color_text = "/".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
         if color_text != "-/-/-":
