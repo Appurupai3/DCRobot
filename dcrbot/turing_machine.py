@@ -1655,7 +1655,7 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
             outline = (170, 178, 188)
             text = "?"
             text_fill = (245, 245, 245)
-        if view.has_shapes:
+        if reveal and view.has_shapes:
             draw_filled_shape(draw, view.shapes[index], (x + 75, y + 76), 70, fill, outline)
         else:
             draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
