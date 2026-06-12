@@ -98,6 +98,12 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
             )
         )
         lines.append(f"平均猜測 {float(extra.get('guess_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
+        if game_name == "數字搜尋者2":
+            highest = extra.get("highest_cleared_difficulty")
+            highest_text = f"N{int(highest)}" if highest is not None else "尚未通關"
+            unlocked = stats.get("unlocked_level")
+            unlocked_text = f"N{int(unlocked)}" if unlocked is not None else "N0"
+            lines.append(f"已通關最高難度 **{highest_text}**｜目前解鎖 **{unlocked_text}**")
     return lines
 
 

@@ -10,7 +10,14 @@ import discord
 from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
-from dcrbot.storage import append_game_record, load_data, open_account, save_data
+from dcrbot.storage import (
+    append_game_record,
+    get_number_searcher2_unlocked,
+    load_data,
+    open_account,
+    save_data,
+    set_number_searcher2_unlocked,
+)
 
 
 DIGITS = tuple(range(10))
@@ -1005,8 +1012,12 @@ class NumberSearcherView(View):
     def unlock_next_difficulty(self, users: dict, uid: str) -> None:
         if self.game_name != "數字搜尋者2":
             return
-        current_unlocked = int(users[uid].get(NUMBER_SEARCHER2_UNLOCK_KEY, 0) or 0)
-        users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = max(current_unlocked, min(self.difficulty + 1, 8))
+        current_unlocked = get_number_searcher2_unlocked(uid)
+        # Keep the in-memory value for the current interaction, but persist the
+        # real unlock rank in leaderboard/數字搜尋者2.json instead of bank.json.
+        next_unlocked = max(current_unlocked, min(self.difficulty + 1, 8))
+        users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = next_unlocked
+        set_number_searcher2_unlocked(uid, next_unlocked)
 
     async def complete_success(self, interaction: discord.Interaction, cost: int, guess_text: str) -> None:
         users = load_data()
@@ -1015,6 +1026,9 @@ class NumberSearcherView(View):
         users[uid]["wallet"] += reward
         self.unlock_next_difficulty(users, uid)
         balance = users[uid]["wallet"]
+        extra_stats = self.record_extra_stats()
+        if self.game_name == "數字搜尋者2":
+            extra_stats["highest_cleared_difficulty"] = self.difficulty
         append_game_record(
             users,
             uid,
@@ -1024,7 +1038,7 @@ class NumberSearcherView(View):
             delta=reward - self.total_spent,
             balance=balance,
             details=self.answer_details(),
-            extra_stats=self.record_extra_stats(),
+            extra_stats=extra_stats,
         )
         save_data(users)
         self.settlement_reward = reward
@@ -1274,9 +1288,7 @@ class NumberSearcher2DifficultyView(View):
         return True
 
     def unlocked_level(self) -> int:
-        users = load_data()
-        uid = str(self.user.id)
-        return max(0, min(8, int(users.get(uid, {}).get(NUMBER_SEARCHER2_UNLOCK_KEY, 0) or 0)))
+        return get_number_searcher2_unlocked(str(self.user.id))
 
     def add_difficulty_select(self) -> None:
         unlocked = self.unlocked_level()
@@ -1362,9 +1374,7 @@ def number_searcher2_description(difficulty: int) -> str:
 
 
 def build_number_searcher2_difficulty_embed(user: discord.User) -> discord.Embed:
-    users = load_data()
-    uid = str(user.id)
-    unlocked = max(0, min(8, int(users.get(uid, {}).get(NUMBER_SEARCHER2_UNLOCK_KEY, 0) or 0)))
+    unlocked = get_number_searcher2_unlocked(str(user.id))
     embed = discord.Embed(
         title="🔢 數字搜尋者2 難度選擇",
         description=f"目前解鎖到 N{unlocked}。通過目前最高難度後會解鎖下一級。",

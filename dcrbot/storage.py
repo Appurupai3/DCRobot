@@ -16,6 +16,8 @@ LEADERBOARD_INFO_DIR = LEADERBOARD_DIR / "info"
 USER_INFO_PATH = LEADERBOARD_INFO_DIR / "users.json"
 MAX_GAME_RECORDS = 100
 BANK_ALLOWED_KEYS = {"wallet", "bank", "number_searcher2_unlocked"}
+NUMBER_SEARCHER2_GAME_NAME = "數字搜尋者2"
+MAX_EXTRA_STAT_KEYS = {"highest_cleared_difficulty"}
 
 
 def ensure_leaderboard_dir() -> None:
@@ -236,6 +238,10 @@ def _apply_game_stat(
         for key, value in extra_stats.items():
             if value is None:
                 continue
+            if key in MAX_EXTRA_STAT_KEYS:
+                current = extras.get(key)
+                extras[key] = int(value) if current is None else max(int(current), int(value))
+                continue
             current = extras.get(key, 0)
             extras[key] = float(current) + float(value) if isinstance(value, float) else int(current) + int(value)
 
@@ -337,6 +343,37 @@ def append_leaderboard_record(record: Dict[str, Any]) -> None:
     _update_leaderboard_index(game_name, record_path, game_stats, record.get("played_at"))
 
 
+def get_number_searcher2_unlocked(uid: str) -> int:
+    """Return the Number Searcher 2 difficulty unlocked for a user from its leaderboard row."""
+
+    game_stats = _load_json_dict(LEADERBOARD_DIR / f"{_safe_leaderboard_name(NUMBER_SEARCHER2_GAME_NAME)}.json")
+    user_stats = game_stats.get(str(uid), {})
+    if not isinstance(user_stats, dict):
+        return 0
+    return max(0, min(8, int(user_stats.get("unlocked_level", 0) or 0)))
+
+
+def set_number_searcher2_unlocked(uid: str, unlocked_level: int) -> None:
+    """Persist the Number Searcher 2 difficulty unlock rank in leaderboard/數字搜尋者2.json."""
+
+    ensure_leaderboard_dir()
+    record_path = LEADERBOARD_DIR / f"{_safe_leaderboard_name(NUMBER_SEARCHER2_GAME_NAME)}.json"
+    game_stats = _load_json_dict(record_path)
+    user_stats = game_stats.setdefault(str(uid), _empty_game_stat(NUMBER_SEARCHER2_GAME_NAME))
+    if not isinstance(user_stats, dict):
+        user_stats = _empty_game_stat(NUMBER_SEARCHER2_GAME_NAME)
+    user_stats["game"] = NUMBER_SEARCHER2_GAME_NAME
+    user_stats["unlocked_level"] = max(0, min(8, int(unlocked_level)))
+    game_stats[str(uid)] = user_stats
+    _write_json(record_path, game_stats)
+    _update_leaderboard_index(
+        NUMBER_SEARCHER2_GAME_NAME,
+        record_path,
+        game_stats,
+        str(user_stats.get("last_played_at", "")) or None,
+    )
+
+
 def append_game_record(
     users: Dict[str, Any],
     uid: str,
@@ -425,7 +462,14 @@ def summarize_game_records(users: Dict[str, Any], uid: str) -> dict[str, Dict[st
     ensure_user_data(users, uid)
     info = _load_user_info()
     stats = _ensure_user_info(info, uid).get("game_stats", {})
-    return {str(game): dict(value) for game, value in stats.items() if isinstance(value, dict)}
+    summary = {str(game): dict(value) for game, value in stats.items() if isinstance(value, dict)}
+    leaderboard_stats = load_user_leaderboard_stats(uid)
+    number_searcher2_stats = leaderboard_stats.get(NUMBER_SEARCHER2_GAME_NAME, {})
+    if NUMBER_SEARCHER2_GAME_NAME in summary and isinstance(number_searcher2_stats, dict):
+        unlocked_level = number_searcher2_stats.get("unlocked_level")
+        if unlocked_level is not None:
+            summary[NUMBER_SEARCHER2_GAME_NAME]["unlocked_level"] = int(unlocked_level)
+    return summary
 
 
 def get_profit_loss_records(users: Dict[str, Any], uid: str, limit: int = 5) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
