@@ -2014,11 +2014,21 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         draw.text((x + 75 - (bbox[2] - bbox[0]) / 2, y + 75 - (bbox[3] - bbox[1]) / 2 - 8), text, fill=text_fill, font=box_font)
         multi_mark_text = "".join(str(digit) for digit in digit_mark) if len(digit_mark) > 1 else ""
         if multi_mark_text:
-            mark_bbox = draw.textbbox((0, 0), multi_mark_text, font=body_font)
+            mark_bbox = draw.textbbox((0, 0), multi_mark_text, font=body_font, stroke_width=1)
+            mark_fill = (20, 24, 30) if marked_colors else (245, 245, 245)
+            mark_stroke = (245, 245, 245) if marked_colors else (20, 24, 30)
             # Multi-digit candidate marks sit at the top of the tile/marked shape
             # so they stay visually associated with that slot without colliding
-            # with the slot label below.
-            draw.text((x + 75 - (mark_bbox[2] - mark_bbox[0]) / 2, y + 16), multi_mark_text, fill=(235, 214, 154), font=body_font)
+            # with the slot label below. Use a stroke to make the marker bold:
+            # white before color marking, black after a color marker is set.
+            draw.text(
+                (x + 75 - (mark_bbox[2] - mark_bbox[0]) / 2, y + 16),
+                multi_mark_text,
+                fill=mark_fill,
+                font=body_font,
+                stroke_width=1,
+                stroke_fill=mark_stroke,
+            )
         label = safe_text(small_font, f"第 {index + 1} 位", f"Slot {index + 1}")
         label_y = y + 166
         draw.text((x + 44, label_y), label, fill=(210, 220, 230), font=small_font)
