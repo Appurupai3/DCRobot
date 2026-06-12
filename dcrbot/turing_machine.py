@@ -558,7 +558,7 @@ class NumberSearcherAnswerGuessView(View):
         super().__init__(timeout=120)
         self.parent = parent
         self.number_guess: tuple[int, int, int] | None = None
-        self.extra_guesses: list[str | None] = [None] * CODE_LENGTH
+        self.extra_guesses: list[str] = []
         self.extra_options = tuple(parent.available_colors) if parent.extra_guess_kind == "color" else SHAPES
         self.rebuild_items()
 
@@ -576,13 +576,17 @@ class NumberSearcherAnswerGuessView(View):
             return "未選"
         return COLOR_NAMES.get(value, value)
 
+    def ordered_extra_text(self) -> str:
+        values = [self.display_extra_value(value) for value in self.extra_guesses]
+        values.extend("未選" for _ in range(CODE_LENGTH - len(values)))
+        return " / ".join(f"第 {index + 1} 格：{value}" for index, value in enumerate(values[:CODE_LENGTH]))
+
     def build_embed(self, status_text: str | None = None) -> discord.Embed:
         number_text = format_code(self.number_guess) if self.number_guess is not None else "未輸入"
-        extra_text = " / ".join(self.display_extra_value(value) for value in self.extra_guesses)
-        description = status_text or "請先輸入三位數字，再用下方按鈕選擇每一格的額外規格，最後按確定送出。"
+        description = status_text or f"先輸入三位數字，再依序按下方{self.kind_label()}按鈕；先按的會先排到第 1 格，最後按確定送出。"
         embed = discord.Embed(title="🧩 猜謎底", description=description, color=discord.Color.dark_teal())
         embed.add_field(name="數字", value=number_text, inline=True)
-        embed.add_field(name=self.kind_label(), value=extra_text, inline=True)
+        embed.add_field(name=f"已選{self.kind_label()}", value=self.ordered_extra_text(), inline=False)
         embed.add_field(name="本次送出費用", value=f"${self.parent.guess_cost()}", inline=True)
         return embed
 
@@ -598,28 +602,36 @@ class NumberSearcherAnswerGuessView(View):
         number_button.callback = number_callback
         self.add_item(number_button)
 
-        for index in range(CODE_LENGTH):
-            value = self.extra_guesses[index]
-            button = Button(
-                label=f"第 {index + 1} 格：{self.display_extra_value(value)}",
-                style=discord.ButtonStyle.success if value is not None else discord.ButtonStyle.secondary,
-                emoji="🎨" if self.parent.extra_guess_kind == "color" else "🔷",
-                row=1,
-            )
+        reset_button = Button(label=f"重製{self.kind_label()}", style=discord.ButtonStyle.secondary, emoji="🔄", row=0, disabled=not self.extra_guesses)
 
-            async def option_callback(interaction: discord.Interaction, slot=index):
-                await self.cycle_extra_guess(interaction, slot)
+        async def reset_callback(interaction: discord.Interaction):
+            await self.reset_extra_guesses(interaction)
 
-            button.callback = option_callback
-            self.add_item(button)
+        reset_button.callback = reset_callback
+        self.add_item(reset_button)
 
-        submit_button = Button(label="確定送出猜測", style=discord.ButtonStyle.danger, emoji="✅", row=2)
+        submit_button = Button(label="確定送出猜測", style=discord.ButtonStyle.danger, emoji="✅", row=0)
 
         async def submit_callback(interaction: discord.Interaction):
             await self.submit_guess(interaction)
 
         submit_button.callback = submit_callback
         self.add_item(submit_button)
+
+        for option in self.extra_options:
+            button = Button(
+                label=self.display_extra_value(option),
+                style=discord.ButtonStyle.success,
+                emoji="🎨" if self.parent.extra_guess_kind == "color" else "🔷",
+                row=1,
+                disabled=len(self.extra_guesses) >= CODE_LENGTH,
+            )
+
+            async def option_callback(interaction: discord.Interaction, selected=option):
+                await self.add_extra_guess(interaction, selected)
+
+            button.callback = option_callback
+            self.add_item(button)
 
     async def set_number_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
         try:
@@ -628,30 +640,36 @@ class NumberSearcherAnswerGuessView(View):
             await interaction.response.send_message("❌ 請輸入剛好三位 0~9 數字，例如 407。", ephemeral=True)
             return
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新謎底數字，請繼續選擇額外規格或送出。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新謎底數字，請繼續依序選擇額外規格或送出。"), view=self)
 
-    async def cycle_extra_guess(self, interaction: discord.Interaction, slot: int) -> None:
-        current = self.extra_guesses[slot]
-        if current not in self.extra_options:
-            next_value = self.extra_options[0]
-        else:
-            next_value = self.extra_options[(self.extra_options.index(current) + 1) % len(self.extra_options)]
-        self.extra_guesses[slot] = next_value
+    async def add_extra_guess(self, interaction: discord.Interaction, value: str) -> None:
+        if len(self.extra_guesses) >= CODE_LENGTH:
+            await interaction.response.send_message(f"❌ 三格{self.kind_label()}都已選好；如果按錯請按重製。", ephemeral=True)
+            return
+        self.extra_guesses.append(value)
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed(f"已設定第 {slot + 1} 格{self.kind_label()}：{self.display_extra_value(next_value)}。"), view=self)
+        await interaction.response.edit_message(
+            embed=self.build_embed(f"已把 {self.display_extra_value(value)} 排入第 {len(self.extra_guesses)} 格。"),
+            view=self,
+        )
+
+    async def reset_extra_guesses(self, interaction: discord.Interaction) -> None:
+        self.extra_guesses.clear()
+        self.rebuild_items()
+        await interaction.response.edit_message(embed=self.build_embed(f"已重製{self.kind_label()}選擇，請重新依序按按鈕。"), view=self)
 
     async def submit_guess(self, interaction: discord.Interaction) -> None:
         if self.parent.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
-        if self.number_guess is None or any(value is None for value in self.extra_guesses):
+        if self.number_guess is None or len(self.extra_guesses) != CODE_LENGTH:
             await interaction.response.send_message("❌ 請先完成三位數字與三格額外規格後再送出。", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         await self.parent.handle_answer_guess(
             interaction,
             self.number_guess,
-            tuple(value for value in self.extra_guesses if value is not None),
+            tuple(self.extra_guesses),
             source_view=self,
         )
 
@@ -1574,19 +1592,39 @@ def build_number_searcher2_difficulty_embed(user: discord.User) -> discord.Embed
     return embed
 
 
+def shape_points(shape: str, center: tuple[int, int], size: int) -> list[tuple[int, int]]:
+    cx, cy = center
+    if shape == "三角形":
+        return [(cx, cy - size), (cx - size, cy + size), (cx + size, cy + size)]
+    if shape == "長方形":
+        return [(cx - size, cy - size), (cx + size, cy - size), (cx + size, cy + size), (cx - size, cy + size)]
+    return [(cx, cy - size), (cx - size, cy - size // 4), (cx - size // 2, cy + size), (cx + size // 2, cy + size), (cx + size, cy - size // 4)]
+
+
 def draw_shape_icon(draw: ImageDraw.ImageDraw, shape: str, center: tuple[int, int], size: int, fill: tuple[int, int, int]) -> None:
     cx, cy = center
     if shape == "圓形":
         draw.ellipse((cx - size, cy - size, cx + size, cy + size), outline=fill, width=4)
-    elif shape == "三角形":
-        points = [(cx, cy - size), (cx - size, cy + size), (cx + size, cy + size)]
-        draw.polygon(points, outline=fill)
-        draw.line(points + [points[0]], fill=fill, width=4)
-    elif shape == "長方形":
-        draw.rectangle((cx - size, cy - size, cx + size, cy + size), outline=fill, width=4)
     else:
-        points = [(cx, cy - size), (cx - size, cy - size // 4), (cx - size // 2, cy + size), (cx + size // 2, cy + size), (cx + size, cy - size // 4)]
+        points = shape_points(shape, center, size)
         draw.line(points + [points[0]], fill=fill, width=4)
+
+
+def draw_filled_shape(
+    draw: ImageDraw.ImageDraw,
+    shape: str,
+    center: tuple[int, int],
+    size: int,
+    fill: tuple[int, int, int],
+    outline: tuple[int, int, int],
+) -> None:
+    cx, cy = center
+    if shape == "圓形":
+        draw.ellipse((cx - size, cy - size, cx + size, cy + size), fill=fill, outline=outline, width=4)
+    else:
+        points = shape_points(shape, center, size)
+        draw.polygon(points, fill=fill)
+        draw.line(points + [points[0]], fill=outline, width=4)
 
 
 def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = False) -> io.BytesIO:
@@ -1617,10 +1655,10 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
             outline = (170, 178, 188)
             text = "?"
             text_fill = (245, 245, 245)
-        draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
         if view.has_shapes:
-            shape_fill = (35, 38, 48) if reveal else (225, 235, 245)
-            draw_shape_icon(draw, view.shapes[index], (x + 75, y + 106), 25, shape_fill)
+            draw_filled_shape(draw, view.shapes[index], (x + 75, y + 76), 70, fill, outline)
+        else:
+            draw.rounded_rectangle((x, y, x + 150, y + 150), radius=18, fill=fill, outline=outline, width=4)
         bbox = draw.textbbox((0, 0), text, font=box_font)
         draw.text((x + 75 - (bbox[2] - bbox[0]) / 2, y + 75 - (bbox[3] - bbox[1]) / 2 - 8), text, fill=text_fill, font=box_font)
         label = safe_text(small_font, f"第 {index + 1} 位", f"Slot {index + 1}")
