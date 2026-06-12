@@ -119,14 +119,6 @@ class EconomyMenu(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0, custom_id="economy_balance")
-    async def bal_btn(self, interaction: discord.Interaction, button: Button):
-        await open_account(interaction.user)
-        account = load_data()[str(interaction.user.id)]
-        wallet = int(account.get("wallet", 0) or 0)
-        bank = int(account.get("bank", 0) or 0)
-        await interaction.response.send_message(f"💰 錢包: ${wallet:,}｜🏦 銀行: ${bank:,}", ephemeral=True)
-
     @discord.ui.button(label="工作", style=discord.ButtonStyle.blurple, emoji="🔨", row=0, custom_id="economy_work")
     async def work_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
@@ -137,13 +129,21 @@ class EconomyMenu(View):
         save_data(users)
         await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt+earnings}", ephemeral=True)
 
+    @discord.ui.button(label="餘額", style=discord.ButtonStyle.green, emoji="💰", row=0, custom_id="economy_balance")
+    async def bal_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        account = load_data()[str(interaction.user.id)]
+        wallet = int(account.get("wallet", 0) or 0)
+        bank = int(account.get("bank", 0) or 0)
+        await interaction.response.send_message(f"💰 錢包: ${wallet:,}｜🏦 銀行: ${bank:,}", ephemeral=True)
+
+    @discord.ui.button(label="銀行", style=discord.ButtonStyle.green, emoji="🏦", row=0, custom_id="economy_bank_gui")
+    async def bank_gui_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
+        
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.green, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
-
-    @discord.ui.button(label="Bank GUI", style=discord.ButtonStyle.blurple, emoji="🏦", row=1, custom_id="economy_bank_gui")
-    async def bank_gui_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
 
     @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.red, emoji="🎮", row=1, custom_id="economy_solo")
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
@@ -655,7 +655,7 @@ def build_economy_menu() -> dict:
             "`/openmenu` 開啟選單\n"
             "`/opengame` 開啟單人遊戲\n"
             "`/battle` 建立多人遊戲\n"
-            "`/bank` / `/bankgui` 開啟 Bank GUI\n"
+            "`/bank`, `/bankgui` 開啟銀行\n"
             "`/ranking` 查看排行榜\n"
             "`/portfolio` 查看個人資訊與遊戲營利"
         ),
