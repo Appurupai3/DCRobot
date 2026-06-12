@@ -8,6 +8,7 @@ from discord.ui import Button, View, Modal, TextInput
 from typing import Callable, Optional
 import random
 from dcrbot.battle import BATTLE_GAMES, prepare_battle_lobby
+from dcrbot.bank import BankGuiView, build_bank_gui_payload, move_wallet_to_bank
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
 from dcrbot.multiplayer import (
     BattleLobbyView,
@@ -81,51 +82,6 @@ class PayModal(Modal, title='💸 轉帳中心'):
             await interaction.response.send_message("❌ 轉帳失敗，請檢查 ID 或金額。", ephemeral=True)
 
 
-def _parse_deposit_amount(amount_text: str, wallet: int) -> tuple[int | None, str | None]:
-    normalized = amount_text.strip().lower().replace(",", "")
-    if normalized in {"all", "max", "全部", "全存"}:
-        return wallet, None
-
-    try:
-        amount = int(normalized)
-    except ValueError:
-        return None, "❌ 存款金額必須是正整數，或輸入 `all` 存入全部錢包餘額。"
-
-    if amount <= 0:
-        return None, "❌ 存款金額必須大於 0。"
-    return amount, None
-
-
-async def deposit_wallet_to_bank(user: discord.User, amount_text: str) -> tuple[discord.Embed | None, str | None]:
-    await open_account(user)
-    users = load_data()
-    uid = str(user.id)
-    account = users.setdefault(uid, {"wallet": 0, "bank": 0})
-    wallet = int(account.get("wallet", 0) or 0)
-    bank = int(account.get("bank", 0) or 0)
-
-    amount, error = _parse_deposit_amount(amount_text, wallet)
-    if error:
-        return None, error
-    if amount is None:
-        return None, "❌ 存款金額格式錯誤。"
-    if wallet <= 0:
-        return None, "❌ 你的錢包目前沒有可存入銀行的金幣。"
-    if amount > wallet:
-        return None, f"❌ 錢包餘額不足，目前錢包只有 ${wallet:,}。"
-
-    account["wallet"] = wallet - amount
-    account["bank"] = bank + amount
-    save_data(users)
-
-    embed = discord.Embed(title="🏦 銀行存款完成", color=discord.Color.green())
-    embed.add_field(name="本次存入", value=f"**${amount:,}**", inline=True)
-    embed.add_field(name="錢包餘額", value=f"**${account['wallet']:,}**", inline=True)
-    embed.add_field(name="銀行餘額", value=f"**${account['bank']:,}**", inline=True)
-    embed.set_footer(text="使用 /portfolio 可查看總資產與遊戲績效。")
-    return embed, None
-
-
 class SimplePostGameView(View):
     def __init__(self, user: discord.User, replay_handler: Callable[[discord.Interaction], object], menu_builder: Callable | None = None):
         super().__init__(timeout=180)
@@ -184,7 +140,11 @@ class EconomyMenu(View):
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.green, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
-    
+
+    @discord.ui.button(label="Bank GUI", style=discord.ButtonStyle.blurple, emoji="🏦", row=1, custom_id="economy_bank_gui")
+    async def bank_gui_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
+
     @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.red, emoji="🎮", row=1, custom_id="economy_solo")
     async def open_game_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_game_menu(interaction.user))
@@ -695,7 +655,7 @@ def build_economy_menu() -> dict:
             "`/openmenu` 開啟選單\n"
             "`/opengame` 開啟單人遊戲\n"
             "`/battle` 建立多人遊戲\n"
-            "`/bank amount` 存錢到銀行\n"
+            "`/bank` / `/bankgui` 開啟 Bank GUI\n"
             "`/ranking` 查看排行榜\n"
             "`/portfolio` 查看個人資訊與遊戲營利"
         ),
@@ -799,14 +759,23 @@ async def ranking_command(interaction: discord.Interaction):
     await send_deferred_payload(interaction, build_ranking_message, ephemeral=True)
 
 
-@bot.tree.command(name="bank", description="把錢包金幣存進銀行")
-@app_commands.describe(amount="要存入的金額；輸入 all 可存入全部錢包餘額")
-async def bank_command(interaction: discord.Interaction, amount: str):
-    embed, error = await deposit_wallet_to_bank(interaction.user, amount)
+@bot.tree.command(name="bank", description="開啟 Bank GUI，或直接把錢包金幣存進銀行")
+@app_commands.describe(amount="可選：要存入的金額；輸入 all 可存入全部錢包餘額")
+async def bank_command(interaction: discord.Interaction, amount: str | None = None):
+    if amount is None:
+        await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
+        return
+
+    embed, error = await move_wallet_to_bank(interaction.user, amount)
     if error:
         await interaction.response.send_message(error, ephemeral=True)
         return
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=BankGuiView(interaction.user), ephemeral=True)
+
+
+@bot.tree.command(name="bankgui", description="開啟可存錢與取錢的 Bank GUI")
+async def bankgui_command(interaction: discord.Interaction):
+    await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
 
 
 @bot.tree.command(name="portfolio", description="查看個人資訊與遊戲營利紀錄")
@@ -833,14 +802,21 @@ async def portfolio_prefix(ctx, user: Optional[discord.User] = None):
 @bot.command(name="bank")
 async def bank_prefix(ctx, amount: str = None):
     if amount is None:
-        await ctx.send("❌ 請輸入要存入銀行的金額，例如：`!bank 100` 或 `!bank all`。")
+        payload = await build_bank_gui_payload(ctx.author)
+        await ctx.send(embed=payload["embed"], view=payload["view"])
         return
 
-    embed, error = await deposit_wallet_to_bank(ctx.author, amount)
+    embed, error = await move_wallet_to_bank(ctx.author, amount)
     if error:
         await ctx.send(error)
         return
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed, view=BankGuiView(ctx.author))
+
+
+@bot.command(name="bankgui")
+async def bankgui_prefix(ctx):
+    payload = await build_bank_gui_payload(ctx.author)
+    await ctx.send(embed=payload["embed"], view=payload["view"])
 
 
 @bot.command()
