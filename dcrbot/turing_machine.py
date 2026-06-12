@@ -2015,11 +2015,12 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         multi_mark_text = "".join(str(digit) for digit in digit_mark) if len(digit_mark) > 1 else ""
         if multi_mark_text:
             mark_bbox = draw.textbbox((0, 0), multi_mark_text, font=body_font)
-            # Keep multi-digit candidate marks directly under the tile. The old
-            # y + 292 placement pushed them below the image canvas/status bar.
-            draw.text((x + 75 - (mark_bbox[2] - mark_bbox[0]) / 2, y + 156), multi_mark_text, fill=(235, 214, 154), font=body_font)
+            # Multi-digit candidate marks sit at the top of the tile/marked shape
+            # so they stay visually associated with that slot without colliding
+            # with the slot label below.
+            draw.text((x + 75 - (mark_bbox[2] - mark_bbox[0]) / 2, y + 16), multi_mark_text, fill=(235, 214, 154), font=body_font)
         label = safe_text(small_font, f"第 {index + 1} 位", f"Slot {index + 1}")
-        label_y = y + 184 if multi_mark_text else y + 166
+        label_y = y + 166
         draw.text((x + 44, label_y), label, fill=(210, 220, 230), font=small_font)
 
     draw.rounded_rectangle((52, 334, 708, 390), radius=14, fill=(18, 24, 31), outline=(80, 150, 190), width=2)
