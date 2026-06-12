@@ -15,6 +15,7 @@ LEADERBOARD_INDEX_PATH = LEADERBOARD_DIR / "index.json"
 LEADERBOARD_INFO_DIR = LEADERBOARD_DIR / "info"
 USER_INFO_PATH = LEADERBOARD_INFO_DIR / "users.json"
 MAX_GAME_RECORDS = 100
+BANK_ALLOWED_KEYS = {"wallet", "bank", "number_searcher2_unlocked"}
 
 
 def ensure_leaderboard_dir() -> None:
@@ -39,6 +40,14 @@ def _safe_leaderboard_name(game_name: str) -> str:
     return (cleaned or "unknown_game").replace(" ", "_")[:80]
 
 
+
+def _is_multiplayer_game_stat(game_name: str, value: Dict[str, Any] | None = None) -> bool:
+    """Return True when a compact stat belongs to multiplayer battles hidden from bank views."""
+
+    stat_game = str((value or {}).get("game", game_name))
+    return game_name.startswith("多人遊戲：") or stat_game.startswith("多人遊戲：")
+
+
 def _load_json_list(path: Path) -> list[Dict[str, Any]]:
     if not path.exists():
         return []
@@ -48,6 +57,17 @@ def _load_json_list(path: Path) -> list[Dict[str, Any]]:
     except (json.JSONDecodeError, OSError):
         return []
     return data if isinstance(data, list) else []
+
+
+def _load_json_dict(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -100,6 +120,22 @@ def ensure_bank_data_file() -> None:
 
     with open(BANK_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump({}, f, indent=4)
+
+
+def _sanitize_bank_user_data(user_data: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned = {
+        "wallet": int(user_data.get("wallet", 0) or 0),
+        "bank": int(user_data.get("bank", 0) or 0),
+    }
+    if "number_searcher2_unlocked" in user_data:
+        cleaned["number_searcher2_unlocked"] = int(user_data.get("number_searcher2_unlocked", 0) or 0)
+    return cleaned
+
+
+def sanitize_bank_data(users: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a bank.json-safe copy containing only economy and unlock fields."""
+
+    return {str(uid): _sanitize_bank_user_data(data if isinstance(data, dict) else {}) for uid, data in users.items()}
 
 
 def load_data() -> Dict[str, Any]:
@@ -262,6 +298,18 @@ def ensure_user_data(users: Dict[str, Any], uid: str) -> Dict[str, Any]:
     return money_data
 
 
+def _update_leaderboard_index(game_name: str, record_path: Path, game_stats: Dict[str, Any], played_at: str | None) -> None:
+    index_records = _load_json_list(LEADERBOARD_INDEX_PATH)
+    index_by_game = {entry.get("game"): entry for entry in index_records if isinstance(entry, dict)}
+    index_by_game[game_name] = {
+        "game": game_name,
+        "file": str(record_path),
+        "players": len(game_stats),
+        "updated_at": played_at,
+    }
+    _write_json(LEADERBOARD_INDEX_PATH, sorted(index_by_game.values(), key=lambda item: str(item.get("game", ""))))
+
+
 def append_leaderboard_record(record: Dict[str, Any]) -> None:
     """Merge one result into leaderboard/<game>.json and update the index."""
 
@@ -271,13 +319,7 @@ def append_leaderboard_record(record: Dict[str, Any]) -> None:
     record_path = LEADERBOARD_DIR / f"{file_stem}.json"
     uid = str(record.get("user_id", ""))
 
-    try:
-        with record_path.open("r", encoding="utf-8") as f:
-            game_stats = json.load(f)
-    except (json.JSONDecodeError, OSError, FileNotFoundError):
-        game_stats = {}
-    if not isinstance(game_stats, dict):
-        game_stats = {}
+    game_stats = _load_json_dict(record_path)
 
     user_stats = game_stats.setdefault(uid, _empty_game_stat(game_name))
     _apply_game_stat(
@@ -292,15 +334,7 @@ def append_leaderboard_record(record: Dict[str, Any]) -> None:
     game_stats[uid] = user_stats
     _write_json(record_path, game_stats)
 
-    index_records = _load_json_list(LEADERBOARD_INDEX_PATH)
-    index_by_game = {entry.get("game"): entry for entry in index_records if isinstance(entry, dict)}
-    index_by_game[game_name] = {
-        "game": game_name,
-        "file": str(record_path),
-        "players": len(game_stats),
-        "updated_at": record.get("played_at"),
-    }
-    _write_json(LEADERBOARD_INDEX_PATH, sorted(index_by_game.values(), key=lambda item: str(item.get("game", ""))))
+    _update_leaderboard_index(game_name, record_path, game_stats, record.get("played_at"))
 
 
 def append_game_record(
@@ -344,6 +378,36 @@ def append_game_record(
             "extra_stats": extra_stats or {},
         }
     )
+
+
+def _leaderboard_record_paths() -> list[Path]:
+    if LEADERBOARD_INDEX_PATH.exists():
+        paths = []
+        for entry in _load_json_list(LEADERBOARD_INDEX_PATH):
+            if not isinstance(entry, dict):
+                continue
+            path = Path(str(entry.get("file", "")))
+            if path.exists():
+                paths.append(path)
+        if paths:
+            return paths
+    return sorted(LEADERBOARD_DIR.glob("*.json")) if LEADERBOARD_DIR.exists() else []
+
+
+def load_user_leaderboard_stats(uid: str) -> dict[str, Dict[str, Any]]:
+    """Load a user's compact per-game stats from leaderboard/*.json."""
+
+    stats: dict[str, Dict[str, Any]] = {}
+    for record_path in _leaderboard_record_paths():
+        if record_path == LEADERBOARD_INDEX_PATH:
+            continue
+        game_stats = _load_json_dict(record_path)
+        value = game_stats.get(str(uid))
+        if not isinstance(value, dict):
+            continue
+        game_name = str(value.get("game") or record_path.stem.replace("_", " "))
+        stats[game_name] = dict(value)
+    return stats
 
 
 def get_game_records(users: Dict[str, Any], uid: str, limit: int = 10) -> list[Dict[str, Any]]:

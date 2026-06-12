@@ -1,0 +1,445 @@
+"""Turn-based Incan Gold multiplayer game state and Pillow scene renderer."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from io import BytesIO
+import os
+from pathlib import Path
+import random
+from typing import Iterable
+
+import discord
+from PIL import Image, ImageDraw, ImageFont
+
+HAZARD_CARDS = [
+    ("spider", "SP", "蜘蛛"),
+    ("snake", "SN", "毒蛇"),
+    ("mummy", "MU", "木乃伊"),
+    ("fire", "FI", "火災"),
+    ("rockslide", "RO", "落石"),
+]
+HAZARD_LABELS = {key: label for key, label, _name in HAZARD_CARDS}
+HAZARD_NAMES = {key: name for key, _label, name in HAZARD_CARDS}
+GEM_VALUES = [1, 2, 3, 4, 5, 5, 7, 7, 8, 9, 10, 11, 11, 13, 13, 14, 15, 17]
+ARTIFACT_COUNT = 5
+ARTIFACT_VALUE = 10
+TOTAL_ROUNDS = 5
+
+Card = tuple[str, str, int | str]
+
+
+@dataclass
+class IncanGoldPlayer:
+    uid: int
+    banked: int = 0
+    pack: int = 0
+    active: bool = True
+
+
+@dataclass
+class IncanGoldGame:
+    participants: list[int]
+    round_number: int = 1
+    deck: list[Card] = field(default_factory=list)
+    floor_gems: int = 0
+    floor_artifacts: int = 0
+    hazards_seen: set[str] = field(default_factory=set)
+    removed_hazards: list[str] = field(default_factory=list)
+    path_cards: list[str] = field(default_factory=list)
+    players: dict[int, IncanGoldPlayer] = field(default_factory=dict)
+    log: list[str] = field(default_factory=list)
+    awaiting_hazard_confirm: bool = False
+    pending_round_end_reason: str | None = None
+    last_busted_players: list[int] = field(default_factory=list)
+    finished: bool = False
+
+    def __post_init__(self) -> None:
+        self.players = {uid: IncanGoldPlayer(uid=uid) for uid in self.participants}
+        self.start_round()
+
+    @property
+    def active_players(self) -> list[int]:
+        return [uid for uid in self.participants if self.players[uid].active]
+
+    def start_round(self) -> None:
+        self.deck = build_incan_deck()
+        self.floor_gems = 0
+        self.floor_artifacts = 0
+        self.hazards_seen = set()
+        self.path_cards = []
+        self.awaiting_hazard_confirm = False
+        self.pending_round_end_reason = None
+        self.last_busted_players = []
+        for player in self.players.values():
+            player.pack = 0
+            player.active = True
+        self.log.append(f"第 {self.round_number} 回合：地下城入口開啟。")
+
+    def return_to_tent(self, leavers: Iterable[int]) -> str:
+        leaver_list = [uid for uid in leavers if self.players[uid].active]
+        if not leaver_list:
+            return "沒有人回到帳篷。"
+        share = self.floor_gems // len(leaver_list)
+        remainder = self.floor_gems % len(leaver_list)
+        artifact_gain = 0
+        artifact_message = ""
+        if self.floor_artifacts and len(leaver_list) == 1:
+            artifact_gain = self.floor_artifacts * ARTIFACT_VALUE
+            artifact_message = f"，並帶走 {self.floor_artifacts} 件神器"
+            self.floor_artifacts = 0
+        elif self.floor_artifacts and len(leaver_list) > 1:
+            artifact_message = f"；{self.floor_artifacts} 件神器無法平分，繼續留在地上"
+        self.floor_gems = remainder
+        for uid in leaver_list:
+            player = self.players[uid]
+            player.banked += player.pack + share + artifact_gain
+            player.pack = 0
+            player.active = False
+        return f"{len(leaver_list)} 人回到帳篷：每人分到地上寶石 {share}，留下 {remainder}{artifact_message}。"
+
+    def draw_next_card(self) -> str:
+        if not self.active_players:
+            return "沒有玩家留在地下城。"
+        if not self.deck:
+            self.end_round("牌庫耗盡。")
+            return "牌庫耗盡，本回合結束。"
+
+        card_type, label, value = self.deck.pop(0)
+        if card_type == "gem":
+            gems = int(value)
+            active = self.active_players
+            share = gems // len(active)
+            remainder = gems % len(active)
+            for uid in active:
+                self.players[uid].pack += share
+            self.floor_gems += remainder
+            card_label = f"G{gems}"
+            self.path_cards.append(card_label)
+            message = f"寶石 {gems}：每位場上玩家分到 {share}，地上留下 {remainder}。"
+        elif card_type == "artifact":
+            self.floor_artifacts += 1
+            card_label = f"A{ARTIFACT_VALUE}"
+            self.path_cards.append(card_label)
+            message = f"神器出現：地上新增 1 件神器，只有單獨回帳篷的人能帶走。"
+        else:
+            hazard_key = str(value)
+            card_label = label
+            self.path_cards.append(card_label)
+            if hazard_key in self.hazards_seen:
+                self.last_busted_players = self.active_players[:]
+                for uid in self.last_busted_players:
+                    self.players[uid].pack = 0
+                    self.players[uid].active = False
+                self.floor_gems = 0
+                self.floor_artifacts = 0
+                self.removed_hazards.append(hazard_key)
+                self.awaiting_hazard_confirm = True
+                self.pending_round_end_reason = f"重複怪物 {HAZARD_NAMES.get(hazard_key, label)}：場上玩家被解決，背包寶石歸零。"
+                message = self.pending_round_end_reason
+                self.log.append(message)
+                return message
+            self.hazards_seen.add(hazard_key)
+            message = f"怪物 {HAZARD_NAMES.get(hazard_key, label)} 出現，危險升高。"
+        self.log.append(message)
+        return message
+
+    def resolve_choices(self, choices: dict[int, str]) -> str:
+        if self.finished:
+            return "遊戲已經結束。"
+        if self.awaiting_hazard_confirm:
+            return "等待被怪物解決的玩家確認下一場。"
+        leavers = [uid for uid, choice in choices.items() if choice == "return"]
+        messages = []
+        if leavers:
+            messages.append(self.return_to_tent(leavers))
+        advancers = [uid for uid in self.active_players if choices.get(uid) == "advance"]
+        if advancers:
+            messages.append(self.draw_next_card())
+        if not self.active_players and not self.finished and not self.awaiting_hazard_confirm:
+            self.end_round("所有玩家都回到帳篷。")
+            messages.append("地下城內沒有玩家，本回合結束。")
+        return "\n".join(message for message in messages if message)
+
+    def end_round(self, reason: str) -> None:
+        if not self.log or self.log[-1] != reason:
+            self.log.append(reason)
+        if self.round_number >= TOTAL_ROUNDS:
+            self.finished = True
+            self.awaiting_hazard_confirm = False
+            return
+        self.round_number += 1
+        self.start_round()
+
+    def confirm_hazard_round_end(self, uid: int) -> str:
+        if not self.awaiting_hazard_confirm:
+            return "目前沒有等待確認的怪物事件。"
+        if uid not in self.last_busted_players:
+            return "只有被怪物解決的玩家可以確認下一場。"
+        reason = self.pending_round_end_reason or "怪物事件已確認。"
+        self.awaiting_hazard_confirm = False
+        self.pending_round_end_reason = None
+        self.last_busted_players = []
+        self.end_round(reason)
+        return "已確認怪物事件，進入下一場。"
+
+    def winners(self) -> list[int]:
+        best_score = max(player.banked for player in self.players.values()) if self.players else 0
+        return [uid for uid, player in self.players.items() if player.banked == best_score]
+
+    def result_text(self) -> str:
+        return "\n".join(
+            f"<@{uid}> 帳篷 {self.players[uid].banked}｜背包 {self.players[uid].pack}"
+            for uid in self.participants
+        )
+
+
+def load_scene_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
+    repo_root = Path(__file__).resolve().parents[1]
+    project_font_dirs = [repo_root / "font", repo_root / "Resources" / "fonts", Path("font"), Path("Resources") / "fonts"]
+    env_font = os.getenv("DCRBOT_CJK_FONT")
+    candidates = [path for path in [env_font, str(repo_root / "font" / "GenSekiGothic2.ttc"), "font/GenSekiGothic2.ttc"] if path]
+    for project_font_dir in project_font_dirs:
+        candidates.extend(str(path) for path in project_font_dir.glob("*.tt*") if path.is_file())
+    if bold:
+        candidates.extend(
+            [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            ]
+        )
+    candidates.extend(
+        [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+    )
+    for font_path in candidates:
+        try:
+            font = ImageFont.truetype(font_path, size)
+            lowered_path = font_path.lower()
+            setattr(font, "_supports_cjk", any(token in lowered_path for token in ("cjk", "wqy", "sourcehan", "genseki", "gothic")))
+            return font
+        except OSError:
+            continue
+    font = ImageFont.load_default()
+    setattr(font, "_supports_cjk", False)
+    return font
+
+
+def font_supports_text(font: ImageFont.ImageFont, text: str) -> bool:
+    try:
+        mask = font.getmask(text)
+    except Exception:
+        return False
+    return bool(mask.getbbox())
+
+
+def safe_label(font: ImageFont.ImageFont, zh: str, fallback: str) -> str:
+    if font_supports_text(font, zh):
+        return zh
+    return fallback
+
+
+def build_incan_deck() -> list[Card]:
+    deck: list[Card] = []
+    for key, label, _name in HAZARD_CARDS:
+        deck.extend(("hazard", label, key) for _ in range(3))
+    deck.extend(("gem", "G", value) for value in GEM_VALUES)
+    deck.extend(("artifact", "A", ARTIFACT_VALUE) for _ in range(ARTIFACT_COUNT))
+    random.shuffle(deck)
+    return deck
+
+
+def draw_text_center(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    draw.text((xy[0] - (bbox[2] - bbox[0]) / 2, xy[1] - (bbox[3] - bbox[1]) / 2), text, font=font, fill=fill)
+
+
+def format_card_label(card: str) -> str:
+    hazard_icons = {"SP": "🕷️蜘蛛", "SN": "🐍毒蛇", "MU": "🗿木乃伊", "FI": "🔥火災", "RO": "🪨落石"}
+    if card in hazard_icons:
+        return hazard_icons[card]
+    if card.startswith("G"):
+        return f"💎{card[1:]}"
+    if card.startswith("A"):
+        return f"✨{card[1:]}"
+    return card
+
+
+def build_avatar_placeholder(uid: int) -> Image.Image:
+    avatar = Image.new("RGB", (96, 96), (57, 43, 34))
+    draw = ImageDraw.Draw(avatar)
+    fill = (232, 197, 128)
+    draw.ellipse((31, 18, 65, 52), fill=fill)
+    draw.ellipse((18, 52, 78, 108), fill=fill)
+    return avatar
+
+
+def draw_avatar(draw_image: Image.Image, avatar: Image.Image, x: int, y: int, active: bool) -> None:
+    draw = ImageDraw.Draw(draw_image)
+    size = 48
+    avatar = avatar.resize((size, size))
+    mask = Image.new("L", (size, size), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((0, 0, size - 1, size - 1), fill=255)
+    ring = (111, 230, 145) if active else (128, 116, 100)
+    draw.ellipse((x - 4, y - 4, x + size + 4, y + size + 4), fill=ring, outline=(35, 25, 18), width=2)
+    draw_image.paste(avatar, (x, y), mask)
+
+
+def draw_card_icon(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], card: str, font: ImageFont.ImageFont) -> None:
+    x1, y1, x2, y2 = box
+    is_hazard = card in {"SP", "SN", "MU", "FI", "RO"}
+    is_artifact = card.startswith("A")
+    if is_hazard:
+        fill = (181, 65, 56)
+        text_fill = (255, 243, 221)
+    elif is_artifact:
+        fill = (128, 83, 181)
+        text_fill = (255, 235, 135)
+    else:
+        fill = (235, 191, 94)
+        text_fill = (42, 28, 20)
+    draw.rounded_rectangle(box, radius=10, fill=fill, outline=(83, 50, 25), width=2)
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    # Draw compact emoji-like pictograms with shapes to avoid missing emoji-font boxes.
+    if card == "SP":
+        draw.ellipse((cx - 10, cy - 8, cx + 10, cy + 10), fill=(35, 28, 28))
+        for dx in (-16, -11, 11, 16):
+            draw.line((cx, cy, cx + dx, cy - 13), fill=(35, 28, 28), width=2)
+            draw.line((cx, cy + 2, cx + dx, cy + 15), fill=(35, 28, 28), width=2)
+    elif card == "SN":
+        draw.arc((cx - 18, cy - 12, cx + 12, cy + 14), 20, 330, fill=(39, 100, 48), width=5)
+        draw.ellipse((cx + 8, cy - 13, cx + 19, cy - 3), fill=(39, 100, 48))
+    elif card == "MU":
+        draw.rectangle((cx - 14, cy - 15, cx + 14, cy + 16), fill=(213, 195, 154))
+        for yy in range(cy - 10, cy + 13, 7):
+            draw.line((cx - 15, yy, cx + 15, yy + 2), fill=(110, 92, 67), width=2)
+        draw.ellipse((cx - 7, cy - 5, cx - 3, cy - 1), fill=(20, 15, 12))
+        draw.ellipse((cx + 4, cy - 5, cx + 8, cy - 1), fill=(20, 15, 12))
+    elif card == "FI":
+        draw.polygon((cx, cy - 20, cx - 15, cy + 14, cx + 15, cy + 14), fill=(244, 80, 45))
+        draw.polygon((cx + 3, cy - 10, cx - 6, cy + 14, cx + 10, cy + 14), fill=(255, 199, 72))
+    elif card == "RO":
+        draw.polygon((cx - 17, cy + 11, cx - 11, cy - 13, cx + 7, cy - 18, cx + 19, cy - 2, cx + 12, cy + 16), fill=(98, 93, 85))
+        draw.line((cx - 9, cy - 8, cx + 9, cy + 9), fill=(60, 56, 51), width=2)
+    elif is_artifact:
+        draw.polygon((cx, cy - 18, cx + 6, cy - 4, cx + 21, cy - 4, cx + 9, cy + 5, cx + 14, cy + 20, cx, cy + 10, cx - 14, cy + 20, cx - 9, cy + 5, cx - 21, cy - 4, cx - 6, cy - 4), fill=(255, 222, 79))
+    else:
+        draw.polygon((cx, cy - 18, cx + 20, cy - 4, cx + 12, cy + 18, cx - 12, cy + 18, cx - 20, cy - 4), fill=(83, 211, 235), outline=(28, 106, 130))
+        draw_text_center(draw, (cx, cy + 1), card[1:], font, (20, 42, 56))
+        return
+    if is_hazard:
+        return
+
+
+def render_incan_scene(game: IncanGoldGame, avatars: dict[int, Image.Image] | None = None, display_names: dict[int, str] | None = None) -> discord.File:
+    avatars = avatars or {}
+    display_names = display_names or {}
+    width, height = 1220, 790
+    image = Image.new("RGB", (width, height), (14, 35, 24))
+    draw = ImageDraw.Draw(image)
+    title_font = load_scene_font(42, bold=True)
+    font = load_scene_font(20)
+    small_font = load_scene_font(15)
+    card_font = load_scene_font(15, bold=True)
+    score_font = load_scene_font(22, bold=True)
+
+    title = safe_label(title_font, "印加寶藏", "印加寶藏")
+    entrance = safe_label(font, "地下城入口", "地下城入口")
+    active_title = safe_label(font, "場上玩家", "場上玩家")
+    floor_label = safe_label(font, "地上寶石", "地上寶石")
+    artifact_label = safe_label(font, "地上神器", "地上神器")
+    hazard_label = safe_label(font, "已出現怪物", "已出現怪物")
+    removed_title = safe_label(font, "移除怪物", "移除怪物")
+    choose_label = safe_label(font, "選擇：前進 或 回帳篷", "選擇：前進 或 回帳篷")
+    pack_label = safe_label(small_font, "背包", "背包")
+
+    # Jungle ruin background and temple entrance.
+    draw.rectangle((0, 0, width, height), fill=(15, 42, 28))
+    for y in range(0, height, 26):
+        shade = 24 + (y // 26) % 2 * 8
+        draw.rectangle((0, y, width, y + 13), fill=(shade, 62, 36))
+    for x in range(-80, width, 150):
+        draw.ellipse((x, -70, x + 230, 135), fill=(29, 87, 47))
+        draw.ellipse((x + 55, 25, x + 265, 210), fill=(19, 73, 41))
+    draw.polygon((278, 166, 660, 44, 1042, 166), fill=(94, 111, 58), outline=(205, 181, 95))
+    draw.rectangle((318, 166, 1002, 655), fill=(64, 83, 55), outline=(205, 181, 95), width=5)
+    for x in range(342, 988, 86):
+        draw.rectangle((x, 166, x + 38, 655), fill=(82, 103, 65), outline=(37, 55, 36), width=2)
+        draw.line((x + 5, 185, x + 26, 630), fill=(35, 89, 45), width=3)
+    draw.rectangle((548, 278, 772, 655), fill=(14, 27, 22), outline=(205, 181, 95), width=4)
+    draw_text_center(draw, (660, 84), title, title_font, (255, 237, 151))
+    draw_text_center(draw, (660, 126), f"{entrance}  {game.round_number}/{TOTAL_ROUNDS}", font, (232, 219, 142))
+
+    # Left active avatars.
+    draw.rounded_rectangle((24, 86, 258, 665), radius=22, fill=(22, 63, 41), outline=(176, 193, 95), width=3)
+    draw.text((48, 108), active_title, font=font, fill=(238, 235, 167))
+    for idx, uid in enumerate(game.active_players[:8]):
+        x = 50 + (idx % 2) * 92
+        y = 154 + (idx // 2) * 96
+        draw_avatar(image, avatars.get(uid, build_avatar_placeholder(uid)), x, y, True)
+        draw.text((x - 8, y + 58), safe_label(small_font, display_names.get(uid, f"玩家{idx + 1}"), f"玩家{idx + 1}")[:10], font=small_font, fill=(221, 221, 165))
+
+    # Center path panel.
+    draw.rounded_rectangle((342, 196, 978, 384), radius=20, fill=(20, 55, 38), outline=(176, 193, 95), width=3)
+    draw.text((366, 218), f"{floor_label}: {game.floor_gems}", font=font, fill=(123, 235, 255))
+    draw.text((552, 218), f"{artifact_label}: {game.floor_artifacts}", font=font, fill=(255, 226, 115))
+    draw.text((742, 218), f"{hazard_label}: {len(game.hazards_seen)}", font=font, fill=(255, 175, 142))
+    if game.awaiting_hazard_confirm:
+        warn = safe_label(font, "怪物解決玩家！請任一被解決玩家按確認。", "怪物解決玩家！請任一被解決玩家按確認。")
+        draw_text_center(draw, (660, 255), warn, font, (255, 117, 101))
+    elif not game.path_cards:
+        draw_text_center(draw, (660, 294), choose_label, font, (238, 235, 167))
+    for idx, card in enumerate(game.path_cards[-18:]):
+        cx = 366 + (idx % 9) * 66
+        cy = 262 + (idx // 9) * 54
+        draw_card_icon(draw, (cx, cy, cx + 52, cy + 38), card, card_font)
+
+    # Right removed monsters.
+    draw.rounded_rectangle((1018, 86, 1190, 384), radius=20, fill=(22, 63, 41), outline=(176, 193, 95), width=3)
+    draw.text((1040, 108), removed_title, font=font, fill=(238, 235, 167))
+    for idx, hazard_key in enumerate(game.removed_hazards[-5:]):
+        label = HAZARD_LABELS.get(hazard_key, "??")
+        x = 1044 + (idx % 2) * 68
+        y = 154 + (idx // 2) * 68
+        draw_card_icon(draw, (x, y, x + 54, y + 42), label, card_font)
+        name = safe_label(small_font, HAZARD_NAMES.get(hazard_key, ""), HAZARD_NAMES.get(hazard_key, hazard_key))
+        draw.text((x - 2, y + 46), name[:8], font=small_font, fill=(221, 221, 165))
+
+    # Bottom score board for up to 8 players.
+    panel_w, panel_h = 256, 78
+    start_x, start_y = 300, 478
+    gap_x, gap_y = 22, 18
+    for idx, uid in enumerate(game.participants[:8]):
+        player = game.players[uid]
+        col = idx % 3
+        row = idx // 3
+        x1 = start_x + col * (panel_w + gap_x)
+        y1 = start_y + row * (panel_h + gap_y)
+        x2 = x1 + panel_w
+        y2 = y1 + panel_h
+        fill = (26, 69, 46) if player.active else (38, 54, 43)
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=fill, outline=(142, 164, 86), width=2)
+        draw.text((x1 + 12, y1 + 10), safe_label(small_font, display_names.get(uid, f"玩家{idx + 1}"), f"玩家{idx + 1}")[:18], font=small_font, fill=(236, 231, 177))
+        draw.text((x1 + 12, y1 + 36), f"{pack_label} {player.pack}", font=small_font, fill=(104, 233, 255))
+        status = safe_label(score_font, "場上", "場上") if player.active else safe_label(score_font, "帳篷", "帳篷")
+        if game.awaiting_hazard_confirm and uid in game.last_busted_players:
+            status = safe_label(score_font, "倒下", "倒下")
+        draw.text((x2 - 54, y1 + 22), status, font=score_font, fill=(129, 230, 150) if player.active else (255, 117, 101) if game.awaiting_hazard_confirm and uid in game.last_busted_players else (175, 160, 138))
+
+    last_log = game.log[-1] if game.log else "請選擇行動。"
+    draw.rounded_rectangle((300, 694, 1090, 756), radius=14, fill=(20, 55, 38), outline=(176, 193, 95), width=2)
+    draw.text((322, 714), last_log[:98], font=font, fill=(238, 235, 167))
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename="incan_gold_scene.png")
