@@ -378,26 +378,26 @@ class EconomyMenu(View):
     async def work_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         users = load_data()
-        earnings = random.randrange(10, 200)
+        earnings = random.randrange(10, 500)
         users[str(interaction.user.id)]["wallet"] += earnings
         amt = load_data()[str(interaction.user.id)]["wallet"]
         save_data(users)
-        await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt}", ephemeral=True)
+        await interaction.response.send_message(f"🔨 賺了 ${earnings} 💰 目前錢包: ${amt+earnings}", ephemeral=True)
 
-    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.red, emoji="💸", row=0, custom_id="economy_pay")
+    @discord.ui.button(label="轉帳", style=discord.ButtonStyle.green, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
+    
+    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.red, emoji="🎮", row=1, custom_id="economy_solo")
+    async def open_game_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(**build_game_menu(interaction.user))
 
     @discord.ui.button(label="多人遊戲", style=discord.ButtonStyle.danger, emoji="⚔️", row=1, custom_id="economy_multiplayer")
     async def open_battle(self, interaction: discord.Interaction, button: Button):
         embed = build_multiplayer_lobby_embed()
         await interaction.response.send_message(embed=embed, view=MultiBattleMenu())
 
-    @discord.ui.button(label="開啟單人遊戲", style=discord.ButtonStyle.success, emoji="🎮", row=2, custom_id="economy_solo")
-    async def open_game_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(**build_game_menu(interaction.user))
-
-    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.primary, emoji="🏅", row=2, custom_id="economy_ranking")
+    @discord.ui.button(label="排行榜", style=discord.ButtonStyle.secondary, emoji="🏅", row=3, custom_id="economy_ranking")
     async def ranking_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**build_ranking_message())
 
