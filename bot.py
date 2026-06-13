@@ -42,6 +42,44 @@ patch_discord_test_stubs()
 bot = create_discord_bot()
 configure_multiplayer_bot(bot)
 
+# ============================================================
+# Pico 2W 橋接（Dashboard 通知）
+# ============================================================
+import urllib.request as _urllib_req
+
+PICO_URL = "http://192.168.1.100/game_event"   # ← 改成 Pico 實際 IP
+PICO_ENABLED = True                                # 關掉設 False 不影響 bot 運作
+
+def notify_pico(
+    game: str,
+    user: str,
+    bet: int,
+    result: str,
+    delta: int,
+    balance: int,
+) -> None:
+    """非同步傳送遊戲結果給 Pico 2W Dashboard，失敗靜默忽略。"""
+    if not PICO_ENABLED:
+        return
+    import json, threading
+    payload = json.dumps({
+        "game": game, "user": user, "bet": bet,
+        "result": result, "delta": delta, "balance": balance,
+    }).encode()
+    def _post():
+        try:
+            req = _urllib_req.Request(
+                PICO_URL, data=payload,
+                headers={"Content-Type": "application/json"}, method="POST"
+            )
+            _urllib_req.urlopen(req, timeout=2)
+        except Exception:
+            pass   # Pico 離線時不影響 bot
+    threading.Thread(target=_post, daemon=True).start()
+# ============================================================
+
+
+
 
 
 
@@ -70,10 +108,10 @@ class PayModal(Modal, title='💸 轉帳中心'):
             if users[sender]["wallet"] < amt:
                 await interaction.response.send_message("❌ 餘額不足。", ephemeral=True)
                 return
-            
+
             receiver = await bot.fetch_user(int(target))
             await open_account(receiver)
-            
+
             users[sender]["wallet"] -= amt
             users[str(receiver.id)]["wallet"] += amt
             save_data(users)
@@ -140,7 +178,7 @@ class EconomyMenu(View):
     @discord.ui.button(label="銀行", style=discord.ButtonStyle.green, emoji="🏦", row=0, custom_id="economy_bank_gui")
     async def bank_gui_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
-        
+
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.green, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
@@ -231,6 +269,15 @@ async def resolve_basic_bet(
         details=result_text,
     )
     save_data(users)
+
+    notify_pico(
+        game=game_name,
+        user=user.display_name,
+        bet=amount,
+        result=record_result,
+        delta=net_delta,
+        balance=balance,
+    )
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_basic_bet(
@@ -324,6 +371,15 @@ async def resolve_custom_bet(
         extra_stats=extra_stats,
     )
     save_data(users)
+
+    notify_pico(
+        game=game_name,
+        user=user.display_name,
+        bet=amount,
+        result="完成",
+        delta=payout_change - amount,
+        balance=balance,
+    )
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_custom_bet(
