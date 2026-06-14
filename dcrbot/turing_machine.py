@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import random
 from dataclasses import dataclass
-from pathlib import Path
 
 import discord
 from discord.ui import Button, Modal, Select, TextInput, View
@@ -46,7 +45,6 @@ HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
 REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
-NUMBER_SEARCHER2_GUIDE_PATH = Path("docs/數字搜尋者2線索與難度說明.txt")
 
 
 def format_money_delta(amount: int) -> str:
@@ -1817,17 +1815,114 @@ class NumberSearcher2DifficultyView(View):
         button = Button(label="線索與難度說明", style=discord.ButtonStyle.secondary, emoji="📘", row=1)
 
         async def callback(interaction: discord.Interaction):
-            if not NUMBER_SEARCHER2_GUIDE_PATH.exists():
-                await interaction.response.send_message("❌ 找不到數字搜尋者2說明檔。", ephemeral=True)
-                return
             await interaction.response.send_message(
-                "📘 這裡是數字搜尋者2的線索與難度完整說明。",
-                file=discord.File(NUMBER_SEARCHER2_GUIDE_PATH, filename="數字搜尋者2線索與難度說明.txt"),
+                embed=build_number_searcher2_guide_embed("overview"),
+                view=NumberSearcher2GuideView(interaction.user),
                 ephemeral=True,
             )
 
         button.callback = callback
         self.add_item(button)
+
+
+NUMBER_SEARCHER2_GUIDE_PAGES = {
+    "overview": {
+        "label": "玩法總覽",
+        "emoji": "📘",
+        "description": (
+            "三個位置各自藏有數字與顏色；N7 起再加入圖形。\n"
+            "一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
+            "可用下方選單切換：數字、顏色、圖形與難度說明。"
+        ),
+        "fields": [
+            ("基本元素", "數字：0～9，共 3 位。\n顏色：黃、綠、藍；N5 起新增紫。\n圖形：N7 起新增圓形、三角形、長方形、五邊形。"),
+            ("隨機與雜訊", "隨機數字/顏色禮包會立刻公開 2 個對應線索。N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
+        ],
+    },
+    "number": {
+        "label": "數字線索",
+        "emoji": "🔢",
+        "description": "數字線索用來推理三位密碼本身。",
+        "fields": [
+            ("加總與奇偶", "總和、奇判定、偶判定、全體奇偶、大判定、小判定。"),
+            ("大小與極值", "大小關係 A/B/C、極差觀測、極值位置 A/B、極值資訊 A/B。"),
+            ("差值與倍數", "差計算 A/B/C、最大差、最小差、差之和、隨機差、倍數密碼 A/B。"),
+            ("特殊判斷", "零的領域、質數獵人、連續風暴、相同複製、隨機機會、隨機計數器 2A。"),
+            ("指定數字", "幸運號碼0～9會公開指定數字在密碼中的位置；隨機數字禮包會公開 2 個數字線索。"),
+        ],
+    },
+    "color": {
+        "label": "顏色線索",
+        "emoji": "🎨",
+        "description": "顏色線索用來推理三個方塊的顏色與顏色上的數字總和。",
+        "fields": [
+            ("位置公開", "藍色雷達、綠色雷達、黃色雷達、首位開榜、中位開榜、末位開榜。"),
+            ("顏色加總", "黃色計數器、綠色計數器、藍色計數器、隨機計數器、隨機計數器 2B、藍黃配、黃綠配、藍綠配。"),
+            ("顏色關係", "色彩多樣性、對稱掃描、鄰居檢查、尾端檢查、色彩絕緣體、左右側安全區 A/B/C。"),
+            ("N5 紫色追加", "紫色雷達、紫色計數器、紫藍配、左側安全區 D、右側安全區 D。"),
+            ("禮包", "隨機顏色禮包會公開 2 個顏色線索。"),
+        ],
+    },
+    "shape": {
+        "label": "圖形線索",
+        "emoji": "🔷",
+        "description": "N7 起啟用圖形線索，用圖形、邊數、顏色與數字的複合關係輔助推理。",
+        "fields": [
+            ("圖形位置", "圓形雷達、三角形雷達、長方形雷達、五邊形雷達、圖形多樣性、圖形絕緣體。"),
+            ("邊數與幾何", "幾何總邊數、尖角觀測、奇偶幾何、偶數幾何、圖形複合相乘、幾何倍數檢測。"),
+            ("圖形上的數字", "圓形/三角形/長方形/五邊形計數器、圓底密碼、尖角極值、圖形大小判定、圖形數字極差。"),
+            ("複合關係", "圓形連擊、最大/最小邊數落點、隨機圖形計數器、多邊形純淨度、尖角大合唱、無角邊界。"),
+            ("顏色＋圖形", "暖色幾何、冷色圓角、綠色幾何特徵、圖形調色盤、幾何對當、雙規開榜、色彩幾何配、安全區圖形檢測。"),
+        ],
+    },
+    "difficulty": {
+        "label": "難度 N0-N8",
+        "emoji": "🏁",
+        "description": "難度效果為累積式；高難度包含前面低難度的變化。",
+        "fields": [
+            ("N0～N2", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
+            ("N3～N5", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
+            ("N6～N8", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
+            ("費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
+        ],
+    },
+}
+
+
+def build_number_searcher2_guide_embed(page: str) -> discord.Embed:
+    guide = NUMBER_SEARCHER2_GUIDE_PAGES.get(page, NUMBER_SEARCHER2_GUIDE_PAGES["overview"])
+    embed = discord.Embed(
+        title=f"{guide['emoji']} 數字搜尋者2｜{guide['label']}",
+        description=guide["description"],
+        color=discord.Color.blurple(),
+    )
+    for name, value in guide["fields"]:
+        embed.add_field(name=name, value=value, inline=False)
+    embed.set_footer(text="使用下方選單切換說明分類；此說明直接顯示於 Discord，不會下載 txt 檔。")
+    return embed
+
+
+class NumberSearcher2GuideView(View):
+    def __init__(self, user: discord.User):
+        super().__init__(timeout=180)
+        self.user = user
+        options = [
+            discord.SelectOption(label=guide["label"], value=key, emoji=guide["emoji"])
+            for key, guide in NUMBER_SEARCHER2_GUIDE_PAGES.items()
+        ]
+        select = Select(placeholder="切換說明分類", options=options, row=0)
+
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(embed=build_number_searcher2_guide_embed(select.values[0]), view=self)
+
+        select.callback = callback
+        self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的數字搜尋者2說明選單。", ephemeral=True)
+            return False
+        return True
 
 
 def number_searcher2_settings(difficulty: int) -> dict:
