@@ -1938,8 +1938,8 @@ NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES = [
 NUMBER_SEARCHER2_GUIDE_PAGE_SIZE = 8
 
 
-def number_searcher2_clue_guide_lines(titles: list[str]) -> list[str]:
-    return [f"【{title}】{clue_choice_text(Clue(title, ''))}" for title in titles]
+def number_searcher2_clue_guide_fields(titles: list[str]) -> list[tuple[str, str]]:
+    return [(title, clue_choice_text(Clue(title, ""))) for title in titles]
 
 
 def chunked(items: list[str], size: int) -> list[list[str]]:
@@ -1949,49 +1949,67 @@ def chunked(items: list[str], size: int) -> list[list[str]]:
 def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
     pages: list[dict[str, object]] = [
         {
+            "category": "overview",
             "title": "📘 數字搜尋者2｜玩法總覽",
             "description": (
-                "三個位置各自藏有數字與顏色；N7 起再加入圖形。\n"
-                "一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
-                "使用下方上一頁 / 下一頁切換，所有線索都在這份說明內。"
+                "**目標：**推理三個位置的數字與顏色；N7 起還要處理圖形。\n"
+                "**操作：**一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
+                "**導覽：**用下拉選單跳到分類，再用上一頁 / 下一頁看完整線索。"
             ),
             "fields": [
-                ("基本元素", "數字：0～9，共 3 位。\n顏色：黃、綠、藍；N5 起新增紫。\n圖形：N7 起新增圓形、三角形、長方形、五邊形。"),
-                ("隨機與雜訊", "隨機數字/顏色禮包會立刻公開 2 個對應線索。N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
+                ("🔢 數字", "每局 3 位，每位為 0～9。"),
+                ("🎨 顏色", "基本顏色為黃、綠、藍；N5 起新增紫色。"),
+                ("🔷 圖形", "N7 起新增圓形、三角形、長方形、五邊形。"),
+                ("⚠️ 雜訊", "N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
             ],
         }
     ]
     sections = [
-        ("🔢 數字線索", NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES),
-        ("🎨 顏色線索", NUMBER_SEARCHER2_COLOR_GUIDE_TITLES),
-        ("🔷 圖形線索", NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES),
+        ("number", "🔢 數字線索", "數字線索會直接縮小三位密碼的可能性。", NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES),
+        ("color", "🎨 顏色線索", "顏色線索用來判斷方塊顏色，以及同色方塊上的數字總和。", NUMBER_SEARCHER2_COLOR_GUIDE_TITLES),
+        ("shape", "🔷 圖形線索", "N7 起出現圖形線索，會結合圖形位置、邊數、顏色與數字。", NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES),
     ]
-    for section_title, titles in sections:
-        chunks = chunked(number_searcher2_clue_guide_lines(titles), NUMBER_SEARCHER2_GUIDE_PAGE_SIZE)
-        for index, lines in enumerate(chunks, start=1):
+    for category, section_title, description, titles in sections:
+        chunks = chunked(number_searcher2_clue_guide_fields(titles), NUMBER_SEARCHER2_GUIDE_PAGE_SIZE)
+        for index, fields in enumerate(chunks, start=1):
             pages.append(
                 {
+                    "category": category,
                     "title": f"{section_title}｜第 {index}/{len(chunks)} 頁",
-                    "description": "\n".join(lines),
-                    "fields": [],
+                    "description": f"{description}\n本頁列出 {len(fields)} 個線索。",
+                    "fields": fields,
                 }
             )
     pages.append(
         {
+            "category": "difficulty",
             "title": "🏁 數字搜尋者2｜難度 N0-N8",
-            "description": "難度效果為累積式；高難度包含前面低難度的變化。",
+            "description": "難度效果為**累積式**：高難度會包含前面低難度的變化。",
             "fields": [
-                ("N0～N2", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
-                ("N3～N5", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
-                ("N6～N8", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
-                ("費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
+                ("N0～N2｜入門與初階干擾", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
+                ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
+                ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
+                ("💰 費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。\n基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
             ],
         }
     )
     return pages
 
-
 NUMBER_SEARCHER2_GUIDE_PAGES = build_number_searcher2_guide_pages()
+NUMBER_SEARCHER2_GUIDE_CATEGORIES = {
+    "overview": ("玩法總覽", "📘"),
+    "number": ("數字線索", "🔢"),
+    "color": ("顏色線索", "🎨"),
+    "shape": ("圖形線索", "🔷"),
+    "difficulty": ("難度 N0-N8", "🏁"),
+}
+
+
+def number_searcher2_guide_category_start(category: str) -> int:
+    for index, page in enumerate(NUMBER_SEARCHER2_GUIDE_PAGES):
+        if page.get("category") == category:
+            return index
+    return 0
 
 
 def build_number_searcher2_guide_embed(page_index: int) -> discord.Embed:
@@ -2004,7 +2022,8 @@ def build_number_searcher2_guide_embed(page_index: int) -> discord.Embed:
     )
     for name, value in guide["fields"]:
         embed.add_field(name=name, value=value, inline=False)
-    embed.set_footer(text=f"第 {page_index + 1}/{len(NUMBER_SEARCHER2_GUIDE_PAGES)} 頁｜此說明直接顯示於 Discord，不會下載 txt 檔。")
+    category_label = NUMBER_SEARCHER2_GUIDE_CATEGORIES.get(str(guide.get("category")), ("說明", "📘"))[0]
+    embed.set_footer(text=f"{category_label}｜第 {page_index + 1}/{len(NUMBER_SEARCHER2_GUIDE_PAGES)} 頁｜可用下拉選單切換分類")
     return embed
 
 
@@ -2013,16 +2032,37 @@ class NumberSearcher2GuideView(View):
         super().__init__(timeout=180)
         self.user = user
         self.page_index = page_index
+        self.add_category_select()
         self.sync_button_state()
+
+    def add_category_select(self) -> None:
+        current_category = str(NUMBER_SEARCHER2_GUIDE_PAGES[self.page_index].get("category"))
+        options = [
+            discord.SelectOption(label=label, value=category, emoji=emoji, default=category == current_category)
+            for category, (label, emoji) in NUMBER_SEARCHER2_GUIDE_CATEGORIES.items()
+        ]
+        select = Select(placeholder="選擇說明分類", options=options, row=0)
+
+        async def callback(interaction: discord.Interaction):
+            page_index = number_searcher2_guide_category_start(select.values[0])
+            await interaction.response.edit_message(
+                embed=build_number_searcher2_guide_embed(page_index),
+                view=NumberSearcher2GuideView(self.user, page_index),
+            )
+
+        select.callback = callback
+        self.add_item(select)
 
     def sync_button_state(self) -> None:
         self.previous_page.disabled = self.page_index <= 0
         self.next_page.disabled = self.page_index >= len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1
 
     async def update_page(self, interaction: discord.Interaction, page_index: int) -> None:
-        self.page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
-        self.sync_button_state()
-        await interaction.response.edit_message(embed=build_number_searcher2_guide_embed(self.page_index), view=self)
+        page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
+        await interaction.response.edit_message(
+            embed=build_number_searcher2_guide_embed(page_index),
+            view=NumberSearcher2GuideView(self.user, page_index),
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user.id:
@@ -2030,11 +2070,11 @@ class NumberSearcher2GuideView(View):
             return False
         return True
 
-    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary, emoji="◀️")
+    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary, emoji="◀️", row=1)
     async def previous_page(self, interaction: discord.Interaction, button: Button):
         await self.update_page(interaction, self.page_index - 1)
 
-    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary, emoji="▶️")
+    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary, emoji="▶️", row=1)
     async def next_page(self, interaction: discord.Interaction, button: Button):
         await self.update_page(interaction, self.page_index + 1)
 
