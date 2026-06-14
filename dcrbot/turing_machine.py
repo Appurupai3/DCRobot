@@ -1816,7 +1816,7 @@ class NumberSearcher2DifficultyView(View):
 
         async def callback(interaction: discord.Interaction):
             await interaction.response.send_message(
-                embed=build_number_searcher2_guide_embed("overview"),
+                embed=build_number_searcher2_guide_embed(0),
                 view=NumberSearcher2GuideView(interaction.user),
                 ephemeral=True,
             )
@@ -1825,104 +1825,218 @@ class NumberSearcher2DifficultyView(View):
         self.add_item(button)
 
 
-NUMBER_SEARCHER2_GUIDE_PAGES = {
-    "overview": {
-        "label": "玩法總覽",
-        "emoji": "📘",
-        "description": (
-            "三個位置各自藏有數字與顏色；N7 起再加入圖形。\n"
-            "一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
-            "可用下方選單切換：數字、顏色、圖形與難度說明。"
-        ),
-        "fields": [
-            ("基本元素", "數字：0～9，共 3 位。\n顏色：黃、綠、藍；N5 起新增紫。\n圖形：N7 起新增圓形、三角形、長方形、五邊形。"),
-            ("隨機與雜訊", "隨機數字/顏色禮包會立刻公開 2 個對應線索。N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
-        ],
-    },
-    "number": {
-        "label": "數字線索",
-        "emoji": "🔢",
-        "description": "數字線索用來推理三位密碼本身。",
-        "fields": [
-            ("加總與奇偶", "總和、奇判定、偶判定、全體奇偶、大判定、小判定。"),
-            ("大小與極值", "大小關係 A/B/C、極差觀測、極值位置 A/B、極值資訊 A/B。"),
-            ("差值與倍數", "差計算 A/B/C、最大差、最小差、差之和、隨機差、倍數密碼 A/B。"),
-            ("特殊判斷", "零的領域、質數獵人、連續風暴、相同複製、隨機機會、隨機計數器 2A。"),
-            ("指定數字", "幸運號碼0～9會公開指定數字在密碼中的位置；隨機數字禮包會公開 2 個數字線索。"),
-        ],
-    },
-    "color": {
-        "label": "顏色線索",
-        "emoji": "🎨",
-        "description": "顏色線索用來推理三個方塊的顏色與顏色上的數字總和。",
-        "fields": [
-            ("位置公開", "藍色雷達、綠色雷達、黃色雷達、首位開榜、中位開榜、末位開榜。"),
-            ("顏色加總", "黃色計數器、綠色計數器、藍色計數器、隨機計數器、隨機計數器 2B、藍黃配、黃綠配、藍綠配。"),
-            ("顏色關係", "色彩多樣性、對稱掃描、鄰居檢查、尾端檢查、色彩絕緣體、左右側安全區 A/B/C。"),
-            ("N5 紫色追加", "紫色雷達、紫色計數器、紫藍配、左側安全區 D、右側安全區 D。"),
-            ("禮包", "隨機顏色禮包會公開 2 個顏色線索。"),
-        ],
-    },
-    "shape": {
-        "label": "圖形線索",
-        "emoji": "🔷",
-        "description": "N7 起啟用圖形線索，用圖形、邊數、顏色與數字的複合關係輔助推理。",
-        "fields": [
-            ("圖形位置", "圓形雷達、三角形雷達、長方形雷達、五邊形雷達、圖形多樣性、圖形絕緣體。"),
-            ("邊數與幾何", "幾何總邊數、尖角觀測、奇偶幾何、偶數幾何、圖形複合相乘、幾何倍數檢測。"),
-            ("圖形上的數字", "圓形/三角形/長方形/五邊形計數器、圓底密碼、尖角極值、圖形大小判定、圖形數字極差。"),
-            ("複合關係", "圓形連擊、最大/最小邊數落點、隨機圖形計數器、多邊形純淨度、尖角大合唱、無角邊界。"),
-            ("顏色＋圖形", "暖色幾何、冷色圓角、綠色幾何特徵、圖形調色盤、幾何對當、雙規開榜、色彩幾何配、安全區圖形檢測。"),
-        ],
-    },
-    "difficulty": {
-        "label": "難度 N0-N8",
-        "emoji": "🏁",
-        "description": "難度效果為累積式；高難度包含前面低難度的變化。",
-        "fields": [
-            ("N0～N2", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
-            ("N3～N5", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
-            ("N6～N8", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
-            ("費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
-        ],
-    },
-}
+NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES = [
+    "總和",
+    "奇判定",
+    "偶判定",
+    "大小關係 A",
+    "大小關係 B",
+    "大小關係 C",
+    "極差觀測",
+    "零的領域",
+    "質數獵人",
+    "大判定",
+    "小判定",
+    "連續風暴",
+    "相同複製",
+    "全體奇偶",
+    "倍數密碼 A",
+    "倍數密碼 B",
+    "極值位置 A",
+    "極值位置 B",
+    "極值資訊 A",
+    "極值資訊 B",
+    "差計算 A",
+    "差計算 B",
+    "差計算 C",
+    "最大差",
+    "最小差",
+    "差之和",
+    "隨機差",
+    "隨機機會",
+    "隨機計數器 2A",
+    RANDOM_NUMBER_PACK_TITLE,
+    *(f"幸運號碼{digit}" for digit in DIGITS),
+]
+
+NUMBER_SEARCHER2_COLOR_GUIDE_TITLES = [
+    "藍色雷達",
+    "綠色雷達",
+    "黃色雷達",
+    "首位開榜",
+    "中位開榜",
+    "末位開榜",
+    "黃色計數器",
+    "綠色計數器",
+    "藍色計數器",
+    "隨機計數器",
+    "隨機計數器 2B",
+    RANDOM_COLOR_PACK_TITLE,
+    "藍黃配",
+    "黃綠配",
+    "藍綠配",
+    "色彩多樣性",
+    "對稱掃描",
+    "鄰居檢查",
+    "尾端檢查",
+    "色彩絕緣體",
+    "左側安全區 A",
+    "左側安全區 B",
+    "左側安全區 C",
+    "右側安全區 A",
+    "右側安全區 B",
+    "右側安全區 C",
+    "紫色雷達",
+    "紫色計數器",
+    "紫藍配",
+    "左側安全區 D",
+    "右側安全區 D",
+]
+
+NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES = [
+    "幾何總邊數",
+    "尖角觀測",
+    "圓形雷達",
+    "三角形雷達",
+    "長方形雷達",
+    "五邊形雷達",
+    "圖形多樣性",
+    "對稱幾何",
+    "鄰居幾何",
+    "圖形絕緣體",
+    "圓形計數器",
+    "三角形計數器",
+    "長方形計數器",
+    "五邊形計數器",
+    "奇偶幾何",
+    "偶數幾何",
+    "圓底密碼",
+    "尖角極值",
+    "圖形大小判定",
+    "圖形數字極差",
+    "圓形連擊",
+    "幾何倍數檢測",
+    "最大邊數落點",
+    "最小邊數落點",
+    "隨機圖形計數器",
+    "圖形複合相乘",
+    "多邊形純淨度",
+    "尖角大合唱",
+    "無角邊界",
+    "暖色幾何",
+    "冷色圓角",
+    "綠色幾何特徵",
+    "圖形調色盤",
+    "幾何對當",
+    "首位開榜（雙規）",
+    "中位開榜（雙規）",
+    "末位開榜（雙規）",
+    "色彩幾何配",
+    "安全區圖形檢測",
+]
+
+NUMBER_SEARCHER2_GUIDE_PAGE_SIZE = 8
 
 
-def build_number_searcher2_guide_embed(page: str) -> discord.Embed:
-    guide = NUMBER_SEARCHER2_GUIDE_PAGES.get(page, NUMBER_SEARCHER2_GUIDE_PAGES["overview"])
+def number_searcher2_clue_guide_lines(titles: list[str]) -> list[str]:
+    return [f"【{title}】{clue_choice_text(Clue(title, ''))}" for title in titles]
+
+
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
+    pages: list[dict[str, object]] = [
+        {
+            "title": "📘 數字搜尋者2｜玩法總覽",
+            "description": (
+                "三個位置各自藏有數字與顏色；N7 起再加入圖形。\n"
+                "一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
+                "使用下方上一頁 / 下一頁切換，所有線索都在這份說明內。"
+            ),
+            "fields": [
+                ("基本元素", "數字：0～9，共 3 位。\n顏色：黃、綠、藍；N5 起新增紫。\n圖形：N7 起新增圓形、三角形、長方形、五邊形。"),
+                ("隨機與雜訊", "隨機數字/顏色禮包會立刻公開 2 個對應線索。N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
+            ],
+        }
+    ]
+    sections = [
+        ("🔢 數字線索", NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES),
+        ("🎨 顏色線索", NUMBER_SEARCHER2_COLOR_GUIDE_TITLES),
+        ("🔷 圖形線索", NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES),
+    ]
+    for section_title, titles in sections:
+        chunks = chunked(number_searcher2_clue_guide_lines(titles), NUMBER_SEARCHER2_GUIDE_PAGE_SIZE)
+        for index, lines in enumerate(chunks, start=1):
+            pages.append(
+                {
+                    "title": f"{section_title}｜第 {index}/{len(chunks)} 頁",
+                    "description": "\n".join(lines),
+                    "fields": [],
+                }
+            )
+    pages.append(
+        {
+            "title": "🏁 數字搜尋者2｜難度 N0-N8",
+            "description": "難度效果為累積式；高難度包含前面低難度的變化。",
+            "fields": [
+                ("N0～N2", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
+                ("N3～N5", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
+                ("N6～N8", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
+                ("費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
+            ],
+        }
+    )
+    return pages
+
+
+NUMBER_SEARCHER2_GUIDE_PAGES = build_number_searcher2_guide_pages()
+
+
+def build_number_searcher2_guide_embed(page_index: int) -> discord.Embed:
+    page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
+    guide = NUMBER_SEARCHER2_GUIDE_PAGES[page_index]
     embed = discord.Embed(
-        title=f"{guide['emoji']} 數字搜尋者2｜{guide['label']}",
-        description=guide["description"],
+        title=str(guide["title"]),
+        description=str(guide["description"]),
         color=discord.Color.blurple(),
     )
     for name, value in guide["fields"]:
         embed.add_field(name=name, value=value, inline=False)
-    embed.set_footer(text="使用下方選單切換說明分類；此說明直接顯示於 Discord，不會下載 txt 檔。")
+    embed.set_footer(text=f"第 {page_index + 1}/{len(NUMBER_SEARCHER2_GUIDE_PAGES)} 頁｜此說明直接顯示於 Discord，不會下載 txt 檔。")
     return embed
 
 
 class NumberSearcher2GuideView(View):
-    def __init__(self, user: discord.User):
+    def __init__(self, user: discord.User, page_index: int = 0):
         super().__init__(timeout=180)
         self.user = user
-        options = [
-            discord.SelectOption(label=guide["label"], value=key, emoji=guide["emoji"])
-            for key, guide in NUMBER_SEARCHER2_GUIDE_PAGES.items()
-        ]
-        select = Select(placeholder="切換說明分類", options=options, row=0)
+        self.page_index = page_index
+        self.sync_button_state()
 
-        async def callback(interaction: discord.Interaction):
-            await interaction.response.edit_message(embed=build_number_searcher2_guide_embed(select.values[0]), view=self)
+    def sync_button_state(self) -> None:
+        self.previous_page.disabled = self.page_index <= 0
+        self.next_page.disabled = self.page_index >= len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1
 
-        select.callback = callback
-        self.add_item(select)
+    async def update_page(self, interaction: discord.Interaction, page_index: int) -> None:
+        self.page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
+        self.sync_button_state()
+        await interaction.response.edit_message(embed=build_number_searcher2_guide_embed(self.page_index), view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("❌ 這不是你的數字搜尋者2說明選單。", ephemeral=True)
             return False
         return True
+
+    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary, emoji="◀️")
+    async def previous_page(self, interaction: discord.Interaction, button: Button):
+        await self.update_page(interaction, self.page_index - 1)
+
+    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary, emoji="▶️")
+    async def next_page(self, interaction: discord.Interaction, button: Button):
+        await self.update_page(interaction, self.page_index + 1)
 
 
 def number_searcher2_settings(difficulty: int) -> dict:
