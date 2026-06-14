@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
 import discord
 from discord.ui import Button, Modal, Select, TextInput, View
@@ -45,6 +46,7 @@ HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
 REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
+NUMBER_SEARCHER2_GUIDE_PATH = Path("docs/數字搜尋者2線索與難度說明.txt")
 
 
 def format_money_delta(amount: int) -> str:
@@ -1778,6 +1780,7 @@ class NumberSearcher2DifficultyView(View):
         return get_number_searcher2_unlocked(str(self.user.id))
 
     def add_difficulty_select(self) -> None:
+        self.add_guide_button()
         unlocked = self.unlocked_level()
         options = []
         for level in range(9):
@@ -1809,6 +1812,22 @@ class NumberSearcher2DifficultyView(View):
 
         select.callback = callback
         self.add_item(select)
+
+    def add_guide_button(self) -> None:
+        button = Button(label="線索與難度說明", style=discord.ButtonStyle.secondary, emoji="📘", row=1)
+
+        async def callback(interaction: discord.Interaction):
+            if not NUMBER_SEARCHER2_GUIDE_PATH.exists():
+                await interaction.response.send_message("❌ 找不到數字搜尋者2說明檔。", ephemeral=True)
+                return
+            await interaction.response.send_message(
+                "📘 這裡是數字搜尋者2的線索與難度完整說明。",
+                file=discord.File(NUMBER_SEARCHER2_GUIDE_PATH, filename="數字搜尋者2線索與難度說明.txt"),
+                ephemeral=True,
+            )
+
+        button.callback = callback
+        self.add_item(button)
 
 
 def number_searcher2_settings(difficulty: int) -> dict:
