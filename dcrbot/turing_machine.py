@@ -29,8 +29,9 @@ COLOR_RGB = {"黃": (245, 202, 66), "綠": (72, 196, 116), "藍": (73, 145, 236)
 SHAPES = ("圓形", "三角形", "長方形", "五邊形")
 SHAPE_SIDES = {"圓形": 0, "三角形": 3, "長方形": 4, "五邊形": 5}
 GUESS_REWARD = 5000
-N5_GUESS_REWARD = 6000
-N8_GUESS_REWARD = 8000
+N3_CLEAR_BONUS = 1000
+N5_CLEAR_BONUS = 3000
+N8_CLEAR_BONUS = 5000
 RANDOM_CLUE_COST = 300
 N1_RANDOM_CLUE_COST = 400
 BASE_ACTION_COST = 100
@@ -978,8 +979,19 @@ class NumberSearcherView(View):
     def random_clue_cost(self) -> int:
         return scaled_amount(self.random_clue_base, self.multiplier)
 
+    def clear_bonus(self) -> int:
+        if self.game_name != "數字搜尋者2":
+            return 0
+        if self.difficulty >= 8:
+            return N8_CLEAR_BONUS
+        if self.difficulty >= 5:
+            return N5_CLEAR_BONUS
+        if self.difficulty >= 3:
+            return N3_CLEAR_BONUS
+        return 0
+
     def guess_reward(self) -> int:
-        return scaled_amount(self.reward, self.multiplier)
+        return scaled_amount(self.reward + self.clear_bonus(), self.multiplier)
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
@@ -1987,9 +1999,9 @@ def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
             "description": "難度效果為**累積式**：高難度會包含前面低難度的變化。",
             "fields": [
                 ("N0～N2｜入門與初階干擾", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
-                ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色，獎金 6000。"),
-                ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形，獎金 8000。"),
-                ("💰 費用與獎金", "基礎獎金 5000；N5 獎金 6000；N8 獎金 8000。\n基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
+                ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000；通關額外獎勵 1000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色；通關額外獎勵提高為 3000。"),
+                ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形；通關額外獎勵提高為 5000。"),
+                ("💰 費用與獎金", "基礎獎金固定 5000。N3+ 額外 1000；N5+ 額外 3000；N8 額外 5000。\n基礎隨機線索 300，N1 起 400；一般線索基礎 100，N6 起 150。"),
             ],
         }
     )
@@ -2102,13 +2114,11 @@ def number_searcher2_settings(difficulty: int) -> dict:
         settings["noise_chance"] = 0.10
     if difficulty >= 5:
         settings["available_colors"] = PURPLE_COLORS
-        settings["reward"] = N5_GUESS_REWARD
     if difficulty >= 6:
         settings["clue_base"] = N6_BASE_CLUE_COST
     if difficulty >= 7:
         settings["has_shapes"] = True
     if difficulty >= 8:
-        settings["reward"] = N8_GUESS_REWARD
         settings["requires_extra_guess"] = True
     return settings
 
@@ -2118,12 +2128,12 @@ def number_searcher2_description(difficulty: int) -> str:
         0: "正常遊戲",
         1: "隨機線索價格 400",
         2: "購買線索 5% 機率遭雜訊攻擊",
-        3: "猜數字費用改為 100×3^(n-1)，上限 3000",
+        3: "猜數字費用改為 100×3^(n-1)，上限 3000，通關額外獎勵 1000",
         4: "雜訊攻擊機率提高到 10%",
-        5: "新增紫色，獎金提高到 6000",
+        5: "新增紫色，通關額外獎勵提高為 3000",
         6: "線索基礎價格提高到 150",
         7: "新增圖形與圖形線索",
-        8: "需額外猜中顏色或圖形，獎金 8000",
+        8: "需額外猜中顏色或圖形，通關額外獎勵提高為 5000",
     }
     return descriptions.get(difficulty, "未知難度")
 
