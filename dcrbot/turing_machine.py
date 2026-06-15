@@ -524,6 +524,7 @@ class PendingClueChoiceView(View):
             embed=None,
             view=self,
         )
+        self.parent.clue_choice_message = await interaction.original_response()
         self.stop()
 
 
@@ -974,6 +975,7 @@ class NumberSearcherView(View):
         self.shape_marks: list[str | None] = [None] * CODE_LENGTH
         self.seen_clue_titles: set[str] = set()
         self.pending_clue_offer: PendingClueOffer | None = None
+        self.clue_choice_message: discord.InteractionMessage | None = None
         self.ended = False
         self.message: discord.Message | None = None
         self.add_advanced_buttons()
@@ -1390,18 +1392,31 @@ class NumberSearcherView(View):
         choice_embed.add_field(name="目前線索紀錄", value=self.clue_history_summary(), inline=False)
         return choice_embed
 
+    async def show_clue_choice_message(self, interaction: discord.Interaction, offer: PendingClueOffer, *, reused: bool = False) -> None:
+        embed = self.pending_offer_embed(offer, reused=reused)
+        view = PendingClueChoiceView(self, list(offer.choices), offer.cost)
+        if self.clue_choice_message is not None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                await self.clue_choice_message.edit(content=None, embed=embed, view=view)
+                return
+            except (discord.NotFound, discord.HTTPException):
+                self.clue_choice_message = None
+
+        if interaction.response.is_done():
+            self.clue_choice_message = await interaction.followup.send(embed=embed, view=view, ephemeral=True, wait=True)
+            return
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        self.clue_choice_message = await interaction.original_response()
+
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
 
         if self.pending_clue_offer is not None:
-            offer = self.pending_clue_offer
-            await interaction.response.send_message(
-                embed=self.pending_offer_embed(offer, reused=True),
-                view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
-                ephemeral=True,
-            )
+            await self.show_clue_choice_message(interaction, self.pending_clue_offer, reused=True)
             return
 
         pool, sample_count, clue_type_name = self.pool_for_clue_type(clue_type)
@@ -1439,11 +1454,7 @@ class NumberSearcherView(View):
         noise_index = random.randrange(len(sampled)) if self.noise_chance > 0 and random.random() < self.noise_chance else None
         offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost, noise_index=noise_index)
         self.pending_clue_offer = offer
-        await interaction.response.send_message(
-            embed=self.pending_offer_embed(offer),
-            view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
-            ephemeral=True,
-        )
+        await self.show_clue_choice_message(interaction, offer)
 
     def answer_details(self) -> str:
         details = f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。"
