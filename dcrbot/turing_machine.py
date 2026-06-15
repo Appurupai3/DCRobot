@@ -43,6 +43,7 @@ NUMBER_SEARCHER2_UNLOCK_KEY = "number_searcher2_unlocked"
 MULTIPLIER_OPTIONS = (1, 5, 10, 50, 100)
 MAX_CUSTOM_MULTIPLIER = 1000
 HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
+MARKER_BUTTON_CUSTOM_ID = "number_searcher_marker"
 REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
@@ -541,7 +542,7 @@ class NumberSearcherDigitMarkModal(Modal):
     def __init__(self, marker_view: "NumberSearcherMarkerView"):
         super().__init__(title="📌 設定數字標記")
         self.marker_view = marker_view
-        current = format_digit_marks_for_input(marker_view.parent.digit_marks)
+        current = format_digit_marks_for_input(marker_view.digit_marks)
         placeholder = current if any(slot for slot in current.split(",")) else "例如 132,5,56（逗號分隔第 1/2/3 位；留空清除該位）"
         self.marks = TextInput(
             label="三格數字標記",
@@ -557,27 +558,50 @@ class NumberSearcherDigitMarkModal(Modal):
 
 
 class NumberSearcherMarkerView(View):
-    def __init__(self, parent: "NumberSearcherView"):
+    def __init__(self, parent: "NumberSearcherView", owner: discord.User, *, affects_parent: bool):
         super().__init__(timeout=180)
         self.parent = parent
+        self.owner = owner
+        self.affects_parent = affects_parent
         self.selected_slot = 0
+        self.digit_marks = [list(marks) for marks in parent.digit_marks]
+        self.color_marks = [list(marks) for marks in parent.color_marks]
+        self.shape_marks = list(parent.shape_marks)
         self.rebuild_items()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.parent.user.id:
+        if interaction.user.id != self.owner.id:
             await interaction.response.send_message("❌ 這不是你的標記介面。", ephemeral=True)
             return False
         return True
 
+    def sync_parent_marks(self) -> None:
+        if not self.affects_parent:
+            return
+        self.parent.digit_marks = [list(marks) for marks in self.digit_marks]
+        self.parent.color_marks = [list(marks) for marks in self.color_marks]
+        self.parent.shape_marks = list(self.shape_marks)
+
+    async def update_parent_board(self, interaction: discord.Interaction, status_text: str) -> None:
+        if not self.affects_parent:
+            return
+        self.sync_parent_marks()
+        await self.parent.update_board_from_child(interaction, status_text)
+
     def build_embed(self, status_text: str | None = None) -> discord.Embed:
+        default_description = (
+            "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。"
+            if self.affects_parent
+            else "這是你的私人標記介面，不會影響遊玩者的主畫面；按「分享標記」可即時產生公開圖片。"
+        )
         embed = discord.Embed(
             title="📌 數字搜尋者標記",
-            description=status_text or "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。",
+            description=status_text or default_description,
             color=discord.Color.blurple(),
         )
-        digit_text = " / ".join(slot or "-" for slot in format_digit_marks_for_input(self.parent.digit_marks).split(","))
-        color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.parent.color_marks)
-        shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
+        digit_text = " / ".join(slot or "-" for slot in format_digit_marks_for_input(self.digit_marks).split(","))
+        color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
+        shape_text = " / ".join(value or "-" for value in self.shape_marks)
         embed.add_field(name="目前位置", value=f"第 {self.selected_slot + 1} 位", inline=True)
         embed.add_field(name="數字標記", value=digit_text, inline=False)
         embed.add_field(name="顏色標記", value=color_text, inline=False)
@@ -628,7 +652,7 @@ class NumberSearcherMarkerView(View):
         for color in self.parent.available_colors:
             color_button = Button(
                 label=COLOR_NAMES[color],
-                style=discord.ButtonStyle.success if color in self.parent.color_marks[self.selected_slot] else discord.ButtonStyle.secondary,
+                style=discord.ButtonStyle.success if color in self.color_marks[self.selected_slot] else discord.ButtonStyle.secondary,
                 emoji="🎨",
                 row=2,
             )
@@ -643,7 +667,7 @@ class NumberSearcherMarkerView(View):
             for shape in SHAPES:
                 shape_button = Button(
                     label=shape,
-                    style=discord.ButtonStyle.success if self.parent.shape_marks[self.selected_slot] == shape else discord.ButtonStyle.secondary,
+                    style=discord.ButtonStyle.success if self.shape_marks[self.selected_slot] == shape else discord.ButtonStyle.secondary,
                     emoji="🔷",
                     row=3,
                 )
@@ -654,20 +678,28 @@ class NumberSearcherMarkerView(View):
                 shape_button.callback = shape_callback
                 self.add_item(shape_button)
 
+        share_button = Button(label="分享標記", style=discord.ButtonStyle.primary, emoji="🖼️", row=4)
+
+        async def share_callback(interaction: discord.Interaction):
+            await self.share_marks(interaction)
+
+        share_button.callback = share_callback
+        self.add_item(share_button)
+
     async def select_slot(self, interaction: discord.Interaction, slot: int) -> None:
         self.selected_slot = slot
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"已切換到第 {slot + 1} 位標記。"), view=self)
 
     async def set_color_mark(self, interaction: discord.Interaction, color: str) -> None:
-        slot_colors = self.parent.color_marks[self.selected_slot]
+        slot_colors = self.color_marks[self.selected_slot]
         if color in slot_colors:
             slot_colors.remove(color)
             action_text = f"已移除第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
         else:
             slot_colors.append(color)
             action_text = f"已加入第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
-        await self.parent.update_board_from_child(interaction, f"📌 {action_text}。")
+        await self.update_parent_board(interaction, f"📌 {action_text}。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ {action_text}。"), view=self)
 
@@ -675,16 +707,16 @@ class NumberSearcherMarkerView(View):
         if not self.parent.has_shapes:
             await interaction.response.send_message("❌ 目前難度沒有圖形標記。", ephemeral=True)
             return
-        self.parent.shape_marks[self.selected_slot] = shape
-        await self.parent.update_board_from_child(interaction, f"📌 已標記第 {self.selected_slot + 1} 位圖形：{shape}。")
+        self.shape_marks[self.selected_slot] = shape
+        await self.update_parent_board(interaction, f"📌 已標記第 {self.selected_slot + 1} 位圖形：{shape}。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ 已標記第 {self.selected_slot + 1} 位圖形：{shape}。"), view=self)
 
     async def reset_slot_marks(self, interaction: discord.Interaction) -> None:
-        self.parent.digit_marks[self.selected_slot] = []
-        self.parent.color_marks[self.selected_slot] = []
-        self.parent.shape_marks[self.selected_slot] = None
-        await self.parent.update_board_from_child(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
+        self.digit_marks[self.selected_slot] = []
+        self.color_marks[self.selected_slot] = []
+        self.shape_marks[self.selected_slot] = None
+        await self.update_parent_board(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ 已重製第 {self.selected_slot + 1} 位的數字、顏色與圖形標記。"), view=self)
 
@@ -709,21 +741,65 @@ class NumberSearcherMarkerView(View):
             marks.append([])
         return marks
 
+    def marker_update_suffix(self) -> str:
+        return "並同步到主畫面" if self.affects_parent else "（私人標記，不影響遊玩者）"
+
     async def set_digit_marks(self, interaction: discord.Interaction, raw_marks: str) -> None:
         marks = self.parse_digit_marks(raw_marks)
         if marks is None:
             await interaction.response.send_message("❌ 格式錯誤，請用 132,5,56 這種格式輸入三格數字標記。", ephemeral=True)
             return
-        self.parent.digit_marks = marks
-        await self.parent.update_board_from_child(interaction, "📌 已更新數字標記。")
+        self.digit_marks = marks
+        await self.update_parent_board(interaction, "📌 已更新數字標記。")
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新數字標記並同步到主畫面。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已更新數字標記{self.marker_update_suffix()}。"), view=self)
 
     async def clear_digit_marks(self, interaction: discord.Interaction) -> None:
-        self.parent.digit_marks = [[] for _ in range(CODE_LENGTH)]
-        await self.parent.update_board_from_child(interaction, "📌 已清除數字標記。")
+        self.digit_marks = [[] for _ in range(CODE_LENGTH)]
+        await self.update_parent_board(interaction, "📌 已清除數字標記。")
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed("✅ 已清除數字標記並同步到主畫面。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已清除數字標記{self.marker_update_suffix()}。"), view=self)
+
+    def marker_summary(self) -> str:
+        parts = []
+        digit_text = "/".join(slot or "-" for slot in format_digit_marks_for_input(self.digit_marks).split(","))
+        if digit_text != "-/-/-":
+            parts.append(f"數字 {digit_text}")
+        color_text = "/".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
+        if color_text != "-/-/-":
+            parts.append(f"顏色 {color_text}")
+        if self.parent.has_shapes:
+            shape_text = "/".join(value or "-" for value in self.shape_marks)
+            if shape_text != "-/-/-":
+                parts.append(f"圖形 {shape_text}")
+        return "｜".join(parts) if parts else "尚無標記"
+
+    def render_snapshot(self) -> object:
+        class MarkerSnapshot:
+            pass
+
+        snapshot = MarkerSnapshot()
+        snapshot.title = f"{self.parent.title}｜標記分享"
+        snapshot.has_shapes = self.parent.has_shapes
+        snapshot.digit_marks = [list(marks) for marks in self.digit_marks]
+        snapshot.color_marks = [list(marks) for marks in self.color_marks]
+        snapshot.shape_marks = list(self.shape_marks)
+        snapshot.colors = self.parent.colors
+        snapshot.secret = self.parent.secret
+        snapshot.multiplier = self.parent.multiplier
+        snapshot.guess_count = self.parent.guess_count
+        snapshot.clue_count = self.parent.clue_count
+        snapshot.total_spent = self.parent.total_spent
+        snapshot.guess_reward = self.parent.guess_reward
+        return snapshot
+
+    async def share_marks(self, interaction: discord.Interaction) -> None:
+        file = discord.File(render_number_searcher_board(self.render_snapshot()), filename="number_searcher_marks.png")
+        await interaction.response.send_message(
+            content=f"📌 {self.owner.display_name} 分享標記：{self.marker_summary()}",
+            file=file,
+            ephemeral=False,
+        )
 
 
 class NumberSearcherGuessModal(Modal):
@@ -984,7 +1060,7 @@ class NumberSearcherView(View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
-        if custom_id == HISTORY_BUTTON_CUSTOM_ID:
+        if custom_id in {HISTORY_BUTTON_CUSTOM_ID, MARKER_BUTTON_CUSTOM_ID}:
             return True
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("❌ 這不是你的數字搜尋者！請自行開啟遊戲。", ephemeral=True)
@@ -1052,10 +1128,11 @@ class NumberSearcherView(View):
             test_button.callback = test_callback
             self.add_item(test_button)
 
-        marker_button = Button(label="標記", style=discord.ButtonStyle.secondary, emoji="📌", row=2)
+        marker_button = Button(label="標記", style=discord.ButtonStyle.secondary, emoji="📌", row=2, custom_id=MARKER_BUTTON_CUSTOM_ID)
 
         async def marker_callback(interaction: discord.Interaction):
-            marker_view = NumberSearcherMarkerView(self)
+            affects_parent = interaction.user.id == self.user.id
+            marker_view = NumberSearcherMarkerView(self, interaction.user, affects_parent=affects_parent)
             await interaction.response.send_message(embed=marker_view.build_embed(), view=marker_view, ephemeral=True)
 
         marker_button.callback = marker_callback
