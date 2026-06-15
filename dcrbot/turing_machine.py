@@ -302,8 +302,25 @@ def build_shape_clues(
     random_shape_for_compare = random.choice(SHAPES)
     missing_shapes = [shape for shape in SHAPES if shape not in shapes]
     repeated_color_for_random_shape = any(colors.count(color) >= 2 for color in {colors[index] for index, shape in enumerate(shapes) if shape == random_shape})
-    duplicated_pair = len(set(zip(colors, shapes, strict=True))) < CODE_LENGTH
-    no_angle_gap = max(circle_digits) - min(circle_digits) if len(circle_digits) >= 2 else 0
+    duplicated_pair = next(
+        (
+            (left_index, right_index)
+            for left_index in range(CODE_LENGTH)
+            for right_index in range(left_index + 1, CODE_LENGTH)
+            if colors[left_index] == colors[right_index] and shapes[left_index] == shapes[right_index]
+        ),
+        None,
+    )
+    duplicated_pair_text = (
+        f"第 {duplicated_pair[0] + 1} 位和第 {duplicated_pair[1] + 1} 位"
+        if duplicated_pair is not None
+        else "沒有完全一樣的位置"
+    )
+    geometry_multiple_count = sum(
+        1 for digit, side in zip(code, shape_sides, strict=True) if digit != 0 and side != 0 and digit % side == 0
+    )
+    boundary_gap = abs(max(max_side_digits) - min(min_side_digits))
+    side_count_gap = max_sides - min_sides
 
     return [
         Clue("幾何總邊數", f"三個位置的圖形總邊數加起來是 {sum(shape_sides)}。"),
@@ -326,25 +343,26 @@ def build_shape_clues(
         Clue("尖角極值", f"所有有尖角的圖形中，上面數字的最大值是 {max((code[index] for index in angled_indexes), default=0)}。"),
         Clue("圖形大小判定", "場上無五邊形。" if not pentagon_digits else f"所有五邊形方塊上面的數字{'都大於或等於 5' if all(digit >= 5 for digit in pentagon_digits) else '不是都大於或等於 5'}。"),
         Clue("圖形數字極差", f"幾何邊數最多的圖形數字減去幾何邊數最少的圖形數字，其差的絕對值為 {abs(max_side_digits[0] - min_side_digits[0])}。"),
+        Clue("邊數差", f"場上邊數最大減場上最小邊數的差為 {side_count_gap}。"),
         Clue("圓形連擊", f"場上所有圓形方塊的數量 {compare_text(shape_count['圓形'], code.count(0))} 密碼中數字 0 的總數量。"),
-        Clue("幾何倍數檢測", f"{'有' if any(side != 0 and digit % side == 0 for digit, side in zip(code, shape_sides, strict=True)) else '沒有'}任何一個位置的方塊數字剛好是該圖形邊數的倍數（不含0）。"),
+        Clue("幾何倍數檢測", f"有 {geometry_multiple_count} 個位置的方塊數字剛好是該圖形邊數的倍數。"),
         Clue("最大邊數落點", f"幾何邊數最多（或並列最多）的圖形，其上方第一個符合的數字是{'奇數' if max_side_digits[0] % 2 else '偶數'}。"),
         Clue("最小邊數落點", f"幾何邊數最少（或並列最少）的圖形，其上方第一個符合的數字 {compare_text(min_side_digits[0], 5)} 5。"),
         Clue("隨機圖形計數器", f"隨機抽一種在場上有出現的圖形，其上方的數字總和是 {shape_sum[random_present_shape]}。"),
         Clue("圖形複合相乘", f"三個位置的（方塊數字 × 圖形邊數）之總和為 {sum(digit * side for digit, side in zip(code, shape_sides, strict=True))}。"),
         Clue("多邊形純淨度", "場上無此圖形。" if not polygon_digits else ("有重複。" if len(set(polygon_digits)) < len(polygon_digits) else "全不重複。")),
         Clue("尖角大合唱", f"所有帶有尖角的圖形上方的數字，奇數的數量共有 {sum(1 for index in angled_indexes if code[index] % 2 == 1)} 個。"),
-        Clue("無角邊界", f"場上所有沒有角的圖形（圓形）上方的數字，最大值減最小值的絕對差等於 {no_angle_gap}。"),
+        Clue("邊界差尋", f"圖形上邊數最大的數字（邊數並列取數字最大）減邊數最小的數字（邊數並列取數字最小）的絕對差等於 {boundary_gap}。"),
         Clue("暖色幾何", f"黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '黃' and SHAPE_SIDES[shape] > 0)} 個。"),
         Clue("冷色圓角", f"藍色方塊且圖形為圓形的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '藍' and shape == '圓形')} 個。"),
         Clue("綠色幾何特徵", f"所有綠色方塊的圖形邊數總和是 {sum(SHAPE_SIDES[shape] for color, shape in zip(colors, shapes, strict=True) if color == '綠')}。"),
         Clue("圖形調色盤", f"{random_shape}在場上{yes_no(repeated_color_for_random_shape)}搭配到重複的顏色。"),
-        Clue("幾何對當", f"{yes_no(duplicated_pair)}任何兩個位置，其顏色與圖形的配置完全一模一樣。"),
+        Clue("幾何對當", f"顏色與圖形的配置完全一模一樣的位置：{duplicated_pair_text}。"),
         Clue("首位開榜（雙規）", f"第一個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[0]]}、{shapes[0]}。"),
         Clue("中位開榜（雙規）", f"第二個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[1]]}、{shapes[1]}。"),
         Clue("末位開榜（雙規）", f"第三個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[2]]}、{shapes[2]}。"),
-        Clue("色彩幾何配", f"{COLOR_NAMES[random_color]}方塊數量 {compare_text(colors.count(random_color), shape_count[random_shape_for_compare])} {random_shape_for_compare}的數量。"),
-        Clue("安全區圖形檢測", f"前兩個方塊（第一與第二個）中，{yes_no('五邊形' in shapes[:2])}包含五邊形。"),
+        Clue("色彩幾何配", f"場上{COLOR_NAMES[random_color]}方塊數量 {compare_text(colors.count(random_color), shape_count[random_shape_for_compare])} 場上{random_shape_for_compare}的數量。"),
+        Clue("安全區圖形檢測", f"前兩個方塊（第一與第二個）中，{yes_no('五邊形' in shapes[:2])}包含五邊形，{yes_no('三角形' in shapes[:2])}包含三角形。"),
     ]
 
 
@@ -431,25 +449,26 @@ def clue_choice_text(clue: Clue) -> str:
         "尖角極值": "所有有尖角的圖形中，上面數字的最大值是 [數字]。",
         "圖形大小判定": "所有五邊形方塊上面的數字是否都大於或等於 5？[是 / 不是 / 場上無五邊形]。",
         "圖形數字極差": "幾何邊數最多的圖形數字減去幾何邊數最少的圖形數字，其差的絕對值為 [絕對差]。",
+        "邊數差": "場上邊數最大減場上最小邊數的差為 [絕對差]。",
         "圓形連擊": "圓形數量是否 [大於 / 小於 / 等於] 密碼中數字 0 的總數量。",
-        "幾何倍數檢測": "有沒有任何一個位置的方塊數字剛好是該圖形邊數的倍數（不含0）？[有 / 沒有]。",
+        "幾何倍數檢測": "有幾個位置的方塊數字剛好是該圖形邊數的倍數？[幾個]。",
         "最大邊數落點": "幾何邊數最多（或並列最多）的圖形，其上方的數字是 [奇數 / 偶數]。",
         "最小邊數落點": "幾何邊數最少（或並列最少）的圖形，其上方的數字 [大於 / 小於 / 等於] 5。",
         "隨機圖形計數器": "隨機抽一種在場上有出現的圖形，其上方的數字總和是 [總和]。",
         "圖形複合相乘": "三個位置的（方塊數字 × 圖形邊數）之總和為 [總和]。",
         "多邊形純淨度": "長方形、五邊形上方的數字是否有重複？[有重複 / 全不重複 / 場上無此圖形]。",
         "尖角大合唱": "所有帶有尖角的圖形上方的數字，奇數的數量共有 [數量] 個。",
-        "無角邊界": "圓形上方數字最大值減最小值的絕對差等於 [絕對差]。",
+        "邊界差尋": "圖形上邊數最大的數字(邊數並列取數字最大)減邊數最小的數字(邊數並列取數字最小)的絕對差等於 [絕對差]。",
         "暖色幾何": "黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 [數量] 個。",
         "冷色圓角": "藍色方塊且圖形為圓形的組合共有 [數量] 個。",
         "綠色幾何特徵": "所有綠色方塊的圖形邊數總和是 [邊數和]。",
         "圖形調色盤": "某種特定的圖形在場上 [有 / 沒有] 搭配到重複的顏色。",
-        "幾何對當": "有沒有任何兩個位置，其顏色與圖形的配置完全一模一樣？[有 / 沒有]。",
+        "幾何對當": "有沒有任何兩個位置，其顏色與圖形的配置完全一模一樣？[第幾位和第幾位]。",
         "首位開榜（雙規）": "直接公開第一個位置（左邊）的 [真實顏色 與 真實圖形]。",
         "中位開榜（雙規）": "直接公開第二個位置（中間）的 [真實顏色 與 真實圖形]。",
         "末位開榜（雙規）": "直接公開第三個位置（右邊）的 [真實顏色 與 真實圖形]。",
-        "色彩幾何配": "某色方塊數量是否 [大於 / 小於 / 等於] 某圖形的數量。",
-        "安全區圖形檢測": "前兩個方塊（第一與第二個）中，[有 / 沒有] 包含五邊形。",
+        "色彩幾何配": "場上某色方塊(公開)數量是否 [大於 / 小於 / 等於] 場上某圖形(公開)的數量。",
+        "安全區圖形檢測": "前兩個方塊（第一與第二個）中，[有 / 沒有] 包含五邊形，[有 / 沒有] 包含三角形。",
     }
     if clue.title.startswith("幸運號碼"):
         return f"顯示所有密碼中的數字 {clue.title.removeprefix('幸運號碼')} 的位置 [第 X 位]。"
@@ -1929,6 +1948,7 @@ NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES = [
     "尖角極值",
     "圖形大小判定",
     "圖形數字極差",
+    "邊數差",
     "圓形連擊",
     "幾何倍數檢測",
     "最大邊數落點",
@@ -1937,7 +1957,7 @@ NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES = [
     "圖形複合相乘",
     "多邊形純淨度",
     "尖角大合唱",
-    "無角邊界",
+    "邊界差尋",
     "暖色幾何",
     "冷色圓角",
     "綠色幾何特徵",
