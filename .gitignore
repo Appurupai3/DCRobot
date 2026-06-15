@@ -4,3 +4,6 @@ bank
 bank/
 bank.json
 leaderboard/
+*.pyc
+*.pyo
+*.pyd
