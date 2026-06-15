@@ -1300,6 +1300,18 @@ class NumberSearcherView(View):
         pool = [clue for clue in pool if clue.title not in RANDOM_PACK_TITLES]
         return self.sample_unseen_clues(pool, 2)
 
+    def clue_history_summary(self, limit: int = 8, max_chars: int = 1000) -> str:
+        clue_entries = [entry for entry in self.history if entry.startswith(("💡", "🎁", "📌"))]
+        if not clue_entries:
+            return "尚未有任何線索紀錄。"
+        summary = "\n".join(clue_entries[-limit:])
+        if len(summary) <= max_chars:
+            return summary
+        return f"…{summary[-(max_chars - 1):]}"
+
+    def selected_clue_message(self, summary: str) -> str:
+        return f"{summary}\n\n目前線索紀錄：\n{self.clue_history_summary(max_chars=1500)}"
+
     def resolve_selected_clue(self, clue: Clue, cost: int) -> tuple[str, str]:
         if clue.title in RANDOM_PACK_TITLES:
             pack_results = self.trigger_random_pack(clue.title)
@@ -1320,12 +1332,12 @@ class NumberSearcherView(View):
                 marker_text = f"\n📌 已同步標記：{'；'.join(marker_lines)}" if marker_lines else ""
                 return (
                     f"觸發【{clue.title}】，隨機公開 {len(pack_results)} 個{pool_name}有關的線索：\n{joined_results}{marker_text}",
-                    f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。",
+                    self.selected_clue_message(f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。"),
                 )
             self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，但{pool_name}線索卡池已沒有未出現過的線索")
             return (
                 f"觸發【{clue.title}】，但{pool_name}線索卡池已沒有未出現過的線索。",
-                f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。",
+                self.selected_clue_message(f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。"),
             )
 
         marker_lines = self.apply_certain_clue_markers(clue)
@@ -1333,7 +1345,9 @@ class NumberSearcherView(View):
         self.history.append(f"💡 ${cost}｜【{clue.title}】{clue.text}")
         if marker_lines:
             self.history.append(f"📌 自動標記｜{'；'.join(marker_lines)}")
-        return f"公開線索：【{clue.title}】{clue.text}{marker_text}", f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+        return f"公開線索：【{clue.title}】{clue.text}{marker_text}", self.selected_clue_message(
+            f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+        )
 
     def pool_for_clue_type(self, clue_type: str) -> tuple[list[Clue], int, str]:
         if clue_type == "number":
@@ -1373,6 +1387,7 @@ class NumberSearcherView(View):
         )
         for index, clue in enumerate(offer.choices, start=1):
             choice_embed.add_field(name=self.offer_title(index, clue, offer), value=self.offer_text(index, clue, offer), inline=False)
+        choice_embed.add_field(name="目前線索紀錄", value=self.clue_history_summary(), inline=False)
         return choice_embed
 
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
