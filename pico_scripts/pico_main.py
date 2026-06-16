@@ -14,7 +14,7 @@ WIFI_SSID      = "POCO F5"
 WIFI_PASSWORD  = "12345678"
 BOT_IP         = "10.233.174.51"   # ← 改成跑 bot 的電腦 IP
 BOT_PORT       = 8765
-FETCH_INTERVAL = 5              # 5 分鐘抓一次
+FETCH_INTERVAL = 5 * 60        # 5 分鐘抓一次
 HTTP_PORT      = 80
 # ─────────────────────────────────────────────────────────────
 
@@ -79,27 +79,35 @@ def fetch_leaderboard():
 # ── 產生 Dashboard HTML ──────────────────────────────────────
 def build_html():
     game_rows = ""
+    total_games = 0
+    dashboard_plays = 0
+    dashboard_wins = 0
+    dashboard_delta = 0
     for game_name, players in leaderboard_cache.items():
         # 彙整這個遊戲的統計
         total_plays = 0
         total_wins  = 0
         total_delta = 0
         player_count = len(players)
+        total_games += 1
         for uid, d in players.items():
             total_plays += d.get("plays", 0)
             total_wins  += d.get("wins", 0)
             total_delta += d.get("total_delta", 0)
 
-        delta_color = "#3DCEA9" if total_delta >= 0 else "#EF4444"
+        dashboard_plays += total_plays
+        dashboard_wins += total_wins
+        dashboard_delta += total_delta
+        delta_class = "pos" if total_delta >= 0 else "neg"
         delta_str = ("+" if total_delta >= 0 else "") + str(total_delta)
 
         game_rows += (
             "<tr>"
-            "<td>" + game_name + "</td>"
+            "<td><span class='game-dot'></span>" + game_name + "</td>"
             "<td>" + str(player_count) + "</td>"
             "<td>" + str(total_plays) + "</td>"
             "<td>" + str(total_wins) + "</td>"
-            "<td style='color:" + delta_color + "'>" + delta_str + "</td>"
+            "<td class='" + delta_class + "'>" + delta_str + "</td>"
             "</tr>"
         )
 
@@ -114,17 +122,18 @@ def build_html():
             all_players[uid]["plays"] += d.get("plays", 0)
 
     sorted_players = sorted(all_players.items(), key=lambda x: x[1]["delta"], reverse=True)
-    medals = ["#F4C430", "#C0C0C0", "#CD7F32"]
+    medals = ["gold", "silver", "bronze"]
     for i, (uid, data) in enumerate(sorted_players[:3]):
-        color = medals[i] if i < 3 else "#D8E0F0"
+        medal = medals[i] if i < 3 else ""
         d = data["delta"]
         d_str = ("+" if d >= 0 else "") + str(d)
+        delta_class = "pos" if d >= 0 else "neg"
         top_rows += (
             "<tr>"
-            "<td style='color:" + color + ";font-weight:bold'>" + str(i + 1) + "</td>"
-            "<td style='font-size:.75rem;color:#7A8BB5'>" + uid[-6:] + "</td>"
+            "<td><span class='rank " + medal + "'>" + str(i + 1) + "</span></td>"
+            "<td class='player'>" + uid[-6:] + "</td>"
             "<td>" + str(data["plays"]) + "</td>"
-            "<td style='color:" + color + "'>" + d_str + "</td>"
+            "<td class='" + delta_class + "'>" + d_str + "</td>"
             "</tr>"
         )
 
@@ -134,6 +143,9 @@ def build_html():
         top_rows = "<tr><td colspan='4' style='text-align:center;color:#7A8BB5'>no data</td></tr>"
 
     refresh_sec = str(FETCH_INTERVAL + 10)
+    total_players = len(all_players)
+    dashboard_delta_str = ("+" if dashboard_delta >= 0 else "") + str(dashboard_delta)
+    dashboard_delta_class = "pos" if dashboard_delta >= 0 else "neg"
 
     html = (
         "<!DOCTYPE html><html><head>"
@@ -143,30 +155,52 @@ def build_html():
         "<title>DCRobot Dashboard</title>"
         "<style>"
         "*{box-sizing:border-box;margin:0;padding:0}"
-        "body{background:#060B1A;color:#D8E0F0;font-family:Arial,sans-serif;padding:20px}"
-        "h1{color:#F4C430;font-size:1.5rem;margin-bottom:4px}"
-        ".sub{color:#7A8BB5;font-size:.8rem;margin-bottom:20px}"
-        "h2{color:#44C9E0;font-size:1rem;margin:20px 0 8px}"
-        "table{width:100%;border-collapse:collapse;font-size:.85rem;margin-bottom:24px}"
-        "th{background:#0D1533;color:#44C9E0;padding:8px;text-align:left;border-bottom:1px solid #1E2D5A}"
-        "td{padding:7px 8px;border-bottom:1px solid #1E2D5A}"
-        ".footer{color:#7A8BB5;font-size:.75rem;text-align:center;margin-top:12px}"
-        "</style></head><body>"
+        "body{min-height:100vh;background:linear-gradient(135deg,#071025 0%,#101A3B 55%,#230B38 100%);color:#EAF1FF;font-family:Arial,sans-serif;padding:16px}"
+        ".wrap{max-width:920px;margin:0 auto}"
+        ".hero{background:linear-gradient(135deg,rgba(68,201,224,.2),rgba(244,196,48,.12));border:1px solid rgba(255,255,255,.12);border-radius:22px;padding:18px;box-shadow:0 16px 40px rgba(0,0,0,.28);margin-bottom:14px}"
+        ".eyebrow{color:#44C9E0;font-size:.72rem;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}"
+        "h1{color:#fff;font-size:1.75rem;line-height:1.1;margin-bottom:8px;text-shadow:0 2px 18px rgba(68,201,224,.35)}"
+        ".sub{color:#AAB8D8;font-size:.82rem;line-height:1.4}"
+        ".cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}"
+        ".card{background:rgba(13,21,51,.78);border:1px solid rgba(68,201,224,.18);border-radius:16px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}"
+        ".label{color:#7A8BB5;font-size:.72rem;margin-bottom:5px}"
+        ".value{font-size:1.35rem;font-weight:bold;color:#fff}"
+        ".panel{background:rgba(6,11,26,.72);border:1px solid rgba(255,255,255,.1);border-radius:18px;overflow:hidden;margin-bottom:14px;box-shadow:0 12px 28px rgba(0,0,0,.22)}"
+        "h2{color:#44C9E0;font-size:1rem;padding:14px 14px 4px}"
+        "table{width:100%;border-collapse:collapse;font-size:.86rem}"
+        "th{color:#8EEBFF;font-size:.72rem;font-weight:bold;text-transform:uppercase;letter-spacing:.04em;padding:10px 12px;text-align:left;border-bottom:1px solid rgba(68,201,224,.18)}"
+        "td{padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.07)}"
+        "tr:last-child td{border-bottom:0}"
+        ".game-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#44C9E0;box-shadow:0 0 12px #44C9E0;margin-right:8px}"
+        ".rank{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#1E2D5A;color:#EAF1FF;font-weight:bold}"
+        ".gold{background:#F4C430;color:#1B1500}.silver{background:#C0C8D8;color:#111827}.bronze{background:#CD7F32;color:#1B0D00}"
+        ".player{color:#AAB8D8;font-family:monospace}"
+        ".pos{color:#3DCEA9;font-weight:bold}.neg{color:#FF6B7A;font-weight:bold}"
+        ".footer{color:#7A8BB5;font-size:.75rem;text-align:center;margin-top:16px}"
+        "@media(min-width:680px){body{padding:28px}.cards{grid-template-columns:repeat(4,1fr)}h1{font-size:2.15rem}}"
+        "</style></head><body><div class='wrap'>"
+        "<section class='hero'><p class='eyebrow'>MiniGame Live Stats</p>"
         "<h1>DCRobot Leaderboard</h1>"
-        "<p class='sub'>Pico 2W Dashboard | 每 5 秒更新 | 上次取得: " + last_fetch + "</p>"
+        "<p class='sub'>Pico 2W Dashboard | 每 5 分鐘更新 | 上次取得: " + last_fetch + "</p></section>"
+        "<section class='cards'>"
+        "<div class='card'><p class='label'>遊戲數</p><p class='value'>" + str(total_games) + "</p></div>"
+        "<div class='card'><p class='label'>玩家數</p><p class='value'>" + str(total_players) + "</p></div>"
+        "<div class='card'><p class='label'>總場次</p><p class='value'>" + str(dashboard_plays) + "</p></div>"
+        "<div class='card'><p class='label'>金幣變化</p><p class='value " + dashboard_delta_class + "'>" + dashboard_delta_str + "</p></div>"
+        "</section>"
 
-        "<h2>遊戲統計</h2>"
+        "<section class='panel'><h2>遊戲統計</h2>"
         "<table><thead>"
         "<tr><th>遊戲</th><th>玩家數</th><th>總場次</th><th>總勝場</th><th>金幣變化</th></tr>"
-        "</thead><tbody>" + game_rows + "</tbody></table>"
+        "</thead><tbody>" + game_rows + "</tbody></table></section>"
 
-        "<h2>總排行（金幣變化）</h2>"
+        "<section class='panel'><h2>總排行（金幣變化）</h2>"
         "<table><thead>"
         "<tr><th>#</th><th>玩家ID後6碼</th><th>場次</th><th>金幣</th></tr>"
-        "</thead><tbody>" + top_rows + "</tbody></table>"
+        "</thead><tbody>" + top_rows + "</tbody></table></section>"
 
         "<p class='footer'>Powered by Raspberry Pi Pico 2W</p>"
-        "</body></html>"
+        "</div></body></html>"
     )
     return html
 
