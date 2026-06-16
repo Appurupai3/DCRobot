@@ -3,18 +3,18 @@
         "game_stats": {
             "骰子決鬥": {
                 "game": "骰子決鬥",
-                "plays": 5,
-                "wins": 2,
-                "losses": 3,
+                "plays": 7,
+                "wins": 3,
+                "losses": 4,
                 "evens": 0,
-                "total_delta": 199500,
-                "total_bet": 100300,
+                "total_delta": 199515,
+                "total_bet": 100320,
                 "max_profit": 100000,
                 "max_loss": -200,
-                "last_played_at": "2026-06-05T17:41:58+00:00",
+                "last_played_at": "2026-06-16T08:24:47+00:00",
                 "extra": {
-                    "cashout_total": 0,
-                    "cashout_count": 0,
+                    "cashout_total": 40,
+                    "cashout_count": 1,
                     "crit_50x_count": 0
                 }
             },

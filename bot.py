@@ -46,9 +46,53 @@ configure_multiplayer_bot(bot)
 # Pico 2W 橋接（Dashboard 通知）
 # ============================================================
 import urllib.request as _urllib_req
+from aiohttp import web as _aiohttp_web
 
-PICO_URL = "http://192.168.1.100/game_event"   # ← 改成 Pico 實際 IP
+PICO_URL = "http://10.233.174.2/game_event"   # ← 改成 Pico 實際 IP
 PICO_ENABLED = True                                # 關掉設 False 不影響 bot 運作
+
+# ============================================================
+# Leaderboard API Server（給 Pico 2W 讀取）
+# ============================================================
+import os as _os, glob as _glob
+
+LEADERBOARD_PORT = 8765   # Pico 會打這個 port
+
+def _read_leaderboard() -> dict:
+    """讀取 leaderboard/ 資料夾下所有 JSON，彙整成一份資料。"""
+    import json as _json
+    result = {}
+    pattern = _os.path.join(_os.path.dirname(__file__), "leaderboard", "*.json")
+    for path in _glob.glob(pattern):
+        fname = _os.path.basename(path)
+        if fname in (".gitkeep", "index.json"):
+            continue
+        game_name = fname.replace(".json", "")
+        try:
+            with open(path, encoding="utf-8") as f:
+                result[game_name] = _json.load(f)
+        except Exception:
+            pass
+    return result
+
+async def _leaderboard_handler(request):
+    import json as _json
+    data = _read_leaderboard()
+    return _aiohttp_web.Response(
+        text=_json.dumps(data, ensure_ascii=False),
+        content_type="application/json",
+    )
+
+async def start_leaderboard_server():
+    app = _aiohttp_web.Application()
+    app.router.add_get("/leaderboard", _leaderboard_handler)
+    runner = _aiohttp_web.AppRunner(app)
+    await runner.setup()
+    site = _aiohttp_web.TCPSite(runner, "0.0.0.0", LEADERBOARD_PORT)
+    await site.start()
+    print(f"[LeaderboardAPI] http://0.0.0.0:{LEADERBOARD_PORT}/leaderboard")
+
+# ============================================================
 
 def notify_pico(
     game: str,
@@ -108,10 +152,10 @@ class PayModal(Modal, title='💸 轉帳中心'):
             if users[sender]["wallet"] < amt:
                 await interaction.response.send_message("❌ 餘額不足。", ephemeral=True)
                 return
-
+            
             receiver = await bot.fetch_user(int(target))
             await open_account(receiver)
-
+            
             users[sender]["wallet"] -= amt
             users[str(receiver.id)]["wallet"] += amt
             save_data(users)
@@ -178,7 +222,7 @@ class EconomyMenu(View):
     @discord.ui.button(label="銀行", style=discord.ButtonStyle.green, emoji="🏦", row=0, custom_id="economy_bank_gui")
     async def bank_gui_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(**await build_bank_gui_payload(interaction.user))
-
+        
     @discord.ui.button(label="轉帳", style=discord.ButtonStyle.green, emoji="💸", row=0, custom_id="economy_pay")
     async def pay_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PayModal())
@@ -889,11 +933,17 @@ async def birthfire_prefix(ctx, *, name: str = None):
 
 
 def main() -> None:
-    token = load_discord_token()
-    if token:
-        bot.run(token)
-    else:
-        print("請先前往.env輸入你的DCToken")
+    import asyncio as _asyncio
+
+    async def _run():
+        token = load_discord_token()
+        if not token:
+            print("請先前往.env輸入你的DCToken")
+            return
+        await start_leaderboard_server()
+        await bot.start(token)
+
+    _asyncio.run(_run())
 
 
 if __name__ == "__main__":
