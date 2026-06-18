@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 from typing import Callable, Optional
 import random
+import re
 from dcrbot.battle import BATTLE_GAMES, prepare_battle_lobby
 from dcrbot.achievements import AchievementView, build_achievement_embed
 from dcrbot.bank import BankGuiView, build_bank_gui_payload, move_wallet_to_bank
@@ -315,10 +316,22 @@ async def resolve_custom_bet(
     balance = users[uid]["wallet"]
     extra_stats = {}
     if game_name == "骰子決鬥":
+        totals = [int(value) for value in re.findall(r"=(\d+)", result_text)]
+        player_total, enemy_total = (totals + [0, 0])[:2]
+        diff = player_total - enemy_total
+        special_win = player_total == 12 and enemy_total == 2
+        special_loss = player_total == 2 and enemy_total == 12
         extra_stats = {
             "cashout_total": max(0, payout_change),
             "cashout_count": 1 if payout_change > 0 else 0,
-            "crit_50x_count": 1 if "50 倍" in result_text else 0,
+            "crit_50x_count": 1 if special_win else 0,
+            "dice_diff_1_win": 1 if diff == 1 else 0,
+            "dice_diff_10_win": 1 if diff >= 10 else 0,
+            "dice_big_win": 1 if diff > 5 else 0,
+            "dice_big_loss": 1 if diff < -5 else 0,
+            "special_20_win_count": 1 if special_win else 0,
+            "special_20_loss_count": 1 if special_loss else 0,
+            "special_20_reward_multiplier": 50 if special_win else 0,
         }
     append_game_record(
         users,

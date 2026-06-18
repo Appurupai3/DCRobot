@@ -65,6 +65,9 @@ class PuzzleGuessView(View):
         self.message: discord.Message | None = None
         self.resolved = False
         self.menu_builder = menu_builder
+        self.seen_0a4b = False
+        self.seen_0a0b = False
+        self.first_guess_2a2b = False
 
 
     def show_post_game_buttons(self) -> None:
@@ -174,6 +177,9 @@ class PuzzleGuessModal(Modal):
 
         view.attempts += 1
         bulls, cows = score_guess(view.secret, guess)
+        view.seen_0a4b = view.seen_0a4b or (bulls == 0 and cows == 4)
+        view.seen_0a0b = view.seen_0a0b or (bulls == 0 and cows == 0)
+        view.first_guess_2a2b = view.first_guess_2a2b or (view.attempts == 1 and bulls + cows >= 4 and bulls >= 2)
         view.history.append(f"第 {view.attempts} 次：{guess} -> {bulls}A{cows}B")
 
         current_mult = puzzle_reward_multiplier(view.attempts)
@@ -199,6 +205,14 @@ class PuzzleGuessModal(Modal):
                 delta=reward,
                 balance=balance,
                 details=f"答案 {view.secret}；第 {view.attempts} 次解開。",
+                extra_stats={
+                    "puzzle_solve_within_3": 1 if view.attempts <= 3 else 0,
+                    "puzzle_solve_within_5": 1 if view.attempts <= 5 else 0,
+                    "puzzle_solve_attempt_8": 1 if view.attempts == 8 else 0,
+                    "puzzle_0a4b": 1 if view.seen_0a4b else 0,
+                    "puzzle_0a0b": 1 if view.seen_0a0b else 0,
+                    "puzzle_first_2a2b": 1 if view.first_guess_2a2b else 0,
+                },
             )
             save_data(users)
             status_text = (
@@ -219,6 +233,11 @@ class PuzzleGuessModal(Modal):
                 delta=-view.bet_amount,
                 balance=users[uid]["wallet"],
                 details=f"答案 {view.secret}；8 次未解開。",
+                extra_stats={
+                    "puzzle_0a4b": 1 if view.seen_0a4b else 0,
+                    "puzzle_0a0b": 1 if view.seen_0a0b else 0,
+                    "puzzle_first_2a2b": 1 if view.first_guess_2a2b else 0,
+                },
             )
             save_data(users)
             view.resolved = True

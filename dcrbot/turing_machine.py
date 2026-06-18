@@ -1089,6 +1089,8 @@ class NumberSearcherView(View):
         self.color_clue_count = 0
         self.shape_clue_count = 0
         self.random_clue_count = 0
+        self.noise_count = 0
+        self.extra_guess_success_count = 0
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
@@ -1154,6 +1156,10 @@ class NumberSearcherView(View):
             "random_clue_count": self.random_clue_count,
             "guess_total": self.guess_count,
             "difficulty": self.difficulty,
+            "purple_clue_count": self.color_clue_count if "紫" in self.available_colors else 0,
+            "noise_filtered_total": self.noise_count,
+            "noise_5_single": 1 if self.noise_count >= 5 else 0,
+            "extra_guess_success": self.extra_guess_success_count,
         }
 
     def has_started(self) -> bool:
@@ -1659,6 +1665,8 @@ class NumberSearcherView(View):
             await self.message.edit(embed=embed, attachments=[file], view=self)
 
         noise_index = random.randrange(len(sampled)) if (self.negative_modifier == "通訊不良" or (self.noise_chance > 0 and random.random() < self.noise_chance)) else None
+        if noise_index is not None:
+            self.noise_count += 1
         offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost, noise_index=noise_index)
         self.pending_clue_offer = offer
         self.lock_ancient_shackle(clue_type)
@@ -1725,6 +1733,18 @@ class NumberSearcherView(View):
         new_stamps: list[str] = []
         if self.game_name == "數字搜尋者2":
             extra_stats.update(number_searcher2_clear_extra_stats(self.difficulty, self.negative_modifier))
+            extra_stats[f"ns2_clear_n{self.difficulty}"] = 1
+            extra_stats["n15_clear_count"] = 1 if self.difficulty >= 15 else 0
+            extra_stats["n15_fast_clear"] = 1 if self.difficulty >= 15 and self.guess_count <= 3 else 0
+            extra_stats["n15_extra_success"] = self.extra_guess_success_count if self.difficulty >= 15 else 0
+            extra_stats["n15_perfect_clear"] = 1 if self.difficulty >= 15 and self.guess_count <= 1 and self.noise_count == 0 else 0
+            extra_stats["noise_clear"] = 1 if self.noise_count > 0 else 0
+            extra_stats["purple_clear"] = 1 if "紫" in self.available_colors else 0
+            extra_stats["composite_color_clear"] = 1 if self.composite_color_chance > 0 else 0
+            extra_stats["no_clue_clear_n4"] = 1 if self.difficulty >= 4 and self.clue_count == 0 else 0
+            extra_stats["last_guess_clear"] = 1 if self.guess_count >= 8 else 0
+            extra_stats["clean_logic_n12_clear"] = 1 if self.difficulty >= 12 else 0
+            extra_stats["ns2_high_spend_n5"] = 1 if self.difficulty >= 5 and self.total_spent > 50 else 0
             before_stats = summarize_game_records(users, uid).get("數字搜尋者2", {})
             new_stamps = newly_earned_stamp_keys(before_stats, extra_stats)
         self.unlock_next_difficulty(users, uid)
@@ -1815,6 +1835,7 @@ class NumberSearcherView(View):
         self.lock_ancient_shackle("guess")
         if all(slot_has_color(slot, g) for slot, g in zip(target, guess, strict=True)) if self.extra_guess_kind == "color" else tuple(guess) == tuple(target):
             self.extra_guess_solved = True
+            self.extra_guess_success_count += 1
             self.history.append(f"✅ ${cost}｜額外規格 {raw_guess}｜正確")
             if self.digits_solved:
                 await self.complete_success(interaction, cost, f"數字+{self.extra_answer_text()}")
@@ -1856,6 +1877,7 @@ class NumberSearcherView(View):
         if number_guess == self.secret and extra_correct:
             self.digits_solved = True
             self.extra_guess_solved = True
+            self.extra_guess_success_count += 1
             await self.complete_success(
                 interaction,
                 cost,
