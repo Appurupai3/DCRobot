@@ -5,17 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 from typing import Callable
 
 import discord
 from discord.ui import View
 
 from Multiplayer.games import BATTLE_GAMES
-from dcrbot.storage import LEADERBOARD_INFO_DIR, load_data, summarize_game_records
+from dcrbot.storage import load_data, summarize_game_records
 
 
 StatCheck = Callable[[dict], bool]
-ACHIEVEMENT_RECORD_PATH = LEADERBOARD_INFO_DIR / "achievements.json"
+ACHIEVEMENT_RECORD_PATH = Path("json") / "achievements.json"
+LEGACY_ACHIEVEMENT_RECORD_PATH = Path("leaderboard") / "info" / "achievements.json"
 
 
 @dataclass(frozen=True)
@@ -338,10 +340,11 @@ for battle in BATTLE_GAMES.values():
 
 
 def _load_achievement_records() -> dict:
-    if not ACHIEVEMENT_RECORD_PATH.exists():
+    record_path = ACHIEVEMENT_RECORD_PATH if ACHIEVEMENT_RECORD_PATH.exists() else LEGACY_ACHIEVEMENT_RECORD_PATH
+    if not record_path.exists():
         return {}
     try:
-        with ACHIEVEMENT_RECORD_PATH.open("r", encoding="utf-8") as f:
+        with record_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -355,7 +358,7 @@ def _save_achievement_records(records: dict) -> None:
 
 
 def sync_user_achievement_records(uid: str, summary: dict[str, dict]) -> dict:
-    """Persist newly unlocked achievements to leaderboard/info/achievements.json."""
+    """Persist newly unlocked achievements to json/achievements.json."""
 
     records = _load_achievement_records()
     user_records = records.setdefault(str(uid), {})
@@ -430,7 +433,7 @@ def build_achievement_embed(user: discord.User, game_name: str | None = None) ->
     if game_name is None:
         total = sum(len(v) for v in ACHIEVEMENTS.values())
         unlocked = sum(sum(1 for a in achievements if a.check(summary.get(game, {}))) for game, achievements in ACHIEVEMENTS.items())
-        embed = discord.Embed(title=f"🏆 {display_name} 的 Achievement", description=f"總進度 **{unlocked}/{total}**。已解鎖成就會寫入 `leaderboard/info/achievements.json`。", color=discord.Color.gold())
+        embed = discord.Embed(title=f"🏆 {display_name} 的 Achievement", description=f"總進度 **{unlocked}/{total}**。已解鎖成就會寫入 `json/achievements.json`。", color=discord.Color.gold())
         lines = []
         for game, achievements in ACHIEVEMENTS.items():
             done = sum(1 for a in achievements if a.check(summary.get(game, {})))
