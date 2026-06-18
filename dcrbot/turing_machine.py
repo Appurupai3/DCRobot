@@ -1188,7 +1188,12 @@ class NumberSearcherView(View):
             return []
         pending = self.delayed_clues
         self.delayed_clues = []
-        return [self.resolve_selected_clue(clue, cost)[0] for clue, cost in pending]
+        results: list[str] = []
+        for clue, cost in pending:
+            pending_prefix = f"⏳ ${cost}｜【{clue.title}】延遲"
+            self.history = [entry for entry in self.history if not entry.startswith(pending_prefix)]
+            results.append(self.resolve_selected_clue(clue, cost)[0])
+        return results
 
 
     def add_advanced_buttons(self) -> None:
@@ -1639,6 +1644,11 @@ class NumberSearcherView(View):
             self.color_clue_count += 1
         else:
             self.random_clue_count += 1
+
+        delayed_lines = self.trigger_delayed_clues()
+        if delayed_lines and self.message is not None:
+            embed, file = self.build_embed_and_file("⏳ 延遲線索觸發：\n" + "\n".join(delayed_lines))
+            await self.message.edit(embed=embed, attachments=[file], view=self)
 
         noise_index = random.randrange(len(sampled)) if (self.negative_modifier == "通訊不良" or (self.noise_chance > 0 and random.random() < self.noise_chance)) else None
         offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost, noise_index=noise_index)
