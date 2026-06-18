@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from dcrbot.pirate import PirateWordEntry, pirate_translation, random_pirate_word_entry
 from dcrbot.solo_games import fetch_avatar_image, load_display_font
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -295,13 +296,16 @@ class PirateGuessView(View):
                 delta=reward,
                 balance=balance,
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），錯 {len(self.wrong)} 次。",
-                extra_stats={"wrong_total": len(self.wrong)},
+                extra_stats={"wrong_total": len(self.wrong), "pirate_last_chance_win": 1 if self.game_name == "海盜寶藏2" and len(self.wrong) == self.max_wrong - 1 else 0, "pirate_perfect_win": 1 if self.game_name == "海盜寶藏2" and len(self.wrong) == 0 else 0, "pirate_long_word_win": 1 if self.game_name == "海盜寶藏2" and len(self.secret_word) > 9 else 0, "pirate_blind_win": 1 if self.game_name == "海盜寶藏2" and len(self.guessed) <= len(self.unique_letters) else 0},
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "海盜寶藏2" if self.visual_mode else "海盜寶藏"))
             status = (
                 f"🎉 你解開了 {self.secret_word}（{pirate_translation(self.secret_word)}）！返還下注 ${self.bet_amount} 並獲得 ${reward}"
                 f"（獎勵倍率 {reward_multiplier:.2f}x）。"
             )
+            if achievement_text:
+                status += f"\n\n{achievement_text}"
             self.resolved = True
         elif out_of_steps:
             users = load_data()
@@ -318,9 +322,10 @@ class PirateGuessView(View):
                 delta=-(self.bet_amount + penalty),
                 balance=balance,
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}），額外損失 ${penalty}。",
-                extra_stats={"wrong_total": len(self.wrong)},
+                extra_stats={"wrong_total": len(self.wrong), "pirate_final_miss_loss": 1 if self.game_name == "海盜寶藏2" and len(self.wrong) >= self.max_wrong else 0},
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "海盜寶藏2" if self.visual_mode else "海盜寶藏"))
             status = (
                 f"💀 海盜落水了！答案是 {self.secret_word}（{pirate_translation(self.secret_word)}），"
                 f"額外被鯊魚咬走 ${penalty}。"
@@ -352,7 +357,7 @@ class PirateGuessView(View):
                 delta=-self.bet_amount,
                 balance=users[uid].get("wallet", 0),
                 details=f"答案 {self.secret_word}（{pirate_translation(self.secret_word)}｜{self.category_name}）。",
-                extra_stats={"wrong_total": len(self.wrong)},
+                extra_stats={"wrong_total": len(self.wrong), "pirate_final_miss_loss": 1 if self.game_name == "海盜寶藏2" and len(self.wrong) >= self.max_wrong else 0},
             )
             save_data(users)
         if self.message:

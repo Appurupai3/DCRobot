@@ -8,6 +8,7 @@ from collections.abc import Callable
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -65,6 +66,15 @@ class PuzzleGuessView(View):
         self.message: discord.Message | None = None
         self.resolved = False
         self.menu_builder = menu_builder
+        self.seen_0a4b = False
+        self.seen_0a0b = False
+        self.first_guess_2a2b = False
+        self.seen_1a1b = False
+        self.seen_1a0b_count = 0
+        self.seen_2a0b_count = 0
+        self.seen_1a3b = False
+        self.seen_3a0b = False
+        self.unique_guess_count = 0
 
 
     def show_post_game_buttons(self) -> None:
@@ -169,11 +179,21 @@ class PuzzleGuessModal(Modal):
             return
 
         if len(set(guess)) != 4:
+            view.seen_duplicate_rejected = True
             await interaction.response.send_message("❌ 數字不能重複。", ephemeral=True)
             return
 
         view.attempts += 1
         bulls, cows = score_guess(view.secret, guess)
+        view.seen_0a4b = view.seen_0a4b or (bulls == 0 and cows == 4)
+        view.seen_0a0b = view.seen_0a0b or (bulls == 0 and cows == 0)
+        view.seen_1a1b = view.seen_1a1b or (bulls == 1 and cows == 1)
+        view.seen_1a0b_count += 1 if (bulls == 1 and cows == 0) else 0
+        view.seen_2a0b_count += 1 if (bulls == 2 and cows == 0) else 0
+        view.seen_1a3b = view.seen_1a3b or (bulls == 1 and cows == 3)
+        view.seen_3a0b = view.seen_3a0b or (bulls == 3 and cows == 0)
+        view.unique_guess_count += 1
+        view.first_guess_2a2b = view.first_guess_2a2b or (view.attempts == 1 and bulls + cows >= 4 and bulls >= 2)
         view.history.append(f"第 {view.attempts} 次：{guess} -> {bulls}A{cows}B")
 
         current_mult = puzzle_reward_multiplier(view.attempts)
@@ -199,12 +219,39 @@ class PuzzleGuessModal(Modal):
                 delta=reward,
                 balance=balance,
                 details=f"答案 {view.secret}；第 {view.attempts} 次解開。",
+                extra_stats={
+                    "puzzle_solve_within_3": 1 if view.attempts <= 3 else 0,
+                    "puzzle_solve_within_5": 1 if view.attempts <= 5 else 0,
+                    "puzzle_solve_attempt_8": 1 if view.attempts == 8 else 0,
+                    "puzzle_0a4b": 1 if view.seen_0a4b else 0,
+                    "puzzle_0a0b": 1 if view.seen_0a0b else 0,
+                    "puzzle_first_2a2b": 1 if view.first_guess_2a2b else 0,
+                    "puzzle_1a1b": 1 if view.seen_1a1b else 0,
+                    "puzzle_1a0b": view.seen_1a0b_count,
+                    "puzzle_2a0b": view.seen_2a0b_count,
+                    "puzzle_1a3b": 1 if view.seen_1a3b else 0,
+                    "puzzle_full_8_unique": 1 if view.unique_guess_count >= 8 else 0,
+                    "puzzle_digit_used_total": view.attempts * 4,
+                    "puzzle_3a_final_loss": 1 if view.seen_3a0b else 0,
+                    "puzzle_1a1b": 1 if view.seen_1a1b else 0,
+                    "puzzle_1a0b": view.seen_1a0b_count,
+                    "puzzle_2a0b": view.seen_2a0b_count,
+                    "puzzle_1a3b": 1 if view.seen_1a3b else 0,
+                    "puzzle_full_8_unique": 1 if view.unique_guess_count >= 8 else 0,
+                    "puzzle_late_solve": 1 if view.attempts >= 6 else 0,
+                    "puzzle_solve_attempt_4": 1 if view.attempts == 4 else 0,
+                    "puzzle_digit_used_total": view.attempts * 4,
+                    "puzzle_extreme_secret_win": 1 if "0" in view.secret and "9" in view.secret else 0,
+                },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "解謎挑戰"))
             status_text = (
                 f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}"
                 f"（獎勵倍率 {reward_multiplier:.2f}x）。"
             )
+            if achievement_text:
+                status_text += f"\n\n{achievement_text}"
             view.resolved = True
         elif view.attempts >= view.max_attempts:
             status_text = f"😢 挑戰失敗，正確答案為 {view.secret}。"
@@ -219,8 +266,16 @@ class PuzzleGuessModal(Modal):
                 delta=-view.bet_amount,
                 balance=users[uid]["wallet"],
                 details=f"答案 {view.secret}；8 次未解開。",
+                extra_stats={
+                    "puzzle_0a4b": 1 if view.seen_0a4b else 0,
+                    "puzzle_0a0b": 1 if view.seen_0a0b else 0,
+                    "puzzle_first_2a2b": 1 if view.first_guess_2a2b else 0,
+                },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "解謎挑戰"))
+            if achievement_text:
+                status_text += f"\n\n{achievement_text}"
             view.resolved = True
 
         if view.resolved:

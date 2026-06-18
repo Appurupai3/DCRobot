@@ -12,6 +12,7 @@ from discord.ui import Button, Modal, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 from collections.abc import Callable
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -200,6 +201,7 @@ class BalloonPumpView(View):
         self.ended = False
         self.burst = False
         self.message: discord.Message | None = None
+        self._survived_30_percent = False
         self.set_post_game_buttons(enabled=False)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -281,9 +283,21 @@ class BalloonPumpView(View):
                 "cashout_count": 1,
                 "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
                 "pump_total": self.pumps,
+                "balloon_cashout_1": 1 if self.pumps == 1 else 0,
+                "balloon_cashout_3": 1 if self.pumps == 3 else 0,
+                "balloon_cashout_5": 1 if self.pumps >= 5 else 0,
+                "balloon_cashout_8": 1 if self.pumps >= 8 else 0,
+                "balloon_cashout_10": 1 if self.pumps == 10 else 0,
+                "balloon_cashout_25_percent": 1 if self.pumps == 6 else 0,
+                "balloon_cashout_30_percent": 1 if self.pumps >= 10 else 0,
+                "balloon_cashout_low_risk": 1 if self.pumps <= 2 else 0,
+                "pump_30_percent_survive": 1 if self._survived_30_percent else 0,
             },
         )
         save_data(users)
+        achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "打氣球"))
+        if achievement_text:
+            status += f"\n\n{achievement_text}"
 
         self.ended = True
         self.show_post_game_buttons()
@@ -324,15 +338,29 @@ class BalloonPumpView(View):
                 delta=-(self.bet_amount + medical_fee),
                 balance=balance,
                 details=f"第 {self.pumps + 1} 次打氣爆炸，醫藥費 ${medical_fee}。",
-                extra_stats={"pump_total": self.pumps + 1},
+                extra_stats={
+                    "pump_total": self.pumps + 1,
+                    "medical_fee_8x_count": 1 if medical_fee_multiplier >= 8 else 0,
+                    "medical_fee_10x_count": 1 if medical_fee_multiplier >= 10 else 0,
+                    "medical_fee_0x_count": 1 if medical_fee_multiplier == 0 else 0,
+                    "balloon_first_pump_burst": 1 if self.pumps == 0 else 0,
+                    "balloon_burst_after_9": 1 if self.pumps >= 9 else 0,
+                    "medical_fee_multiplier_total": medical_fee_multiplier,
+                },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "打氣球"))
+            if achievement_text:
+                embed.add_field(name="🏆 成就解鎖", value=achievement_text, inline=False)
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
             return
 
+        previous_chance = self.next_burst_chance() or 0
         self.pumps += 1
+        if previous_chance >= 0.30:
+            self._survived_30_percent = True
         if self.pumps >= 11:
             payout = int(self.bet_amount * BALLOON_MULTIPLIERS[-1])
             await self.settle(interaction, f"🏆 完成 11 次打氣！頭像撐住了，獲得 500 倍獎金 ${payout}！", payout, discord.Color.gold())
@@ -621,6 +649,8 @@ async def run_horse_race(interaction: discord.Interaction, user: discord.User, a
 
     users[uid]["wallet"] = max(0, users[uid]["wallet"] + payout_change)
     balance = users[uid]["wallet"]
+    final_comeback = user_idx == winner_idx and len(log_lines) >= 2 and f"{names[user_idx]} " in log_lines[-1]
+    reward_multiplier_value = reward_multiplier if user_idx == winner_idx else 0
     append_game_record(
         users,
         uid,
@@ -630,10 +660,20 @@ async def run_horse_race(interaction: discord.Interaction, user: discord.User, a
         delta=payout_change - amount,
         balance=balance,
         details=f"選 {names[user_idx]}；冠軍 {names[winner_idx]}；距離 {top_distance}m。",
+        extra_stats={
+            f"horse_pick_{pick}": 1,
+            f"horse_pick_{pick}_win": 1 if user_idx == winner_idx else 0,
+            "horse_3x_win": 1 if user_idx == winner_idx and reward_multiplier_value >= 3.0 else 0,
+            "horse_reward_multiplier_total": reward_multiplier_value if user_idx == winner_idx else 0,
+            "horse_final_comeback_win": 1 if final_comeback else 0,
+        },
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "賽馬競速"))
 
     race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
+    if achievement_text:
+        race_embed.add_field(name="🏆 成就解鎖", value=achievement_text, inline=False)
     race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
     race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
     race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)

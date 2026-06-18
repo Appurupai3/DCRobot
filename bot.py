@@ -7,7 +7,9 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 from typing import Callable, Optional
 import random
+import re
 from dcrbot.battle import BATTLE_GAMES, prepare_battle_lobby
+from dcrbot.achievements import AchievementView, build_achievement_embed, format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.bank import BankGuiView, build_bank_gui_payload, move_wallet_to_bank
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
 from dcrbot.multiplayer import (
@@ -170,6 +172,11 @@ class EconomyMenu(View):
         embeds, files = build_portfolio_embeds(interaction.user)
         await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
 
+    @discord.ui.button(label="Achievement", style=discord.ButtonStyle.secondary, emoji="🏆", row=4, custom_id="economy_achievement")
+    async def achievement_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_achievement_embed(interaction.user), view=AchievementView(interaction.user), ephemeral=True)
+
 
 async def resolve_basic_bet(
     interaction: discord.Interaction,
@@ -233,6 +240,7 @@ async def resolve_basic_bet(
         details=result_text,
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, game_name))
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_basic_bet(
@@ -247,8 +255,11 @@ async def resolve_basic_bet(
         )
 
     post_view = SimplePostGameView(user, replay_handler, build_game_menu)
+    final_text = f"{result_text}\n目前錢包餘額：${balance}"
+    if achievement_text:
+        final_text += f"\n\n{achievement_text}"
     await interaction.response.send_message(
-        f"{result_text}\n目前錢包餘額：${balance}",
+        final_text,
         view=post_view,
         ephemeral=True,
     )
@@ -309,10 +320,33 @@ async def resolve_custom_bet(
     balance = users[uid]["wallet"]
     extra_stats = {}
     if game_name == "骰子決鬥":
+        totals = [int(value) for value in re.findall(r"=(\d+)", result_text)]
+        player_total, enemy_total = (totals + [0, 0])[:2]
+        diff = player_total - enemy_total
+        special_win = player_total == 12 and enemy_total == 2
+        special_loss = player_total == 2 and enemy_total == 12
         extra_stats = {
             "cashout_total": max(0, payout_change),
             "cashout_count": 1 if payout_change > 0 else 0,
-            "crit_50x_count": 1 if "50 倍" in result_text else 0,
+            "crit_50x_count": 1 if special_win else 0,
+            "dice_diff_1_win": 1 if diff == 1 else 0,
+            "dice_diff_10_win": 1 if diff >= 10 else 0,
+            "dice_big_win": 1 if diff > 5 else 0,
+            "dice_big_loss": 1 if diff < -5 else 0,
+            "special_20_win_count": 1 if special_win else 0,
+            "special_20_loss_count": 1 if special_loss else 0,
+            "special_20_reward_multiplier": 50 if special_win else 0,
+            "dice_first_big_win": 1 if diff > 3 else 0,
+            "dice_close_game": 1 if abs(diff) <= 2 else 0,
+            "dice_diff_11_win": 1 if diff == 11 else 0,
+            "dice_near_10x_penalty": 1 if enemy_total == 12 and player_total == 3 else 0,
+            "dice_total_12_count": (1 if player_total == 12 else 0) + (1 if enemy_total == 12 else 0),
+            "dice_total_2_count": (1 if player_total == 2 else 0) + (1 if enemy_total == 2 else 0),
+            "dice_half_step_profit": 1 if diff > 0 else 0,
+            "dice_win_streak_5": 1 if diff > 0 else 0,
+            "dice_loss_streak_6_big": 1 if diff < -4 else 0,
+            "dice_100x_profit": 1 if special_win and amount > 0 else 0,
+            "dice_roll_count": 4,
         }
     append_game_record(
         users,
@@ -326,6 +360,7 @@ async def resolve_custom_bet(
         extra_stats=extra_stats,
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, game_name))
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_custom_bet(
@@ -346,13 +381,18 @@ async def resolve_custom_bet(
             await progress.edit(content=frame)
 
         final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        if achievement_text:
+            final_text += f"\n\n{achievement_text}"
         post_view = SimplePostGameView(user, replay_handler, build_game_menu)
         await asyncio.sleep(1.1)
         await progress.edit(content=f"{frames[-1]}\n{final_text}", view=post_view)
     else:
         post_view = SimplePostGameView(user, replay_handler, build_game_menu)
+        final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        if achievement_text:
+            final_text += f"\n\n{achievement_text}"
         await interaction.response.send_message(
-            f"{result_text}\n目前錢包餘額：${balance}",
+            final_text,
             view=post_view,
             ephemeral=response_ephemeral,
         )
@@ -549,6 +589,11 @@ class GameMenu(View):
         await open_account(interaction.user)
         embeds, files = build_portfolio_embeds(interaction.user)
         await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
+
+    @discord.ui.button(label="Achievement", style=discord.ButtonStyle.secondary, emoji="🏆", row=4)
+    async def achievement(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_achievement_embed(interaction.user), view=AchievementView(interaction.user), ephemeral=True)
 
 
 def build_game_menu(user: discord.User):
