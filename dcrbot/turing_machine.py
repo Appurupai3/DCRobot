@@ -39,6 +39,7 @@ N6_BASE_CLUE_COST = 150
 MAX_ACTION_COST = 1500
 N3_MAX_ACTION_COST = 3000
 MAX_CLUE_COST = 750
+NEGATIVE_MODIFIERS = ("顏色通膨", "圖形通膨", "數字通膨", "隨機通膨", "通膨王朝", "延遲線索", "通訊不良", "古老枷鎖")
 NUMBER_SEARCHER2_UNLOCK_KEY = "number_searcher2_unlocked"
 MULTIPLIER_OPTIONS = (1, 5, 10, 50, 100)
 MAX_CUSTOM_MULTIPLIER = 1000
@@ -142,8 +143,26 @@ def positions_text(indexes: list[int]) -> str:
     return "、".join(f"第 {index + 1} 位" for index in indexes)
 
 
-def color_positions(colors: tuple[str, str, str], color: str) -> str:
-    indexes = [index for index, value in enumerate(colors) if value == color]
+def slot_has_color(slot: str | tuple[str, ...], color: str) -> bool:
+    return color in slot if isinstance(slot, tuple) else slot == color
+
+
+def slot_colors(slot: str | tuple[str, ...]) -> tuple[str, ...]:
+    return slot if isinstance(slot, tuple) else (slot,)
+
+
+def slot_color_text(slot: str | tuple[str, ...]) -> str:
+    return "+".join(COLOR_NAMES[value] for value in slot_colors(slot))
+
+
+def colors_equal(left: str | tuple[str, ...], right: str | tuple[str, ...]) -> bool:
+    left_values = slot_colors(left)
+    right_values = slot_colors(right)
+    return set(left_values) == set(right_values)
+
+
+def color_positions(colors: tuple, color: str) -> str:
+    indexes = [index for index, value in enumerate(colors) if slot_has_color(value, color)]
     return positions_text(indexes)
 
 
@@ -229,23 +248,23 @@ def build_number_clues(code: tuple[int, int, int]) -> list[Clue]:
 
 def build_color_clues(
     code: tuple[int, int, int],
-    colors: tuple[str, str, str],
+    colors: tuple,
     available_colors: tuple[str, ...] = COLORS,
 ) -> list[Clue]:
     color_sum = {
-        color: sum(digit for digit, block_color in zip(code, colors, strict=True) if block_color == color)
+        color: sum(digit for digit, block_color in zip(code, colors, strict=True) if slot_has_color(block_color, color))
         for color in available_colors
     }
-    missing = [COLOR_NAMES[color] for color in available_colors if color not in colors]
+    missing = [COLOR_NAMES[color] for color in available_colors if not any(slot_has_color(slot, color) for slot in colors)]
     random_color = random.choice(available_colors)
     two_colors = random.sample(available_colors, min(2, len(available_colors)))
     clues = [
         Clue("藍色雷達", f"所有藍色方塊位置：{color_positions(colors, '藍')}。"),
         Clue("綠色雷達", f"所有綠色方塊位置：{color_positions(colors, '綠')}。"),
         Clue("黃色雷達", f"所有黃色方塊位置：{color_positions(colors, '黃')}。"),
-        Clue("首位開榜", f"第一個位置的真實顏色是 {COLOR_NAMES[colors[0]]}。"),
-        Clue("中位開榜", f"第二個位置的真實顏色是 {COLOR_NAMES[colors[1]]}。"),
-        Clue("末位開榜", f"第三個位置的真實顏色是 {COLOR_NAMES[colors[2]]}。"),
+        Clue("首位開榜", f"第一個位置的真實顏色是 {slot_color_text(colors[0])}。"),
+        Clue("中位開榜", f"第二個位置的真實顏色是 {slot_color_text(colors[1])}。"),
+        Clue("末位開榜", f"第三個位置的真實顏色是 {slot_color_text(colors[2])}。"),
         Clue("黃色計數器", f"黃色方塊上面的數字總和是 {color_sum['黃']}。"),
         Clue("綠色計數器", f"綠色方塊上面的數字總和是 {color_sum['綠']}。"),
         Clue("藍色計數器", f"藍色方塊上面的數字總和是 {color_sum['藍']}。"),
@@ -255,17 +274,17 @@ def build_color_clues(
         Clue("藍黃配", f"藍色方塊 + 黃色方塊上面的數字總和是 {color_sum['藍'] + color_sum['黃']}。"),
         Clue("黃綠配", f"綠色方塊 + 黃色方塊上面的數字總和是 {color_sum['綠'] + color_sum['黃']}。"),
         Clue("藍綠配", f"藍色方塊 + 綠色方塊上面的數字總和是 {color_sum['藍'] + color_sum['綠']}。"),
-        Clue("色彩多樣性", f"場上一共出現了 {len(set(colors))} 種不同顏色。"),
-        Clue("對稱掃描", f"第一個方塊與第三個方塊的顏色{'相同' if colors[0] == colors[2] else '不同'}。"),
-        Clue("鄰居檢查", f"前兩個方塊的顏色{'相同' if colors[0] == colors[1] else '不同'}。"),
-        Clue("尾端檢查", f"後兩個方塊的顏色{'相同' if colors[1] == colors[2] else '不同'}。"),
+        Clue("色彩多樣性", f"場上一共出現了 {len({color for slot in colors for color in (slot_colors(slot))})} 種不同顏色。"),
+        Clue("對稱掃描", f"第一個方塊與第三個方塊的顏色{'相同' if colors_equal(colors[0], colors[2]) else '不同'}。"),
+        Clue("鄰居檢查", f"前兩個方塊的顏色{'相同' if colors_equal(colors[0], colors[1]) else '不同'}。"),
+        Clue("尾端檢查", f"後兩個方塊的顏色{'相同' if colors_equal(colors[1], colors[2]) else '不同'}。"),
         Clue("色彩絕緣體", "、".join(f"{item}沒出現" for item in missing) if missing else "所有可用顏色都有出現。"),
-        Clue("左側安全區 A", f"前兩個方塊（第一與第二個），{yes_no('黃' in colors[:2])}包含黃色，{yes_no('綠' in colors[:2])}包含綠色。"),
-        Clue("左側安全區 B", f"前兩個方塊（第一與第二個），{yes_no('綠' in colors[:2])}包含綠色，{yes_no('藍' in colors[:2])}包含藍色。"),
-        Clue("左側安全區 C", f"前兩個方塊（第一與第二個），{yes_no('藍' in colors[:2])}包含藍色，{yes_no('黃' in colors[:2])}包含黃色。"),
-        Clue("右側安全區 A", f"後兩個方塊（第二與第三個），{yes_no('黃' in colors[1:])}包含黃色，{yes_no('綠' in colors[1:])}包含綠色。"),
-        Clue("右側安全區 B", f"後兩個方塊（第二與第三個），{yes_no('綠' in colors[1:])}包含綠色，{yes_no('藍' in colors[1:])}包含藍色。"),
-        Clue("右側安全區 C", f"後兩個方塊（第二與第三個），{yes_no('藍' in colors[1:])}包含藍色，{yes_no('綠' in colors[1:])}包含綠色。"),
+        Clue("左側安全區 A", f"前兩個方塊（第一與第二個），{yes_no(any(slot_has_color(slot, '黃') for slot in colors[:2]))}包含黃色，{yes_no(any(slot_has_color(slot, '綠') for slot in colors[:2]))}包含綠色。"),
+        Clue("左側安全區 B", f"前兩個方塊（第一與第二個），{yes_no(any(slot_has_color(slot, '綠') for slot in colors[:2]))}包含綠色，{yes_no(any(slot_has_color(slot, '藍') for slot in colors[:2]))}包含藍色。"),
+        Clue("左側安全區 C", f"前兩個方塊（第一與第二個），{yes_no(any(slot_has_color(slot, '藍') for slot in colors[:2]))}包含藍色，{yes_no(any(slot_has_color(slot, '黃') for slot in colors[:2]))}包含黃色。"),
+        Clue("右側安全區 A", f"後兩個方塊（第二與第三個），{yes_no(any(slot_has_color(slot, '黃') for slot in colors[1:]))}包含黃色，{yes_no(any(slot_has_color(slot, '綠') for slot in colors[1:]))}包含綠色。"),
+        Clue("右側安全區 B", f"後兩個方塊（第二與第三個），{yes_no(any(slot_has_color(slot, '綠') for slot in colors[1:]))}包含綠色，{yes_no(any(slot_has_color(slot, '藍') for slot in colors[1:]))}包含藍色。"),
+        Clue("右側安全區 C", f"後兩個方塊（第二與第三個），{yes_no(any(slot_has_color(slot, '藍') for slot in colors[1:]))}包含藍色，{yes_no(any(slot_has_color(slot, '綠') for slot in colors[1:]))}包含綠色。"),
     ]
     if "紫" in available_colors:
         clues.extend(
@@ -273,8 +292,8 @@ def build_color_clues(
                 Clue("紫色雷達", f"所有紫色方塊位置：{color_positions(colors, '紫')}。"),
                 Clue("紫色計數器", f"紫色方塊上面的數字總和是 {color_sum['紫']}。"),
                 Clue("紫藍配", f"紫色方塊 + 藍色方塊上面的數字總和是 {color_sum['紫'] + color_sum['藍']}。"),
-                Clue("左側安全區 D", f"前兩個方塊（第一與第二個），{yes_no('紫' in colors[:2])}包含紫色，{yes_no('黃' in colors[:2])}包含黃色。"),
-                Clue("右側安全區 D", f"後兩個方塊（第二與第三個），{yes_no('紫' in colors[1:])}包含紫色，{yes_no('綠' in colors[1:])}包含綠色。"),
+                Clue("左側安全區 D", f"前兩個方塊（第一與第二個），{yes_no(any(slot_has_color(slot, '紫') for slot in colors[:2]))}包含紫色，{yes_no(any(slot_has_color(slot, '黃') for slot in colors[:2]))}包含黃色。"),
+                Clue("右側安全區 D", f"後兩個方塊（第二與第三個），{yes_no(any(slot_has_color(slot, '紫') for slot in colors[1:]))}包含紫色，{yes_no(any(slot_has_color(slot, '綠') for slot in colors[1:]))}包含綠色。"),
             ]
         )
     return clues
@@ -299,16 +318,16 @@ def build_shape_clues(
     present_shapes = [shape for shape in SHAPES if shape in shapes]
     random_present_shape = random.choice(present_shapes)
     random_shape = random.choice(SHAPES)
-    random_color = random.choice(tuple(set(colors)))
+    random_color = random.choice(tuple({color for slot in colors for color in (slot_colors(slot))}))
     random_shape_for_compare = random.choice(SHAPES)
     missing_shapes = [shape for shape in SHAPES if shape not in shapes]
-    repeated_color_for_random_shape = any(colors.count(color) >= 2 for color in {colors[index] for index, shape in enumerate(shapes) if shape == random_shape})
+    repeated_color_for_random_shape = any(sum(1 for slot in colors if slot_has_color(slot, color)) >= 2 for color in {color for index, shape in enumerate(shapes) if shape == random_shape for color in slot_colors(colors[index])})
     duplicated_pair = next(
         (
             (left_index, right_index)
             for left_index in range(CODE_LENGTH)
             for right_index in range(left_index + 1, CODE_LENGTH)
-            if colors[left_index] == colors[right_index] and shapes[left_index] == shapes[right_index]
+            if colors_equal(colors[left_index], colors[right_index]) and shapes[left_index] == shapes[right_index]
         ),
         None,
     )
@@ -354,15 +373,15 @@ def build_shape_clues(
         Clue("多邊形純淨度", "場上無此圖形。" if not polygon_digits else ("有重複。" if len(set(polygon_digits)) < len(polygon_digits) else "全不重複。")),
         Clue("尖角大合唱", f"所有帶有尖角的圖形上方的數字，奇數的數量共有 {sum(1 for index in angled_indexes if code[index] % 2 == 1)} 個。"),
         Clue("邊界差尋", f"圖形上邊數最大的數字（邊數並列取數字最大）減邊數最小的數字（邊數並列取數字最小）的絕對差等於 {boundary_gap}。"),
-        Clue("暖色幾何", f"黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '黃' and SHAPE_SIDES[shape] > 0)} 個。"),
-        Clue("冷色圓角", f"藍色方塊且圖形為圓形的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '藍' and shape == '圓形')} 個。"),
-        Clue("綠色幾何特徵", f"所有綠色方塊的圖形邊數總和是 {sum(SHAPE_SIDES[shape] for color, shape in zip(colors, shapes, strict=True) if color == '綠')}。"),
+        Clue("暖色幾何", f"黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if slot_has_color(color, '黃') and SHAPE_SIDES[shape] > 0)} 個。"),
+        Clue("冷色圓角", f"藍色方塊且圖形為圓形的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if slot_has_color(color, '藍') and shape == '圓形')} 個。"),
+        Clue("綠色幾何特徵", f"所有綠色方塊的圖形邊數總和是 {sum(SHAPE_SIDES[shape] for color, shape in zip(colors, shapes, strict=True) if slot_has_color(color, '綠'))}。"),
         Clue("圖形調色盤", f"{random_shape}在場上{yes_no(repeated_color_for_random_shape)}搭配到重複的顏色。"),
         Clue("幾何對當", f"顏色與圖形的配置完全一模一樣的位置：{duplicated_pair_text}。"),
-        Clue("首位開榜（雙規）", f"第一個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[0]]}、{shapes[0]}。"),
-        Clue("中位開榜（雙規）", f"第二個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[1]]}、{shapes[1]}。"),
-        Clue("末位開榜（雙規）", f"第三個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[2]]}、{shapes[2]}。"),
-        Clue("色彩幾何配", f"場上{COLOR_NAMES[random_color]}方塊數量 {compare_text(colors.count(random_color), shape_count[random_shape_for_compare])} 場上{random_shape_for_compare}的數量。"),
+        Clue("首位開榜（雙規）", f"第一個位置的真實顏色與真實圖形是 {slot_color_text(colors[0])}、{shapes[0]}。"),
+        Clue("中位開榜（雙規）", f"第二個位置的真實顏色與真實圖形是 {slot_color_text(colors[1])}、{shapes[1]}。"),
+        Clue("末位開榜（雙規）", f"第三個位置的真實顏色與真實圖形是 {slot_color_text(colors[2])}、{shapes[2]}。"),
+        Clue("色彩幾何配", f"場上{COLOR_NAMES[random_color]}方塊數量 {compare_text(sum(1 for slot in colors if slot_has_color(slot, random_color)), shape_count[random_shape_for_compare])} 場上{random_shape_for_compare}的數量。"),
         Clue("安全區圖形檢測", f"前兩個方塊（第一與第二個）中，{yes_no('五邊形' in shapes[:2])}包含五邊形，{yes_no('三角形' in shapes[:2])}包含三角形。"),
     ]
 
@@ -513,7 +532,7 @@ class PendingClueChoiceView(View):
             return
 
         self.parent.pending_clue_offer = None
-        status_text, selection_text = self.parent.resolve_selected_clue(clue, self.cost)
+        status_text, selection_text = self.parent.select_or_delay_clue(clue, self.cost)
         embed, file = self.parent.build_embed_and_file(status_text)
         if self.parent.message is not None:
             await self.parent.message.edit(embed=embed, attachments=[file], view=self.parent)
@@ -1014,6 +1033,8 @@ class NumberSearcherView(View):
         noise_chance: float = 0.0,
         has_shapes: bool = False,
         requires_extra_guess: bool = False,
+        composite_color_chance: float = 0.0,
+        negative_modifier: str | None = None,
     ):
         super().__init__(timeout=420)
         self.user = user
@@ -1031,11 +1052,15 @@ class NumberSearcherView(View):
         self.noise_chance = noise_chance
         self.has_shapes = has_shapes
         self.requires_extra_guess = requires_extra_guess
+        self.composite_color_chance = composite_color_chance
+        self.negative_modifier = negative_modifier
+        self.delayed_clues: list[tuple[Clue, int]] = []
+        self.locked_action: str | None = None
         self.extra_guess_kind = random.choice(("color", "shape")) if requires_extra_guess else ""
         self.extra_guess_solved = not requires_extra_guess
         self.digits_solved = False
         self.secret = tuple(random.randint(0, 9) for _ in range(CODE_LENGTH))
-        self.colors = tuple(random.choice(self.available_colors) for _ in range(CODE_LENGTH))
+        self.colors = tuple(self.roll_slot_colors() for _ in range(CODE_LENGTH))
         self.shapes = tuple(random.choice(SHAPES) for _ in range(CODE_LENGTH)) if self.has_shapes else ()
         self.guess_count = 0
         self.clue_count = 0
@@ -1068,7 +1093,7 @@ class NumberSearcherView(View):
         return True
 
     def guess_cost(self) -> int:
-        return scaled_amount(action_cost(self.guess_count, cap=self.max_guess_cost, growth=self.guess_growth), self.multiplier)
+        return self.apply_cost_modifier(scaled_amount(action_cost(self.guess_count, cap=self.max_guess_cost, growth=self.guess_growth), self.multiplier), "guess")
 
     def clue_cost(self) -> int:
         return scaled_amount(action_cost(self.clue_count, cap=MAX_CLUE_COST, base=self.clue_base), self.multiplier)
@@ -1108,6 +1133,46 @@ class NumberSearcherView(View):
 
     def has_started(self) -> bool:
         return self.guess_count > 0 or self.clue_count > 0 or self.total_spent > 0
+
+    def roll_slot_colors(self):
+        primary = random.choice(self.available_colors)
+        if self.composite_color_chance > 0 and len(self.available_colors) > 1 and random.random() < self.composite_color_chance:
+            secondary = random.choice([color for color in self.available_colors if color != primary])
+            return tuple(sorted((primary, secondary), key=self.available_colors.index))
+        return primary
+
+    def cost_multiplier_for(self, clue_type: str) -> float:
+        modifier = self.negative_modifier
+        if modifier == "顏色通膨" and clue_type in {"color", "random_color"}:
+            return 1.5
+        if modifier == "圖形通膨" and clue_type == "shape":
+            return 1.5
+        if modifier == "數字通膨" and clue_type in {"number", "random_number"}:
+            return 1.5
+        if modifier == "隨機通膨" and clue_type.startswith("random"):
+            return 1.8
+        if modifier == "通膨王朝":
+            return 1.2
+        return 1.0
+
+    def apply_cost_modifier(self, amount: int, clue_type: str) -> int:
+        return int(amount * self.cost_multiplier_for(clue_type))
+
+    def unlock_ancient_shackle(self) -> None:
+        if self.negative_modifier == "古老枷鎖":
+            self.locked_action = None
+
+    def lock_ancient_shackle(self, action: str) -> None:
+        if self.negative_modifier == "古老枷鎖":
+            self.locked_action = action
+
+    def trigger_delayed_clues(self) -> list[str]:
+        if not self.delayed_clues:
+            return []
+        pending = self.delayed_clues
+        self.delayed_clues = []
+        return [self.resolve_selected_clue(clue, cost)[0] for clue, cost in pending]
+
 
     def add_advanced_buttons(self) -> None:
         if self.has_shapes:
@@ -1286,7 +1351,7 @@ class NumberSearcherView(View):
         color_radar = {"黃色雷達": "黃", "綠色雷達": "綠", "藍色雷達": "藍", "紫色雷達": "紫"}
         if clue.title in color_radar:
             color = color_radar[clue.title]
-            indexes = [index for index, value in enumerate(self.colors) if value == color]
+            indexes = [index for index, value in enumerate(self.colors) if slot_has_color(value, color)]
             for index in indexes:
                 self.color_marks[index] = [color]
             if indexes:
@@ -1294,8 +1359,8 @@ class NumberSearcherView(View):
         color_open = {"首位開榜": 0, "中位開榜": 1, "末位開榜": 2}
         if clue.title in color_open:
             index = color_open[clue.title]
-            self.color_marks[index] = [self.colors[index]]
-            applied.append(f"第 {index + 1} 位顏色：{COLOR_NAMES[self.colors[index]]}")
+            self.color_marks[index] = list(slot_colors(self.colors[index]))
+            applied.append(f"第 {index + 1} 位顏色：{slot_color_text(self.colors[index])}")
 
         shape_radar = {"圓形雷達": "圓形", "三角形雷達": "三角形", "長方形雷達": "長方形", "五邊形雷達": "五邊形"}
         if self.has_shapes and clue.title in shape_radar:
@@ -1308,9 +1373,9 @@ class NumberSearcherView(View):
         shape_open = {"首位開榜（雙規）": 0, "中位開榜（雙規）": 1, "末位開榜（雙規）": 2}
         if self.has_shapes and clue.title in shape_open:
             index = shape_open[clue.title]
-            self.color_marks[index] = [self.colors[index]]
+            self.color_marks[index] = list(slot_colors(self.colors[index]))
             self.shape_marks[index] = self.shapes[index]
-            applied.append(f"第 {index + 1} 位：{COLOR_NAMES[self.colors[index]]}、{self.shapes[index]}")
+            applied.append(f"第 {index + 1} 位：{slot_color_text(self.colors[index])}、{self.shapes[index]}")
 
         if clue.title.startswith("幸運號碼"):
             raw_digit = clue.title.removeprefix("幸運號碼")
@@ -1334,6 +1399,8 @@ class NumberSearcherView(View):
         embed = discord.Embed(title=f"🔢 {self.title}", description=status_text, color=color or discord.Color.dark_teal())
         if self.game_name == "數字搜尋者2":
             embed.add_field(name="難度", value=f"N{self.difficulty}", inline=True)
+            if self.negative_modifier:
+                embed.add_field(name="負面詞條", value=f"【{self.negative_modifier}】", inline=True)
         embed.add_field(name="倍率", value=f"{self.multiplier} 倍", inline=True)
         embed.add_field(name="猜測次數 n1", value=str(self.guess_count), inline=True)
         embed.add_field(name="下次猜數字費用", value=f"${self.guess_cost()}", inline=True)
@@ -1390,6 +1457,16 @@ class NumberSearcherView(View):
 
     def selected_clue_message(self, summary: str) -> str:
         return f"{summary}\n\n目前線索紀錄：\n{self.clue_history_summary(max_chars=1500)}"
+
+    def select_or_delay_clue(self, clue: Clue, cost: int) -> tuple[str, str]:
+        if self.negative_modifier == "延遲線索":
+            self.delayed_clues.append((clue, cost))
+            self.history.append(f"⏳ ${cost}｜【{clue.title}】延遲，下一次購買或猜測後觸發")
+            return (
+                f"⏳ 已選擇【{clue.title}】，但因【延遲線索】會在下一次購買任意東西後觸發。",
+                self.selected_clue_message(f"⏳ 已選擇【{clue.title}】，線索延遲觸發。"),
+            )
+        return self.resolve_selected_clue(clue, cost)
 
     def resolve_selected_clue(self, clue: Clue, cost: int) -> tuple[str, str]:
         if clue.title in RANDOM_PACK_TITLES:
@@ -1488,6 +1565,10 @@ class NumberSearcherView(View):
         self.clue_choice_message = await interaction.original_response()
 
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
+        if self.locked_action == clue_type:
+            await interaction.response.send_message("🔒【古老枷鎖】這個按鈕本回合被鎖定，請先購買其他線索或猜數字。", ephemeral=True)
+            return
+        self.unlock_ancient_shackle()
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
@@ -1506,6 +1587,7 @@ class NumberSearcherView(View):
             cost = self.clue_cost()
         else:
             cost = self.random_clue_cost()
+        cost = self.apply_cost_modifier(cost, clue_type)
         if not await self.charge_wallet(interaction, cost):
             self.seen_clue_titles.difference_update(clue.title for clue in sampled)
             return
@@ -1528,20 +1610,21 @@ class NumberSearcherView(View):
         else:
             self.random_clue_count += 1
 
-        noise_index = random.randrange(len(sampled)) if self.noise_chance > 0 and random.random() < self.noise_chance else None
+        noise_index = random.randrange(len(sampled)) if (self.negative_modifier == "通訊不良" or (self.noise_chance > 0 and random.random() < self.noise_chance)) else None
         offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost, noise_index=noise_index)
         self.pending_clue_offer = offer
+        self.lock_ancient_shackle(clue_type)
         await self.show_clue_choice_message(interaction, offer)
 
     def answer_details(self) -> str:
         details = f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。"
         if self.has_shapes:
-            details += f" 顏色 {''.join(self.colors)}；圖形 {'/'.join(self.shapes)}。"
+            details += f" 顏色 {'/'.join(slot_color_text(slot) for slot in self.colors)}；圖形 {'/'.join(self.shapes)}。"
         return details
 
     def extra_answer_text(self) -> str:
         if self.extra_guess_kind == "color":
-            return "".join(self.colors)
+            return "/".join(slot_color_text(slot) for slot in self.colors)
         if self.extra_guess_kind == "shape":
             return "、".join(self.shapes)
         return ""
@@ -1573,7 +1656,7 @@ class NumberSearcherView(View):
         current_unlocked = get_number_searcher2_unlocked(uid)
         # Keep the in-memory value for the current interaction, but persist the
         # real unlock rank in leaderboard/數字搜尋者2.json instead of bank.json.
-        next_unlocked = max(current_unlocked, min(self.difficulty + 1, 8))
+        next_unlocked = max(current_unlocked, min(self.difficulty + 1, 11))
         users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = next_unlocked
         set_number_searcher2_unlocked(uid, next_unlocked)
 
@@ -1635,16 +1718,19 @@ class NumberSearcherView(View):
         except ValueError:
             await interaction.response.send_message("❌ 請輸入剛好三位 0~9 數字，例如 407。", ephemeral=True)
             return
-        cost = self.clue_cost()
+        cost = self.apply_cost_modifier(self.clue_cost(), "number")
         if not await self.charge_wallet(interaction, cost):
             return
         self.clue_count += 1
         self.number_clue_count += 1
+        delayed_lines = self.trigger_delayed_clues()
+        delayed_text = ("\n" + "\n".join(delayed_lines)) if delayed_lines else ""
+        self.lock_ancient_shackle("number_test")
         correct = guess == self.secret
         if correct:
             self.digits_solved = True
         self.history.append(f"🧪 ${cost}｜數字測試 {format_code(guess)}｜{'正確' if correct else '錯誤'}")
-        await self.refresh(interaction, f"數字測試 {format_code(guess)}：{'✅ 正確' if correct else '❌ 錯誤'}。")
+        await self.refresh(interaction, f"數字測試 {format_code(guess)}：{'✅ 正確' if correct else '❌ 錯誤'}。{delayed_text}")
 
     async def handle_extra_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
         if self.ended:
@@ -1659,7 +1745,10 @@ class NumberSearcherView(View):
         if not await self.charge_wallet(interaction, cost):
             return
         self.guess_count += 1
-        if tuple(guess) == tuple(target):
+        delayed_lines = self.trigger_delayed_clues()
+        delayed_text = ("\n" + "\n".join(delayed_lines)) if delayed_lines else ""
+        self.lock_ancient_shackle("guess")
+        if all(slot_has_color(slot, g) for slot, g in zip(target, guess, strict=True)) if self.extra_guess_kind == "color" else tuple(guess) == tuple(target):
             self.extra_guess_solved = True
             self.history.append(f"✅ ${cost}｜額外規格 {raw_guess}｜正確")
             if self.digits_solved:
@@ -1668,7 +1757,7 @@ class NumberSearcherView(View):
             await self.refresh(interaction, "✅ 額外規格正確！還需要猜中三位數字才能通關。")
             return
         self.history.append(f"❌ ${cost}｜額外規格 {raw_guess}｜錯誤")
-        await self.refresh(interaction, "額外規格猜測錯誤，請繼續推理。")
+        await self.refresh(interaction, f"額外規格猜測錯誤，請繼續推理。{delayed_text}")
 
     async def handle_answer_guess(
         self,
@@ -1692,10 +1781,14 @@ class NumberSearcherView(View):
             return
 
         self.guess_count += 1
+        delayed_lines = self.trigger_delayed_clues()
+        delayed_text = ("\n" + "\n".join(delayed_lines)) if delayed_lines else ""
+        self.lock_ancient_shackle("guess")
         target = self.colors if self.extra_guess_kind == "color" else self.shapes
         number_text = format_code(number_guess)
         extra_text = "、".join(COLOR_NAMES.get(value, value) for value in extra_guess)
-        if number_guess == self.secret and tuple(extra_guess) == tuple(target):
+        extra_correct = all(slot_has_color(slot, g) for slot, g in zip(target, extra_guess, strict=True)) if self.extra_guess_kind == "color" else tuple(extra_guess) == tuple(target)
+        if number_guess == self.secret and extra_correct:
             self.digits_solved = True
             self.extra_guess_solved = True
             await self.complete_success(
@@ -1709,7 +1802,7 @@ class NumberSearcherView(View):
             return
 
         self.history.append(f"❌ ${cost}｜猜謎底 {number_text}+{extra_text}｜錯誤")
-        status_text = f"猜謎底 {number_text}+{extra_text} 錯誤，請繼續推理。"
+        status_text = f"猜謎底 {number_text}+{extra_text} 錯誤，請繼續推理。{delayed_text}"
         if self.message is not None:
             embed, file = self.build_embed_and_file(status_text)
             await self.message.edit(embed=embed, attachments=[file], view=self)
@@ -1720,6 +1813,10 @@ class NumberSearcherView(View):
             await interaction.followup.send(status_text, ephemeral=True)
 
     async def handle_guess(self, interaction: discord.Interaction, raw_guess: str) -> None:
+        if self.locked_action == "guess":
+            await interaction.response.send_message("🔒【古老枷鎖】猜數字本回合被鎖定，請先購買線索。", ephemeral=True)
+            return
+        self.unlock_ancient_shackle()
         if self.ended:
             await interaction.response.send_message("✅ 本局已結束。", ephemeral=True)
             return
@@ -1735,6 +1832,9 @@ class NumberSearcherView(View):
             return
 
         self.guess_count += 1
+        delayed_lines = self.trigger_delayed_clues()
+        self.lock_ancient_shackle("guess")
+        delayed_text = ("\n" + "\n".join(delayed_lines)) if delayed_lines else ""
         if guess == self.secret:
             self.digits_solved = True
             if not self.extra_guess_solved:
@@ -1745,7 +1845,7 @@ class NumberSearcherView(View):
             return
 
         self.history.append(f"❌ ${cost}｜猜測 {format_code(guess)}｜錯誤")
-        await self.refresh(interaction, f"猜測 {format_code(guess)} 錯誤，請繼續推理。")
+        await self.refresh(interaction, f"猜測 {format_code(guess)} 錯誤，請繼續推理。{delayed_text}")
 
     @discord.ui.button(label="猜數字", style=discord.ButtonStyle.primary, emoji="🔢", row=0)
     async def guess_number(self, interaction: discord.Interaction, button: Button):
@@ -1918,7 +2018,7 @@ class NumberSearcher2DifficultyView(View):
         self.add_guide_button()
         unlocked = self.unlocked_level()
         options = []
-        for level in range(9):
+        for level in range(12):
             locked = level > unlocked
             options.append(
                 discord.SelectOption(
@@ -2121,12 +2221,13 @@ def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
     pages.append(
         {
             "category": "difficulty",
-            "title": "🏁 數字搜尋者2｜難度 N0-N8",
+            "title": "🏁 數字搜尋者2｜難度 N0-N11",
             "description": "難度效果為**累積式**：高難度會包含前面低難度的變化。",
             "fields": [
                 ("N0～N2｜入門與初階干擾", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
                 ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000；花費 5000（隨倍率縮放）以內通關額外獎勵 1000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 3000。"),
                 ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000。"),
+                ("N9～N11｜高階干擾", "N9：雜訊攻擊機率提高到 20%。\nN10：每場抽出 1 個隨機負面詞條（通膨、延遲線索、通訊不良、古老枷鎖）。\nN11：每個數字背後有 20% 機率是 2 種顏色；猜顏色時包含其中一種即可。"),
                 ("💰 費用與獎金", "基礎獎金固定 5000。只有花費 5000（隨倍率縮放）以內通關才有額外獎勵；超過就沒有額外獎金。\nN3+ 額外 1000；N5+ 額外 3000；N8 額外 5000。"),
             ],
         }
@@ -2139,7 +2240,7 @@ NUMBER_SEARCHER2_GUIDE_CATEGORIES = {
     "number": ("數字線索", "🔢"),
     "color": ("顏色線索", "🎨"),
     "shape": ("圖形線索", "🔷"),
-    "difficulty": ("難度 N0-N8", "🏁"),
+    "difficulty": ("難度 N0-N11", "🏁"),
 }
 
 
@@ -2228,6 +2329,8 @@ def number_searcher2_settings(difficulty: int) -> dict:
         "noise_chance": 0.0,
         "has_shapes": False,
         "requires_extra_guess": False,
+        "composite_color_chance": 0.0,
+        "negative_modifier": None,
     }
     if difficulty >= 1:
         settings["random_clue_base"] = N1_RANDOM_CLUE_COST
@@ -2246,6 +2349,12 @@ def number_searcher2_settings(difficulty: int) -> dict:
         settings["has_shapes"] = True
     if difficulty >= 8:
         settings["requires_extra_guess"] = True
+    if difficulty >= 9:
+        settings["noise_chance"] = 0.20
+    if difficulty >= 10:
+        settings["negative_modifier"] = random.choice(NEGATIVE_MODIFIERS)
+    if difficulty >= 11:
+        settings["composite_color_chance"] = 0.20
     return settings
 
 
@@ -2260,6 +2369,9 @@ def number_searcher2_description(difficulty: int) -> str:
         6: "線索基礎價格提高到 150",
         7: "新增圖形與圖形線索",
         8: "需額外猜中顏色或圖形，花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000",
+        9: "雜訊攻擊機率提高到 20%",
+        10: "每場抽出 1 個隨機負面詞條",
+        11: "每個數字背後有 20% 機率是 2 種顏色，猜顏色包含其中一種即可",
     }
     return descriptions.get(difficulty, "未知難度")
 
@@ -2271,7 +2383,7 @@ def build_number_searcher2_difficulty_embed(user: discord.User) -> discord.Embed
         description=f"目前解鎖到 N{unlocked}。通過目前最高難度後會解鎖下一級。",
         color=discord.Color.dark_teal(),
     )
-    for level in range(9):
+    for level in range(12):
         status = "✅ 已解鎖" if level <= unlocked else "🔒 未解鎖"
         embed.add_field(name=f"N{level}｜{status}", value=number_searcher2_description(level), inline=False)
     return embed
@@ -2394,7 +2506,7 @@ def render_number_searcher_board(view: NumberSearcherView, *, reveal: bool = Fal
         marked_colors = view.color_marks[index] if not reveal else []
         marked_shape = view.shape_marks[index] if not reveal else None
         if reveal:
-            fill = COLOR_RGB[view.colors[index]]
+            fill = COLOR_RGB[slot_colors(view.colors[index])[0]]
             outline = (245, 245, 245)
             text = str(view.secret[index])
             text_fill = (20, 24, 30)
