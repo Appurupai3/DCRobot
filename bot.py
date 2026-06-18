@@ -8,6 +8,7 @@ from discord.ui import Button, View, Modal, TextInput
 from typing import Callable, Optional
 import random
 from dcrbot.battle import BATTLE_GAMES, prepare_battle_lobby
+from dcrbot.achievements import AchievementView, build_achievement_embed
 from dcrbot.bank import BankGuiView, build_bank_gui_payload, move_wallet_to_bank
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
 from dcrbot.multiplayer import (
@@ -169,6 +170,11 @@ class EconomyMenu(View):
         await open_account(interaction.user)
         embeds, files = build_portfolio_embeds(interaction.user)
         await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
+
+    @discord.ui.button(label="Achievement", style=discord.ButtonStyle.secondary, emoji="🏆", row=4, custom_id="economy_achievement")
+    async def achievement_btn(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_achievement_embed(interaction.user), view=AchievementView(interaction.user), ephemeral=True)
 
 
 async def resolve_basic_bet(
@@ -549,6 +555,11 @@ class GameMenu(View):
         await open_account(interaction.user)
         embeds, files = build_portfolio_embeds(interaction.user)
         await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
+
+    @discord.ui.button(label="Achievement", style=discord.ButtonStyle.secondary, emoji="🏆", row=4)
+    async def achievement(self, interaction: discord.Interaction, button: Button):
+        await open_account(interaction.user)
+        await interaction.response.send_message(embed=build_achievement_embed(interaction.user), view=AchievementView(interaction.user), ephemeral=True)
 
 
 def build_game_menu(user: discord.User):
