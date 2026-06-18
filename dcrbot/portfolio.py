@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import discord
 from PIL import Image, ImageDraw, ImageFont
 from discord.ui import View
 
+from dcrbot.etching_stamps import (
+    HIGHEST_CLEAR_EXTRA_KEY,
+    NUMBER_SEARCHER2_NEGATIVE_MODIFIERS,
+    NUMBER_SEARCHER2_STAMPS,
+    negative_modifier_clear_count,
+    stamp_unlocked,
+)
 from dcrbot.storage import get_game_records, load_data, summarize_game_records
 
 
@@ -103,41 +109,25 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
         )
         lines.append(f"平均猜測 {float(extra.get('guess_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
         if game_name == "數字搜尋者2":
-            highest = extra.get("highest_cleared_difficulty")
+            highest = extra.get(HIGHEST_CLEAR_EXTRA_KEY)
             highest_text = f"N{int(highest)}" if highest is not None else "尚未通關"
             unlocked = stats.get("unlocked_level")
             unlocked_text = f"N{int(unlocked)}" if unlocked is not None else "N0"
             lines.append(f"已通關最高難度 **{highest_text}**｜目前解鎖 **{unlocked_text}**")
     return lines
 
-NUMBER_SEARCHER2_STAMPS = (
-    ("N5", 5, "N5 通關", "完成 N5 難度獲得", Path("Resources/數字搜尋者2/mathN5.png"), "portfolio_stamp_n5.png"),
-    ("N10", 10, "N10 通關", "完成 N10 難度獲得", Path("Resources/數字搜尋者2/mathN10.png"), "portfolio_stamp_n10.png"),
-    (
-        "N10_ALL_DEBUFF",
-        None,
-        "全負面詞條",
-        "每個 N10+ 負面詞條都通關一次獲得",
-        Path("Resources/數字搜尋者2/mathN10Alldebuff.png"),
-        "portfolio_stamp_all_debuff.png",
-    ),
-    ("N15", 15, "N15 通關", "完成 N15 難度獲得", Path("Resources/數字搜尋者2/mathN15.png"), "portfolio_stamp_n15.png"),
-)
-NEGATIVE_MODIFIER_NAMES = ("顏色通膨", "圖形通膨", "數字通膨", "隨機通膨", "通膨王朝", "延遲線索", "通訊不良", "古老枷鎖")
-
 
 def _number_searcher2_stamp_lines(stats: dict | None) -> list[str]:
     extra = stats.get("extra", {}) if isinstance(stats, dict) and isinstance(stats.get("extra", {}), dict) else {}
-    highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
-    all_debuff = all(int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0 for name in NEGATIVE_MODIFIER_NAMES)
+    highest = int(extra.get(HIGHEST_CLEAR_EXTRA_KEY, 0) or 0)
     lines: list[str] = []
-    for key, level, title, requirement, _asset_path, _filename in NUMBER_SEARCHER2_STAMPS:
-        unlocked = all_debuff if key == "N10_ALL_DEBUFF" else highest >= int(level or 0)
+    for stamp in NUMBER_SEARCHER2_STAMPS:
+        unlocked = stamp_unlocked(stats, stamp)
         icon = "🟨" if unlocked else "⬛"
-        state = "已收藏" if unlocked else requirement
-        lines.append(f"{icon} **{title}**｜{state}")
-    debuff_count = sum(1 for name in NEGATIVE_MODIFIER_NAMES if int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0)
-    lines.append(f"☠️ 負面詞條進度 **{debuff_count}/{len(NEGATIVE_MODIFIER_NAMES)}**｜最高通關 **N{highest}**")
+        state = "已收藏" if unlocked else stamp.requirement
+        lines.append(f"{icon} **{stamp.title}**｜{state}")
+    debuff_count = negative_modifier_clear_count(stats)
+    lines.append(f"☠️ 負面詞條進度 **{debuff_count}/{len(NUMBER_SEARCHER2_NEGATIVE_MODIFIERS)}**｜最高通關 **N{highest}**")
     return lines
 
 
@@ -235,13 +225,6 @@ def _load_gallery_font(size: int) -> ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def _stamp_unlock_state(stats: dict | None, key: str, level: int | None) -> bool:
-    extra = stats.get("extra", {}) if isinstance(stats, dict) and isinstance(stats.get("extra", {}), dict) else {}
-    if key == "N10_ALL_DEBUFF":
-        return all(int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0 for name in NEGATIVE_MODIFIER_NAMES)
-    return int(extra.get("highest_cleared_difficulty", 0) or 0) >= int(level or 0)
-
-
 def _number_searcher2_stamp_gallery_file(stats: dict | None) -> discord.File:
     width, height = 1100, 760
     card_width, card_height = 480, 270
@@ -255,23 +238,23 @@ def _number_searcher2_stamp_gallery_file(stats: dict | None) -> discord.File:
     draw.text((58, 102), "已取得的蝕刻章會以原始章圖鑲嵌在收藏冊中。", fill=(205, 212, 230), font=small_font)
 
     positions = ((60, 160), (560, 160), (60, 455), (560, 455))
-    for (key, level, title, requirement, asset_path, _filename), (x, y) in zip(NUMBER_SEARCHER2_STAMPS, positions):
-        unlocked = _stamp_unlock_state(stats, key, level)
+    for stamp, (x, y) in zip(NUMBER_SEARCHER2_STAMPS, positions):
+        unlocked = stamp_unlocked(stats, stamp)
         border = (245, 202, 94) if unlocked else (91, 96, 112)
         fill = (44, 39, 30) if unlocked else (40, 43, 54)
         draw.rounded_rectangle((x, y, x + card_width, y + card_height), radius=28, fill=fill, outline=border, width=4)
-        draw.text((x + 24, y + 18), title, fill=(255, 232, 161) if unlocked else (165, 171, 190), font=label_font)
-        draw.text((x + 24, y + 56), "已收藏" if unlocked else requirement, fill=(226, 232, 245) if unlocked else (135, 142, 160), font=small_font)
+        draw.text((x + 24, y + 18), stamp.title, fill=(255, 232, 161) if unlocked else (165, 171, 190), font=label_font)
+        draw.text((x + 24, y + 56), "已收藏" if unlocked else stamp.requirement, fill=(226, 232, 245) if unlocked else (135, 142, 160), font=small_font)
         stamp_box = (x + 150, y + 88, x + 330, y + 248)
-        if unlocked and asset_path.exists():
-            with Image.open(asset_path) as stamp:
-                stamp = stamp.convert("RGBA")
-                stamp.thumbnail((180, 160), Image.LANCZOS)
-                px = stamp_box[0] + ((stamp_box[2] - stamp_box[0]) - stamp.width) // 2
-                py = stamp_box[1] + ((stamp_box[3] - stamp_box[1]) - stamp.height) // 2
-                shadow = Image.new("RGBA", stamp.size, (0, 0, 0, 95))
+        if unlocked and stamp.asset_path.exists():
+            with Image.open(stamp.asset_path) as stamp_image:
+                stamp_image = stamp_image.convert("RGBA")
+                stamp_image.thumbnail((180, 160), Image.LANCZOS)
+                px = stamp_box[0] + ((stamp_box[2] - stamp_box[0]) - stamp_image.width) // 2
+                py = stamp_box[1] + ((stamp_box[3] - stamp_box[1]) - stamp_image.height) // 2
+                shadow = Image.new("RGBA", stamp_image.size, (0, 0, 0, 95))
                 image.paste(shadow, (px + 8, py + 8), shadow)
-                image.paste(stamp, (px, py), stamp)
+                image.paste(stamp_image, (px, py), stamp_image)
         else:
             draw.rounded_rectangle(stamp_box, radius=20, fill=(27, 30, 40), outline=(82, 88, 104), width=3)
             draw.text((x + 194, y + 140), "LOCKED", fill=(118, 126, 148), font=label_font)

@@ -5,13 +5,18 @@ from __future__ import annotations
 import io
 import random
 import time
-from pathlib import Path
 from dataclasses import dataclass
 
 import discord
 from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
+from dcrbot.etching_stamps import (
+    NUMBER_SEARCHER2_STAMPS,
+    newly_earned_stamp_keys,
+    number_searcher2_clear_extra_stats,
+    stamp_title,
+)
 from dcrbot.storage import (
     append_game_record,
     get_number_searcher2_unlocked,
@@ -63,12 +68,6 @@ LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
 CLUE_CHOICE_VIEW_TIMEOUT = 180
 NUMBER_SEARCHER2_MAX_DIFFICULTY = 15
-ETCHING_STAMP_ASSETS = {
-    "N5": Path("Resources/數字搜尋者2/mathN5.png"),
-    "N10": Path("Resources/數字搜尋者2/mathN10.png"),
-    "N10_ALL_DEBUFF": Path("Resources/數字搜尋者2/mathN10Alldebuff.png"),
-    "N15": Path("Resources/數字搜尋者2/mathN15.png"),
-}
 
 
 def format_money_delta(amount: int) -> str:
@@ -1709,32 +1708,6 @@ class NumberSearcherView(View):
         users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = next_unlocked
         set_number_searcher2_unlocked(uid, next_unlocked)
 
-    def earned_etching_stamps_from_stats(self, stats: dict) -> set[str]:
-        if self.game_name != "數字搜尋者2":
-            return set()
-        extra = stats.get("extra", {}) if isinstance(stats.get("extra", {}), dict) else {}
-        highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
-        earned = {key for key, level in {"N5": 5, "N10": 10, "N15": 15}.items() if highest >= level}
-        if all(int(extra.get(f"negative_modifier_clear_{modifier}", 0) or 0) > 0 for modifier in NEGATIVE_MODIFIERS):
-            earned.add("N10_ALL_DEBUFF")
-        return earned
-
-    def new_etching_stamps(self, users: dict, uid: str, extra_stats: dict) -> list[str]:
-        if self.game_name != "數字搜尋者2":
-            return []
-        before_stats = summarize_game_records(users, uid).get("數字搜尋者2", {})
-        after_stats = dict(before_stats)
-        after_extra = dict(after_stats.get("extra", {}) if isinstance(after_stats.get("extra", {}), dict) else {})
-        for key, value in extra_stats.items():
-            if key == "highest_cleared_difficulty":
-                after_extra[key] = max(int(after_extra.get(key, 0) or 0), int(value))
-            elif key.startswith("negative_modifier_clear_"):
-                after_extra[key] = int(after_extra.get(key, 0) or 0) + int(value)
-        after_stats["extra"] = after_extra
-        before = self.earned_etching_stamps_from_stats(before_stats)
-        after = self.earned_etching_stamps_from_stats(after_stats)
-        return [key for key in ("N5", "N10", "N10_ALL_DEBUFF", "N15") if key in after - before]
-
     async def complete_success(
         self,
         interaction: discord.Interaction,
@@ -1751,10 +1724,9 @@ class NumberSearcherView(View):
         extra_stats = self.record_extra_stats()
         new_stamps: list[str] = []
         if self.game_name == "數字搜尋者2":
-            extra_stats["highest_cleared_difficulty"] = self.difficulty
-            if self.negative_modifier:
-                extra_stats[f"negative_modifier_clear_{self.negative_modifier}"] = 1
-            new_stamps = self.new_etching_stamps(users, uid, extra_stats)
+            extra_stats.update(number_searcher2_clear_extra_stats(self.difficulty, self.negative_modifier))
+            before_stats = summarize_game_records(users, uid).get("數字搜尋者2", {})
+            new_stamps = newly_earned_stamp_keys(before_stats, extra_stats)
         self.unlock_next_difficulty(users, uid)
         append_game_record(
             users,
@@ -1775,8 +1747,7 @@ class NumberSearcherView(View):
         self.history.append(f"✅ ${cost}｜猜測 {guess_text}｜正確，獲得 ${reward}｜營利 {format_money_delta(profit)}")
         stamp_text = ""
         if new_stamps:
-            stamp_names = {"N5": "N5 通關蝕刻章", "N10": "N10 通關蝕刻章", "N10_ALL_DEBUFF": "全負面詞條制霸蝕刻章", "N15": "N15 通關蝕刻章"}
-            stamp_text = "\n\n✨ **蝕刻章解鎖！** " + "、".join(stamp_names[key] for key in new_stamps) + "\n金屬光芒刻進收藏冊，Portfolio 已新增紀念印記。"
+            stamp_text = "\n\n✨ **蝕刻章解鎖！** " + "、".join(f"{stamp_title(key)}蝕刻章" for key in new_stamps) + "\n金屬光芒刻進收藏冊，Portfolio 已新增紀念印記。"
         status_text = (
             f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${reward}。\n"
             f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
@@ -1785,7 +1756,7 @@ class NumberSearcherView(View):
         )
         if update_message is not None:
             embed, file = self.build_embed_and_file(status_text, reveal=True, color=discord.Color.green())
-            stamp_files = [discord.File(ETCHING_STAMP_ASSETS[key], filename=ETCHING_STAMP_ASSETS[key].name) for key in new_stamps if ETCHING_STAMP_ASSETS[key].exists()]
+            stamp_files = [discord.File(stamp.asset_path, filename=stamp.asset_path.name) for stamp in NUMBER_SEARCHER2_STAMPS if stamp.key in new_stamps and stamp.asset_path.exists()]
             if stamp_files:
                 embed.set_thumbnail(url=f"attachment://{stamp_files[0].filename}")
             await update_message.edit(embed=embed, attachments=[file, *stamp_files], view=self)
@@ -1796,7 +1767,7 @@ class NumberSearcherView(View):
             return
         if new_stamps:
             embed, file = self.build_embed_and_file(status_text, reveal=True, color=discord.Color.green())
-            stamp_files = [discord.File(ETCHING_STAMP_ASSETS[key], filename=ETCHING_STAMP_ASSETS[key].name) for key in new_stamps if ETCHING_STAMP_ASSETS[key].exists()]
+            stamp_files = [discord.File(stamp.asset_path, filename=stamp.asset_path.name) for stamp in NUMBER_SEARCHER2_STAMPS if stamp.key in new_stamps and stamp.asset_path.exists()]
             if stamp_files:
                 embed.set_thumbnail(url=f"attachment://{stamp_files[0].filename}")
             await interaction.response.edit_message(embed=embed, attachments=[file, *stamp_files], view=self)
