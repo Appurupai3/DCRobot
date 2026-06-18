@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import discord
 from discord.ui import View
 
@@ -107,10 +109,17 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
     return lines
 
 NUMBER_SEARCHER2_STAMPS = (
-    ("N5", 5, "N5 通關", "完成 N5 難度獲得"),
-    ("N10", 10, "N10 通關", "完成 N10 難度獲得"),
-    ("N10_ALL_DEBUFF", None, "全負面詞條", "每個 N10+ 負面詞條都通關一次獲得"),
-    ("N15", 15, "N15 通關", "完成 N15 難度獲得"),
+    ("N5", 5, "N5 通關", "完成 N5 難度獲得", Path("Resources/數字搜尋者2/mathN5.png"), "portfolio_stamp_n5.png"),
+    ("N10", 10, "N10 通關", "完成 N10 難度獲得", Path("Resources/數字搜尋者2/mathN10.png"), "portfolio_stamp_n10.png"),
+    (
+        "N10_ALL_DEBUFF",
+        None,
+        "全負面詞條",
+        "每個 N10+ 負面詞條都通關一次獲得",
+        Path("Resources/數字搜尋者2/mathN10Alldebuff.png"),
+        "portfolio_stamp_all_debuff.png",
+    ),
+    ("N15", 15, "N15 通關", "完成 N15 難度獲得", Path("Resources/數字搜尋者2/mathN15.png"), "portfolio_stamp_n15.png"),
 )
 NEGATIVE_MODIFIER_NAMES = ("顏色通膨", "圖形通膨", "數字通膨", "隨機通膨", "通膨王朝", "延遲線索", "通訊不良", "古老枷鎖")
 
@@ -120,7 +129,7 @@ def _number_searcher2_stamp_lines(stats: dict | None) -> list[str]:
     highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
     all_debuff = all(int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0 for name in NEGATIVE_MODIFIER_NAMES)
     lines: list[str] = []
-    for key, level, title, requirement in NUMBER_SEARCHER2_STAMPS:
+    for key, level, title, requirement, _asset_path, _filename in NUMBER_SEARCHER2_STAMPS:
         unlocked = all_debuff if key == "N10_ALL_DEBUFF" else highest >= int(level or 0)
         icon = "🟨" if unlocked else "⬛"
         state = "已收藏" if unlocked else requirement
@@ -207,6 +216,40 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     return embed
 
 
+def _number_searcher2_stamp_gallery(stats: dict | None) -> tuple[list[discord.Embed], list[discord.File]]:
+    extra = stats.get("extra", {}) if isinstance(stats, dict) and isinstance(stats.get("extra", {}), dict) else {}
+    highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
+    all_debuff = all(int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0 for name in NEGATIVE_MODIFIER_NAMES)
+    embeds: list[discord.Embed] = []
+    files: list[discord.File] = []
+    for key, level, title, requirement, asset_path, filename in NUMBER_SEARCHER2_STAMPS:
+        unlocked = all_debuff if key == "N10_ALL_DEBUFF" else highest >= int(level or 0)
+        state = "✅ 已收藏" if unlocked else f"🔒 {requirement}"
+        embed = discord.Embed(
+            title=f"🏅 {title}蝕刻章",
+            description=state,
+            color=discord.Color.gold() if unlocked else discord.Color.dark_grey(),
+        )
+        if asset_path.exists():
+            files.append(discord.File(asset_path, filename=filename))
+            embed.set_image(url=f"attachment://{filename}")
+        else:
+            embed.description = f"{state}\n⚠️ 找不到圖片資源：`{asset_path}`"
+        embeds.append(embed)
+    return embeds, files
+
+
+def build_portfolio_embeds(user: discord.User, game_name: str | None = None) -> tuple[list[discord.Embed], list[discord.File]]:
+    embed = build_game_stat_embed(user, game_name)
+    users = load_data()
+    summary = summarize_game_records(users, str(user.id))
+    should_show_gallery = game_name is None or game_name == "數字搜尋者2"
+    if not should_show_gallery:
+        return [embed], []
+    gallery_embeds, files = _number_searcher2_stamp_gallery(summary.get("數字搜尋者2"))
+    return [embed, *gallery_embeds], files
+
+
 def build_portfolio_embed(user: discord.User) -> discord.Embed:
     return build_game_stat_embed(user)
 
@@ -248,8 +291,9 @@ class PortfolioGameSelect(discord.ui.Select):
             await interaction.response.send_message("❌ 這不是你開啟的 Portfolio 選單。", ephemeral=True)
             return
         selected = self.values[0]
-        embed = build_game_stat_embed(self.user, None if selected == "__all__" else selected)
-        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user, interaction.user))
+        game_name = None if selected == "__all__" else selected
+        embeds, files = build_portfolio_embeds(self.user, game_name)
+        await interaction.response.edit_message(embeds=embeds, attachments=files, view=PortfolioStatsView(self.user, interaction.user))
 
 
 class PortfolioStatsView(View):

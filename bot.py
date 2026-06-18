@@ -21,7 +21,7 @@ from dcrbot.multiplayer import (
 from dcrbot.portfolio import (
     PortfolioStatsView,
     build_game_records_embed,
-    build_portfolio_embed,
+    build_portfolio_embeds,
 )
 from dcrbot.data_heist import CoinFlipChallengeModal
 from dcrbot.pirate_game import PirateTreasure2Modal, PirateTreasureModal
@@ -166,7 +166,8 @@ class EconomyMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
     async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user))
+        embeds, files = build_portfolio_embeds(interaction.user)
+        await interaction.response.send_message(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
 
 
 async def resolve_basic_bet(
@@ -544,7 +545,8 @@ class GameMenu(View):
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
     async def portfolio(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
-        await interaction.response.send_message(embed=build_portfolio_embed(interaction.user), view=PortfolioStatsView(interaction.user))
+        embeds, files = build_portfolio_embeds(interaction.user)
+        await interaction.response.send_message(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
 
 
 def build_game_menu(user: discord.User):
@@ -792,7 +794,8 @@ async def portfolio_command(interaction: discord.Interaction, user: discord.User
     target = user or interaction.user
     await interaction.response.defer(thinking=True, ephemeral=False)
     await open_account(target)
-    await interaction.followup.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target, interaction.user), ephemeral=False)
+    embeds, files = build_portfolio_embeds(target)
+    await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(target, interaction.user), ephemeral=False)
 
 
 @bot.tree.command(name="rankgame", description="快速查看經濟排行榜")
@@ -804,7 +807,8 @@ async def rankgame_command(interaction: discord.Interaction):
 async def portfolio_prefix(ctx, user: Optional[discord.User] = None):
     target = user or ctx.author
     await open_account(target)
-    await ctx.send(embed=build_portfolio_embed(target), view=PortfolioStatsView(target, ctx.author))
+    embeds, files = build_portfolio_embeds(target)
+    await ctx.send(embeds=embeds, files=files, view=PortfolioStatsView(target, ctx.author))
 
 
 @bot.command(name="bank")
