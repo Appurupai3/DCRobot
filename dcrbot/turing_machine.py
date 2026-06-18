@@ -39,7 +39,17 @@ N6_BASE_CLUE_COST = 150
 MAX_ACTION_COST = 1500
 N3_MAX_ACTION_COST = 3000
 MAX_CLUE_COST = 750
-NEGATIVE_MODIFIERS = ("顏色通膨", "圖形通膨", "數字通膨", "隨機通膨", "通膨王朝", "延遲線索", "通訊不良", "古老枷鎖")
+NEGATIVE_MODIFIER_DESCRIPTIONS = {
+    "顏色通膨": "顏色線索的花費提升至 150%。",
+    "圖形通膨": "圖形線索的花費提升至 150%。",
+    "數字通膨": "數字線索的花費提升至 150%。",
+    "隨機通膨": "隨機線索的花費提升至 180%。",
+    "通膨王朝": "所有花費提升至 120%。",
+    "延遲線索": "所有線索會在下一次購買任意東西後（買線索或猜數字）才觸發。",
+    "通訊不良": "每次購買線索必定觸發一次雜訊攻擊。",
+    "古老枷鎖": "購買線索或猜測後，該按鈕會鎖定一回合，直到下次購買線索或猜數字才解鎖。",
+}
+NEGATIVE_MODIFIERS = tuple(NEGATIVE_MODIFIER_DESCRIPTIONS)
 NUMBER_SEARCHER2_UNLOCK_KEY = "number_searcher2_unlocked"
 MULTIPLIER_OPTIONS = (1, 5, 10, 50, 100)
 MAX_CUSTOM_MULTIPLIER = 1000
@@ -2199,6 +2209,7 @@ def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
                 ("🎨 顏色", "基本顏色為黃、綠、藍；N5 起新增紫色。"),
                 ("🔷 圖形", "N7 起新增圓形、三角形、長方形、五邊形。"),
                 ("⚠️ 雜訊", "N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
+                ("☠️ 負面詞條", "N10 起每場會抽 1 個負面詞條；可切到「負面詞條」分類查看完整效果。"),
             ],
         }
     ]
@@ -2218,6 +2229,14 @@ def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
                     "fields": fields,
                 }
             )
+    pages.append(
+        {
+            "category": "negative",
+            "title": "☠️ 數字搜尋者2｜負面詞條",
+            "description": "N10 起每場遊戲會從下列負面詞條池隨機抽出 1 個；N11 也會保留此效果。",
+            "fields": [(f"【{name}】", description) for name, description in NEGATIVE_MODIFIER_DESCRIPTIONS.items()],
+        }
+    )
     pages.append(
         {
             "category": "difficulty",
@@ -2240,6 +2259,7 @@ NUMBER_SEARCHER2_GUIDE_CATEGORIES = {
     "number": ("數字線索", "🔢"),
     "color": ("顏色線索", "🎨"),
     "shape": ("圖形線索", "🔷"),
+    "negative": ("負面詞條", "☠️"),
     "difficulty": ("難度 N0-N11", "🏁"),
 }
 
