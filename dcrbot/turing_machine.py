@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import random
 import time
+from pathlib import Path
 from dataclasses import dataclass
 
 import discord
@@ -18,6 +19,7 @@ from dcrbot.storage import (
     open_account,
     save_data,
     set_number_searcher2_unlocked,
+    summarize_game_records,
 )
 
 
@@ -60,6 +62,13 @@ REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
 CLUE_CHOICE_VIEW_TIMEOUT = 180
+NUMBER_SEARCHER2_MAX_DIFFICULTY = 15
+ETCHING_STAMP_ASSETS = {
+    "N5": Path("Resources/數字搜尋者2/mathN5.png"),
+    "N10": Path("Resources/數字搜尋者2/mathN10.png"),
+    "N10_ALL_DEBUFF": Path("Resources/數字搜尋者2/mathN10Alldebuff.png"),
+    "N15": Path("Resources/數字搜尋者2/mathN15.png"),
+}
 
 
 def format_money_delta(amount: int) -> str:
@@ -1696,9 +1705,35 @@ class NumberSearcherView(View):
         current_unlocked = get_number_searcher2_unlocked(uid)
         # Keep the in-memory value for the current interaction, but persist the
         # real unlock rank in leaderboard/數字搜尋者2.json instead of bank.json.
-        next_unlocked = max(current_unlocked, min(self.difficulty + 1, 11))
+        next_unlocked = max(current_unlocked, min(self.difficulty + 1, NUMBER_SEARCHER2_MAX_DIFFICULTY))
         users[uid][NUMBER_SEARCHER2_UNLOCK_KEY] = next_unlocked
         set_number_searcher2_unlocked(uid, next_unlocked)
+
+    def earned_etching_stamps_from_stats(self, stats: dict) -> set[str]:
+        if self.game_name != "數字搜尋者2":
+            return set()
+        extra = stats.get("extra", {}) if isinstance(stats.get("extra", {}), dict) else {}
+        highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
+        earned = {key for key, level in {"N5": 5, "N10": 10, "N15": 15}.items() if highest >= level}
+        if all(int(extra.get(f"negative_modifier_clear_{modifier}", 0) or 0) > 0 for modifier in NEGATIVE_MODIFIERS):
+            earned.add("N10_ALL_DEBUFF")
+        return earned
+
+    def new_etching_stamps(self, users: dict, uid: str, extra_stats: dict) -> list[str]:
+        if self.game_name != "數字搜尋者2":
+            return []
+        before_stats = summarize_game_records(users, uid).get("數字搜尋者2", {})
+        after_stats = dict(before_stats)
+        after_extra = dict(after_stats.get("extra", {}) if isinstance(after_stats.get("extra", {}), dict) else {})
+        for key, value in extra_stats.items():
+            if key == "highest_cleared_difficulty":
+                after_extra[key] = max(int(after_extra.get(key, 0) or 0), int(value))
+            elif key.startswith("negative_modifier_clear_"):
+                after_extra[key] = int(after_extra.get(key, 0) or 0) + int(value)
+        after_stats["extra"] = after_extra
+        before = self.earned_etching_stamps_from_stats(before_stats)
+        after = self.earned_etching_stamps_from_stats(after_stats)
+        return [key for key in ("N5", "N10", "N10_ALL_DEBUFF", "N15") if key in after - before]
 
     async def complete_success(
         self,
@@ -1712,11 +1747,15 @@ class NumberSearcherView(View):
         uid = str(self.user.id)
         reward = self.guess_reward()
         users[uid]["wallet"] += reward
-        self.unlock_next_difficulty(users, uid)
         balance = users[uid]["wallet"]
         extra_stats = self.record_extra_stats()
+        new_stamps: list[str] = []
         if self.game_name == "數字搜尋者2":
             extra_stats["highest_cleared_difficulty"] = self.difficulty
+            if self.negative_modifier:
+                extra_stats[f"negative_modifier_clear_{self.negative_modifier}"] = 1
+            new_stamps = self.new_etching_stamps(users, uid, extra_stats)
+        self.unlock_next_difficulty(users, uid)
         append_game_record(
             users,
             uid,
@@ -1734,20 +1773,35 @@ class NumberSearcherView(View):
         self.show_post_game_controls()
         profit = self.settlement_profit()
         self.history.append(f"✅ ${cost}｜猜測 {guess_text}｜正確，獲得 ${reward}｜營利 {format_money_delta(profit)}")
+        stamp_text = ""
+        if new_stamps:
+            stamp_names = {"N5": "N5 通關蝕刻章", "N10": "N10 通關蝕刻章", "N10_ALL_DEBUFF": "全負面詞條制霸蝕刻章", "N15": "N15 通關蝕刻章"}
+            stamp_text = "\n\n✨ **蝕刻章解鎖！** " + "、".join(stamp_names[key] for key in new_stamps) + "\n金屬光芒刻進收藏冊，Portfolio 已新增紀念印記。"
         status_text = (
             f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${reward}。\n"
             f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
             f"目前錢包餘額：${balance}"
+            f"{stamp_text}"
         )
         if update_message is not None:
             embed, file = self.build_embed_and_file(status_text, reveal=True, color=discord.Color.green())
-            await update_message.edit(embed=embed, attachments=[file], view=self)
+            stamp_files = [discord.File(ETCHING_STAMP_ASSETS[key], filename=ETCHING_STAMP_ASSETS[key].name) for key in new_stamps if ETCHING_STAMP_ASSETS[key].exists()]
+            if stamp_files:
+                embed.set_thumbnail(url=f"attachment://{stamp_files[0].filename}")
+            await update_message.edit(embed=embed, attachments=[file, *stamp_files], view=self)
             if interaction.response.is_done():
                 await interaction.followup.send(status_text, ephemeral=True)
             else:
                 await interaction.response.send_message(status_text, ephemeral=True)
             return
-        await self.refresh(interaction, status_text, reveal=True, color=discord.Color.green())
+        if new_stamps:
+            embed, file = self.build_embed_and_file(status_text, reveal=True, color=discord.Color.green())
+            stamp_files = [discord.File(ETCHING_STAMP_ASSETS[key], filename=ETCHING_STAMP_ASSETS[key].name) for key in new_stamps if ETCHING_STAMP_ASSETS[key].exists()]
+            if stamp_files:
+                embed.set_thumbnail(url=f"attachment://{stamp_files[0].filename}")
+            await interaction.response.edit_message(embed=embed, attachments=[file, *stamp_files], view=self)
+        else:
+            await self.refresh(interaction, status_text, reveal=True, color=discord.Color.green())
 
     async def handle_number_test(self, interaction: discord.Interaction, raw_guess: str) -> None:
         if self.ended:
@@ -2058,7 +2112,7 @@ class NumberSearcher2DifficultyView(View):
         self.add_guide_button()
         unlocked = self.unlocked_level()
         options = []
-        for level in range(12):
+        for level in range(NUMBER_SEARCHER2_MAX_DIFFICULTY + 1):
             locked = level > unlocked
             options.append(
                 discord.SelectOption(
@@ -2270,13 +2324,14 @@ def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
     pages.append(
         {
             "category": "difficulty",
-            "title": "🏁 數字搜尋者2｜難度 N0-N11",
+            "title": "🏁 數字搜尋者2｜難度 N0-N15",
             "description": "難度效果為**累積式**：高難度會包含前面低難度的變化。",
             "fields": [
                 ("N0～N2｜入門與初階干擾", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
                 ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000；花費 5000（隨倍率縮放）以內通關額外獎勵 1000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 3000。"),
                 ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000。"),
                 ("N9～N11｜高階干擾", "N9：雜訊攻擊機率提高到 20%。\nN10：每場抽出 1 個隨機負面詞條（通膨、延遲線索、通訊不良、古老枷鎖）。\nN11：每個數字背後有 20% 機率是 2 種顏色；猜顏色時包含其中一種即可。"),
+                ("N12～N15｜蝕刻章終局挑戰", "延續 N11 的完整規則逐級解鎖；完成 N15 可獲得 N15 蝕刻章。"),
                 ("💰 費用與獎金", "基礎獎金固定 5000。只有花費 5000（隨倍率縮放）以內通關才有額外獎勵；超過就沒有額外獎金。\nN3+ 額外 1000；N5+ 額外 3000；N8 額外 5000。"),
             ],
         }
@@ -2290,7 +2345,7 @@ NUMBER_SEARCHER2_GUIDE_CATEGORIES = {
     "color": ("顏色線索", "🎨"),
     "shape": ("圖形線索", "🔷"),
     "negative": ("負面詞條", "☠️"),
-    "difficulty": ("難度 N0-N11", "🏁"),
+    "difficulty": ("難度 N0-N15", "🏁"),
 }
 
 
@@ -2420,8 +2475,12 @@ def number_searcher2_description(difficulty: int) -> str:
         7: "新增圖形與圖形線索",
         8: "需額外猜中顏色或圖形，花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000",
         9: "雜訊攻擊機率提高到 20%",
-        10: "每場抽出 1 個隨機負面詞條",
+        10: "每場抽出 1 個隨機負面詞條，完成後可獲得 N10 蝕刻章",
         11: "每個數字背後有 20% 機率是 2 種顏色，猜顏色包含其中一種即可",
+        12: "延續 N11 規則的高階挑戰，用於推進 N15 蝕刻章進度",
+        13: "延續 N11 規則的高階挑戰，用於推進 N15 蝕刻章進度",
+        14: "延續 N11 規則的高階挑戰，用於推進 N15 蝕刻章進度",
+        15: "終局挑戰：完成後可獲得 N15 蝕刻章",
     }
     return descriptions.get(difficulty, "未知難度")
 
@@ -2433,7 +2492,7 @@ def build_number_searcher2_difficulty_embed(user: discord.User) -> discord.Embed
         description=f"目前解鎖到 N{unlocked}。通過目前最高難度後會解鎖下一級。",
         color=discord.Color.dark_teal(),
     )
-    for level in range(12):
+    for level in range(NUMBER_SEARCHER2_MAX_DIFFICULTY + 1):
         status = "✅ 已解鎖" if level <= unlocked else "🔒 未解鎖"
         embed.add_field(name=f"N{level}｜{status}", value=number_searcher2_description(level), inline=False)
     return embed

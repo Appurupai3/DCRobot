@@ -106,6 +106,29 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
             lines.append(f"已通關最高難度 **{highest_text}**｜目前解鎖 **{unlocked_text}**")
     return lines
 
+NUMBER_SEARCHER2_STAMPS = (
+    ("N5", 5, "N5 通關", "完成 N5 難度獲得"),
+    ("N10", 10, "N10 通關", "完成 N10 難度獲得"),
+    ("N10_ALL_DEBUFF", None, "全負面詞條", "每個 N10+ 負面詞條都通關一次獲得"),
+    ("N15", 15, "N15 通關", "完成 N15 難度獲得"),
+)
+NEGATIVE_MODIFIER_NAMES = ("顏色通膨", "圖形通膨", "數字通膨", "隨機通膨", "通膨王朝", "延遲線索", "通訊不良", "古老枷鎖")
+
+
+def _number_searcher2_stamp_lines(stats: dict | None) -> list[str]:
+    extra = stats.get("extra", {}) if isinstance(stats, dict) and isinstance(stats.get("extra", {}), dict) else {}
+    highest = int(extra.get("highest_cleared_difficulty", 0) or 0)
+    all_debuff = all(int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0 for name in NEGATIVE_MODIFIER_NAMES)
+    lines: list[str] = []
+    for key, level, title, requirement in NUMBER_SEARCHER2_STAMPS:
+        unlocked = all_debuff if key == "N10_ALL_DEBUFF" else highest >= int(level or 0)
+        icon = "🟨" if unlocked else "⬛"
+        state = "已收藏" if unlocked else requirement
+        lines.append(f"{icon} **{title}**｜{state}")
+    debuff_count = sum(1 for name in NEGATIVE_MODIFIER_NAMES if int(extra.get(f"negative_modifier_clear_{name}", 0) or 0) > 0)
+    lines.append(f"☠️ 負面詞條進度 **{debuff_count}/{len(NEGATIVE_MODIFIER_NAMES)}**｜最高通關 **N{highest}**")
+    return lines
+
 
 def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
     users = load_data()
@@ -133,6 +156,8 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
         extras = _extra_stat_lines(game_name, stats)
         if extras:
             embed.add_field(name="✨ 額外統計", value="\n".join(extras), inline=False)
+        if game_name == "數字搜尋者2":
+            embed.add_field(name="🏅 蝕刻章專區", value="\n".join(_number_searcher2_stamp_lines(stats)), inline=False)
         return embed
 
     wallet = int(user_data.get("wallet", 0) or 0)
@@ -156,6 +181,13 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     embed.add_field(name="💹 累計盈虧", value=f"{_money_trend_emoji(total_delta)} **{format_money_delta(total_delta)}**", inline=True)
     embed.add_field(name="🎮 總遊戲次數", value=f"**{total_games}** 場", inline=True)
     embed.add_field(name="🏆 整體勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**（{total_wins}/{total_games}）", inline=True)
+
+    number_searcher2_stats = summary.get("數字搜尋者2")
+    embed.add_field(
+        name="🏅 蝕刻章專區｜數字搜尋者2",
+        value="\n".join(_number_searcher2_stamp_lines(number_searcher2_stats)),
+        inline=False,
+    )
 
     if summary:
         favorite_stats = sorted(
