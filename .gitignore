@@ -3,3 +3,8 @@
 bank
 bank/
 bank.json
+leaderboard/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/

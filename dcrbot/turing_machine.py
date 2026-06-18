@@ -29,8 +29,9 @@ COLOR_RGB = {"黃": (245, 202, 66), "綠": (72, 196, 116), "藍": (73, 145, 236)
 SHAPES = ("圓形", "三角形", "長方形", "五邊形")
 SHAPE_SIDES = {"圓形": 0, "三角形": 3, "長方形": 4, "五邊形": 5}
 GUESS_REWARD = 5000
-N5_GUESS_REWARD = 6000
-N8_GUESS_REWARD = 8000
+N3_CLEAR_BONUS = 1000
+N5_CLEAR_BONUS = 3000
+N8_CLEAR_BONUS = 5000
 RANDOM_CLUE_COST = 300
 N1_RANDOM_CLUE_COST = 400
 BASE_ACTION_COST = 100
@@ -42,6 +43,7 @@ NUMBER_SEARCHER2_UNLOCK_KEY = "number_searcher2_unlocked"
 MULTIPLIER_OPTIONS = (1, 5, 10, 50, 100)
 MAX_CUSTOM_MULTIPLIER = 1000
 HISTORY_BUTTON_CUSTOM_ID = "number_searcher_view_history"
+MARKER_BUTTON_CUSTOM_ID = "number_searcher_marker"
 REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
@@ -301,8 +303,25 @@ def build_shape_clues(
     random_shape_for_compare = random.choice(SHAPES)
     missing_shapes = [shape for shape in SHAPES if shape not in shapes]
     repeated_color_for_random_shape = any(colors.count(color) >= 2 for color in {colors[index] for index, shape in enumerate(shapes) if shape == random_shape})
-    duplicated_pair = len(set(zip(colors, shapes, strict=True))) < CODE_LENGTH
-    no_angle_gap = max(circle_digits) - min(circle_digits) if len(circle_digits) >= 2 else 0
+    duplicated_pair = next(
+        (
+            (left_index, right_index)
+            for left_index in range(CODE_LENGTH)
+            for right_index in range(left_index + 1, CODE_LENGTH)
+            if colors[left_index] == colors[right_index] and shapes[left_index] == shapes[right_index]
+        ),
+        None,
+    )
+    duplicated_pair_text = (
+        f"第 {duplicated_pair[0] + 1} 位和第 {duplicated_pair[1] + 1} 位"
+        if duplicated_pair is not None
+        else "沒有完全一樣的位置"
+    )
+    geometry_multiple_count = sum(
+        1 for digit, side in zip(code, shape_sides, strict=True) if digit != 0 and side != 0 and digit % side == 0
+    )
+    boundary_gap = abs(max(max_side_digits) - min(min_side_digits))
+    side_count_gap = max_sides - min_sides
 
     return [
         Clue("幾何總邊數", f"三個位置的圖形總邊數加起來是 {sum(shape_sides)}。"),
@@ -325,25 +344,26 @@ def build_shape_clues(
         Clue("尖角極值", f"所有有尖角的圖形中，上面數字的最大值是 {max((code[index] for index in angled_indexes), default=0)}。"),
         Clue("圖形大小判定", "場上無五邊形。" if not pentagon_digits else f"所有五邊形方塊上面的數字{'都大於或等於 5' if all(digit >= 5 for digit in pentagon_digits) else '不是都大於或等於 5'}。"),
         Clue("圖形數字極差", f"幾何邊數最多的圖形數字減去幾何邊數最少的圖形數字，其差的絕對值為 {abs(max_side_digits[0] - min_side_digits[0])}。"),
+        Clue("邊數差", f"場上邊數最大減場上最小邊數的差為 {side_count_gap}。"),
         Clue("圓形連擊", f"場上所有圓形方塊的數量 {compare_text(shape_count['圓形'], code.count(0))} 密碼中數字 0 的總數量。"),
-        Clue("幾何倍數檢測", f"{'有' if any(side != 0 and digit % side == 0 for digit, side in zip(code, shape_sides, strict=True)) else '沒有'}任何一個位置的方塊數字剛好是該圖形邊數的倍數（不含0）。"),
+        Clue("幾何倍數檢測", f"有 {geometry_multiple_count} 個位置的方塊數字剛好是該圖形邊數的倍數。"),
         Clue("最大邊數落點", f"幾何邊數最多（或並列最多）的圖形，其上方第一個符合的數字是{'奇數' if max_side_digits[0] % 2 else '偶數'}。"),
         Clue("最小邊數落點", f"幾何邊數最少（或並列最少）的圖形，其上方第一個符合的數字 {compare_text(min_side_digits[0], 5)} 5。"),
         Clue("隨機圖形計數器", f"隨機抽一種在場上有出現的圖形，其上方的數字總和是 {shape_sum[random_present_shape]}。"),
         Clue("圖形複合相乘", f"三個位置的（方塊數字 × 圖形邊數）之總和為 {sum(digit * side for digit, side in zip(code, shape_sides, strict=True))}。"),
         Clue("多邊形純淨度", "場上無此圖形。" if not polygon_digits else ("有重複。" if len(set(polygon_digits)) < len(polygon_digits) else "全不重複。")),
         Clue("尖角大合唱", f"所有帶有尖角的圖形上方的數字，奇數的數量共有 {sum(1 for index in angled_indexes if code[index] % 2 == 1)} 個。"),
-        Clue("無角邊界", f"場上所有沒有角的圖形（圓形）上方的數字，最大值減最小值的絕對差等於 {no_angle_gap}。"),
+        Clue("邊界差尋", f"圖形上邊數最大的數字（邊數並列取數字最大）減邊數最小的數字（邊數並列取數字最小）的絕對差等於 {boundary_gap}。"),
         Clue("暖色幾何", f"黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '黃' and SHAPE_SIDES[shape] > 0)} 個。"),
         Clue("冷色圓角", f"藍色方塊且圖形為圓形的組合共有 {sum(1 for color, shape in zip(colors, shapes, strict=True) if color == '藍' and shape == '圓形')} 個。"),
         Clue("綠色幾何特徵", f"所有綠色方塊的圖形邊數總和是 {sum(SHAPE_SIDES[shape] for color, shape in zip(colors, shapes, strict=True) if color == '綠')}。"),
         Clue("圖形調色盤", f"{random_shape}在場上{yes_no(repeated_color_for_random_shape)}搭配到重複的顏色。"),
-        Clue("幾何對當", f"{yes_no(duplicated_pair)}任何兩個位置，其顏色與圖形的配置完全一模一樣。"),
+        Clue("幾何對當", f"顏色與圖形的配置完全一模一樣的位置：{duplicated_pair_text}。"),
         Clue("首位開榜（雙規）", f"第一個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[0]]}、{shapes[0]}。"),
         Clue("中位開榜（雙規）", f"第二個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[1]]}、{shapes[1]}。"),
         Clue("末位開榜（雙規）", f"第三個位置的真實顏色與真實圖形是 {COLOR_NAMES[colors[2]]}、{shapes[2]}。"),
-        Clue("色彩幾何配", f"{COLOR_NAMES[random_color]}方塊數量 {compare_text(colors.count(random_color), shape_count[random_shape_for_compare])} {random_shape_for_compare}的數量。"),
-        Clue("安全區圖形檢測", f"前兩個方塊（第一與第二個）中，{yes_no('五邊形' in shapes[:2])}包含五邊形。"),
+        Clue("色彩幾何配", f"場上{COLOR_NAMES[random_color]}方塊數量 {compare_text(colors.count(random_color), shape_count[random_shape_for_compare])} 場上{random_shape_for_compare}的數量。"),
+        Clue("安全區圖形檢測", f"前兩個方塊（第一與第二個）中，{yes_no('五邊形' in shapes[:2])}包含五邊形，{yes_no('三角形' in shapes[:2])}包含三角形。"),
     ]
 
 
@@ -430,25 +450,26 @@ def clue_choice_text(clue: Clue) -> str:
         "尖角極值": "所有有尖角的圖形中，上面數字的最大值是 [數字]。",
         "圖形大小判定": "所有五邊形方塊上面的數字是否都大於或等於 5？[是 / 不是 / 場上無五邊形]。",
         "圖形數字極差": "幾何邊數最多的圖形數字減去幾何邊數最少的圖形數字，其差的絕對值為 [絕對差]。",
+        "邊數差": "場上邊數最大減場上最小邊數的差為 [絕對差]。",
         "圓形連擊": "圓形數量是否 [大於 / 小於 / 等於] 密碼中數字 0 的總數量。",
-        "幾何倍數檢測": "有沒有任何一個位置的方塊數字剛好是該圖形邊數的倍數（不含0）？[有 / 沒有]。",
+        "幾何倍數檢測": "有幾個位置的方塊數字剛好是該圖形邊數的倍數？[幾個]。",
         "最大邊數落點": "幾何邊數最多（或並列最多）的圖形，其上方的數字是 [奇數 / 偶數]。",
         "最小邊數落點": "幾何邊數最少（或並列最少）的圖形，其上方的數字 [大於 / 小於 / 等於] 5。",
         "隨機圖形計數器": "隨機抽一種在場上有出現的圖形，其上方的數字總和是 [總和]。",
         "圖形複合相乘": "三個位置的（方塊數字 × 圖形邊數）之總和為 [總和]。",
         "多邊形純淨度": "長方形、五邊形上方的數字是否有重複？[有重複 / 全不重複 / 場上無此圖形]。",
         "尖角大合唱": "所有帶有尖角的圖形上方的數字，奇數的數量共有 [數量] 個。",
-        "無角邊界": "圓形上方數字最大值減最小值的絕對差等於 [絕對差]。",
+        "邊界差尋": "圖形上邊數最大的數字(邊數並列取數字最大)減邊數最小的數字(邊數並列取數字最小)的絕對差等於 [絕對差]。",
         "暖色幾何": "黃色方塊且圖形中有尖角（三/長/五邊形）的組合共有 [數量] 個。",
         "冷色圓角": "藍色方塊且圖形為圓形的組合共有 [數量] 個。",
         "綠色幾何特徵": "所有綠色方塊的圖形邊數總和是 [邊數和]。",
         "圖形調色盤": "某種特定的圖形在場上 [有 / 沒有] 搭配到重複的顏色。",
-        "幾何對當": "有沒有任何兩個位置，其顏色與圖形的配置完全一模一樣？[有 / 沒有]。",
+        "幾何對當": "有沒有任何兩個位置，其顏色與圖形的配置完全一模一樣？[第幾位和第幾位]。",
         "首位開榜（雙規）": "直接公開第一個位置（左邊）的 [真實顏色 與 真實圖形]。",
         "中位開榜（雙規）": "直接公開第二個位置（中間）的 [真實顏色 與 真實圖形]。",
         "末位開榜（雙規）": "直接公開第三個位置（右邊）的 [真實顏色 與 真實圖形]。",
-        "色彩幾何配": "某色方塊數量是否 [大於 / 小於 / 等於] 某圖形的數量。",
-        "安全區圖形檢測": "前兩個方塊（第一與第二個）中，[有 / 沒有] 包含五邊形。",
+        "色彩幾何配": "場上某色方塊(公開)數量是否 [大於 / 小於 / 等於] 場上某圖形(公開)的數量。",
+        "安全區圖形檢測": "前兩個方塊（第一與第二個）中，[有 / 沒有] 包含五邊形，[有 / 沒有] 包含三角形。",
     }
     if clue.title.startswith("幸運號碼"):
         return f"顯示所有密碼中的數字 {clue.title.removeprefix('幸運號碼')} 的位置 [第 X 位]。"
@@ -504,6 +525,7 @@ class PendingClueChoiceView(View):
             embed=None,
             view=self,
         )
+        self.parent.clue_choice_message = await interaction.original_response()
         self.stop()
 
 
@@ -520,7 +542,7 @@ class NumberSearcherDigitMarkModal(Modal):
     def __init__(self, marker_view: "NumberSearcherMarkerView"):
         super().__init__(title="📌 設定數字標記")
         self.marker_view = marker_view
-        current = format_digit_marks_for_input(marker_view.parent.digit_marks)
+        current = format_digit_marks_for_input(marker_view.digit_marks)
         placeholder = current if any(slot for slot in current.split(",")) else "例如 132,5,56（逗號分隔第 1/2/3 位；留空清除該位）"
         self.marks = TextInput(
             label="三格數字標記",
@@ -536,27 +558,50 @@ class NumberSearcherDigitMarkModal(Modal):
 
 
 class NumberSearcherMarkerView(View):
-    def __init__(self, parent: "NumberSearcherView"):
+    def __init__(self, parent: "NumberSearcherView", owner: discord.User, *, affects_parent: bool):
         super().__init__(timeout=180)
         self.parent = parent
+        self.owner = owner
+        self.affects_parent = affects_parent
         self.selected_slot = 0
+        self.digit_marks = [list(marks) for marks in parent.digit_marks]
+        self.color_marks = [list(marks) for marks in parent.color_marks]
+        self.shape_marks = list(parent.shape_marks)
         self.rebuild_items()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.parent.user.id:
+        if interaction.user.id != self.owner.id:
             await interaction.response.send_message("❌ 這不是你的標記介面。", ephemeral=True)
             return False
         return True
 
+    def sync_parent_marks(self) -> None:
+        if not self.affects_parent:
+            return
+        self.parent.digit_marks = [list(marks) for marks in self.digit_marks]
+        self.parent.color_marks = [list(marks) for marks in self.color_marks]
+        self.parent.shape_marks = list(self.shape_marks)
+
+    async def update_parent_board(self, interaction: discord.Interaction, status_text: str) -> None:
+        if not self.affects_parent:
+            return
+        self.sync_parent_marks()
+        await self.parent.update_board_from_child(interaction, status_text)
+
     def build_embed(self, status_text: str | None = None) -> discord.Embed:
+        default_description = (
+            "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。"
+            if self.affects_parent
+            else "這是你的私人標記介面，不會影響遊玩者的主畫面；按「分享標記」可即時產生公開圖片。"
+        )
         embed = discord.Embed(
             title="📌 數字搜尋者標記",
-            description=status_text or "把確定或候選資訊標在主畫面上；單一數字會顯示在方塊中央，多個候選會顯示在方塊下方。",
+            description=status_text or default_description,
             color=discord.Color.blurple(),
         )
-        digit_text = " / ".join(slot or "-" for slot in format_digit_marks_for_input(self.parent.digit_marks).split(","))
-        color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.parent.color_marks)
-        shape_text = " / ".join(value or "-" for value in self.parent.shape_marks)
+        digit_text = " / ".join(slot or "-" for slot in format_digit_marks_for_input(self.digit_marks).split(","))
+        color_text = " / ".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
+        shape_text = " / ".join(value or "-" for value in self.shape_marks)
         embed.add_field(name="目前位置", value=f"第 {self.selected_slot + 1} 位", inline=True)
         embed.add_field(name="數字標記", value=digit_text, inline=False)
         embed.add_field(name="顏色標記", value=color_text, inline=False)
@@ -607,7 +652,7 @@ class NumberSearcherMarkerView(View):
         for color in self.parent.available_colors:
             color_button = Button(
                 label=COLOR_NAMES[color],
-                style=discord.ButtonStyle.success if color in self.parent.color_marks[self.selected_slot] else discord.ButtonStyle.secondary,
+                style=discord.ButtonStyle.success if color in self.color_marks[self.selected_slot] else discord.ButtonStyle.secondary,
                 emoji="🎨",
                 row=2,
             )
@@ -622,7 +667,7 @@ class NumberSearcherMarkerView(View):
             for shape in SHAPES:
                 shape_button = Button(
                     label=shape,
-                    style=discord.ButtonStyle.success if self.parent.shape_marks[self.selected_slot] == shape else discord.ButtonStyle.secondary,
+                    style=discord.ButtonStyle.success if self.shape_marks[self.selected_slot] == shape else discord.ButtonStyle.secondary,
                     emoji="🔷",
                     row=3,
                 )
@@ -633,20 +678,28 @@ class NumberSearcherMarkerView(View):
                 shape_button.callback = shape_callback
                 self.add_item(shape_button)
 
+        share_button = Button(label="分享標記", style=discord.ButtonStyle.primary, emoji="🖼️", row=4)
+
+        async def share_callback(interaction: discord.Interaction):
+            await self.share_marks(interaction)
+
+        share_button.callback = share_callback
+        self.add_item(share_button)
+
     async def select_slot(self, interaction: discord.Interaction, slot: int) -> None:
         self.selected_slot = slot
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"已切換到第 {slot + 1} 位標記。"), view=self)
 
     async def set_color_mark(self, interaction: discord.Interaction, color: str) -> None:
-        slot_colors = self.parent.color_marks[self.selected_slot]
+        slot_colors = self.color_marks[self.selected_slot]
         if color in slot_colors:
             slot_colors.remove(color)
             action_text = f"已移除第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
         else:
             slot_colors.append(color)
             action_text = f"已加入第 {self.selected_slot + 1} 位顏色標記：{COLOR_NAMES[color]}"
-        await self.parent.update_board_from_child(interaction, f"📌 {action_text}。")
+        await self.update_parent_board(interaction, f"📌 {action_text}。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ {action_text}。"), view=self)
 
@@ -654,16 +707,16 @@ class NumberSearcherMarkerView(View):
         if not self.parent.has_shapes:
             await interaction.response.send_message("❌ 目前難度沒有圖形標記。", ephemeral=True)
             return
-        self.parent.shape_marks[self.selected_slot] = shape
-        await self.parent.update_board_from_child(interaction, f"📌 已標記第 {self.selected_slot + 1} 位圖形：{shape}。")
+        self.shape_marks[self.selected_slot] = shape
+        await self.update_parent_board(interaction, f"📌 已標記第 {self.selected_slot + 1} 位圖形：{shape}。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ 已標記第 {self.selected_slot + 1} 位圖形：{shape}。"), view=self)
 
     async def reset_slot_marks(self, interaction: discord.Interaction) -> None:
-        self.parent.digit_marks[self.selected_slot] = []
-        self.parent.color_marks[self.selected_slot] = []
-        self.parent.shape_marks[self.selected_slot] = None
-        await self.parent.update_board_from_child(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
+        self.digit_marks[self.selected_slot] = []
+        self.color_marks[self.selected_slot] = []
+        self.shape_marks[self.selected_slot] = None
+        await self.update_parent_board(interaction, f"📌 已重製第 {self.selected_slot + 1} 位標記。")
         self.rebuild_items()
         await interaction.response.edit_message(embed=self.build_embed(f"✅ 已重製第 {self.selected_slot + 1} 位的數字、顏色與圖形標記。"), view=self)
 
@@ -688,21 +741,65 @@ class NumberSearcherMarkerView(View):
             marks.append([])
         return marks
 
+    def marker_update_suffix(self) -> str:
+        return "並同步到主畫面" if self.affects_parent else "（私人標記，不影響遊玩者）"
+
     async def set_digit_marks(self, interaction: discord.Interaction, raw_marks: str) -> None:
         marks = self.parse_digit_marks(raw_marks)
         if marks is None:
             await interaction.response.send_message("❌ 格式錯誤，請用 132,5,56 這種格式輸入三格數字標記。", ephemeral=True)
             return
-        self.parent.digit_marks = marks
-        await self.parent.update_board_from_child(interaction, "📌 已更新數字標記。")
+        self.digit_marks = marks
+        await self.update_parent_board(interaction, "📌 已更新數字標記。")
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed("✅ 已更新數字標記並同步到主畫面。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已更新數字標記{self.marker_update_suffix()}。"), view=self)
 
     async def clear_digit_marks(self, interaction: discord.Interaction) -> None:
-        self.parent.digit_marks = [[] for _ in range(CODE_LENGTH)]
-        await self.parent.update_board_from_child(interaction, "📌 已清除數字標記。")
+        self.digit_marks = [[] for _ in range(CODE_LENGTH)]
+        await self.update_parent_board(interaction, "📌 已清除數字標記。")
         self.rebuild_items()
-        await interaction.response.edit_message(embed=self.build_embed("✅ 已清除數字標記並同步到主畫面。"), view=self)
+        await interaction.response.edit_message(embed=self.build_embed(f"✅ 已清除數字標記{self.marker_update_suffix()}。"), view=self)
+
+    def marker_summary(self) -> str:
+        parts = []
+        digit_text = "/".join(slot or "-" for slot in format_digit_marks_for_input(self.digit_marks).split(","))
+        if digit_text != "-/-/-":
+            parts.append(f"數字 {digit_text}")
+        color_text = "/".join("+".join(COLOR_NAMES.get(color, color) for color in marks) or "-" for marks in self.color_marks)
+        if color_text != "-/-/-":
+            parts.append(f"顏色 {color_text}")
+        if self.parent.has_shapes:
+            shape_text = "/".join(value or "-" for value in self.shape_marks)
+            if shape_text != "-/-/-":
+                parts.append(f"圖形 {shape_text}")
+        return "｜".join(parts) if parts else "尚無標記"
+
+    def render_snapshot(self) -> object:
+        class MarkerSnapshot:
+            pass
+
+        snapshot = MarkerSnapshot()
+        snapshot.title = f"{self.parent.title}｜標記分享"
+        snapshot.has_shapes = self.parent.has_shapes
+        snapshot.digit_marks = [list(marks) for marks in self.digit_marks]
+        snapshot.color_marks = [list(marks) for marks in self.color_marks]
+        snapshot.shape_marks = list(self.shape_marks)
+        snapshot.colors = self.parent.colors
+        snapshot.secret = self.parent.secret
+        snapshot.multiplier = self.parent.multiplier
+        snapshot.guess_count = self.parent.guess_count
+        snapshot.clue_count = self.parent.clue_count
+        snapshot.total_spent = self.parent.total_spent
+        snapshot.guess_reward = self.parent.guess_reward
+        return snapshot
+
+    async def share_marks(self, interaction: discord.Interaction) -> None:
+        file = discord.File(render_number_searcher_board(self.render_snapshot()), filename="number_searcher_marks.png")
+        await interaction.response.send_message(
+            content=f"📌 {self.owner.display_name} 分享標記：{self.marker_summary()}",
+            file=file,
+            ephemeral=False,
+        )
 
 
 class NumberSearcherGuessModal(Modal):
@@ -954,6 +1051,7 @@ class NumberSearcherView(View):
         self.shape_marks: list[str | None] = [None] * CODE_LENGTH
         self.seen_clue_titles: set[str] = set()
         self.pending_clue_offer: PendingClueOffer | None = None
+        self.clue_choice_message: discord.InteractionMessage | None = None
         self.ended = False
         self.message: discord.Message | None = None
         self.add_advanced_buttons()
@@ -962,7 +1060,7 @@ class NumberSearcherView(View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
-        if custom_id == HISTORY_BUTTON_CUSTOM_ID:
+        if custom_id in {HISTORY_BUTTON_CUSTOM_ID, MARKER_BUTTON_CUSTOM_ID}:
             return True
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("❌ 這不是你的數字搜尋者！請自行開啟遊戲。", ephemeral=True)
@@ -978,8 +1076,22 @@ class NumberSearcherView(View):
     def random_clue_cost(self) -> int:
         return scaled_amount(self.random_clue_base, self.multiplier)
 
+    def clear_bonus_limit(self) -> int:
+        return scaled_amount(GUESS_REWARD, self.multiplier)
+
+    def clear_bonus(self) -> int:
+        if self.game_name != "數字搜尋者2" or self.total_spent > self.clear_bonus_limit():
+            return 0
+        if self.difficulty >= 8:
+            return N8_CLEAR_BONUS
+        if self.difficulty >= 5:
+            return N5_CLEAR_BONUS
+        if self.difficulty >= 3:
+            return N3_CLEAR_BONUS
+        return 0
+
     def guess_reward(self) -> int:
-        return scaled_amount(self.reward, self.multiplier)
+        return scaled_amount(self.reward + self.clear_bonus(), self.multiplier)
 
     def settlement_profit(self) -> int:
         return self.settlement_reward - self.total_spent
@@ -1016,10 +1128,11 @@ class NumberSearcherView(View):
             test_button.callback = test_callback
             self.add_item(test_button)
 
-        marker_button = Button(label="標記", style=discord.ButtonStyle.secondary, emoji="📌", row=2)
+        marker_button = Button(label="標記", style=discord.ButtonStyle.secondary, emoji="📌", row=2, custom_id=MARKER_BUTTON_CUSTOM_ID)
 
         async def marker_callback(interaction: discord.Interaction):
-            marker_view = NumberSearcherMarkerView(self)
+            affects_parent = interaction.user.id == self.user.id
+            marker_view = NumberSearcherMarkerView(self, interaction.user, affects_parent=affects_parent)
             await interaction.response.send_message(embed=marker_view.build_embed(), view=marker_view, ephemeral=True)
 
         marker_button.callback = marker_callback
@@ -1266,6 +1379,18 @@ class NumberSearcherView(View):
         pool = [clue for clue in pool if clue.title not in RANDOM_PACK_TITLES]
         return self.sample_unseen_clues(pool, 2)
 
+    def clue_history_summary(self, limit: int = 8, max_chars: int = 1000) -> str:
+        clue_entries = [entry for entry in self.history if entry.startswith(("💡", "🎁", "📌"))]
+        if not clue_entries:
+            return "尚未有任何線索紀錄。"
+        summary = "\n".join(clue_entries[-limit:])
+        if len(summary) <= max_chars:
+            return summary
+        return f"…{summary[-(max_chars - 1):]}"
+
+    def selected_clue_message(self, summary: str) -> str:
+        return f"{summary}\n\n目前線索紀錄：\n{self.clue_history_summary(max_chars=1500)}"
+
     def resolve_selected_clue(self, clue: Clue, cost: int) -> tuple[str, str]:
         if clue.title in RANDOM_PACK_TITLES:
             pack_results = self.trigger_random_pack(clue.title)
@@ -1286,12 +1411,12 @@ class NumberSearcherView(View):
                 marker_text = f"\n📌 已同步標記：{'；'.join(marker_lines)}" if marker_lines else ""
                 return (
                     f"觸發【{clue.title}】，隨機公開 {len(pack_results)} 個{pool_name}有關的線索：\n{joined_results}{marker_text}",
-                    f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。",
+                    self.selected_clue_message(f"✅ 已選擇【{clue.title}】，已觸發禮包並公開 {len(pack_results)} 個{pool_name}線索。"),
                 )
             self.history.append(f"🎁 ${cost}｜【{clue.title}】觸發，但{pool_name}線索卡池已沒有未出現過的線索")
             return (
                 f"觸發【{clue.title}】，但{pool_name}線索卡池已沒有未出現過的線索。",
-                f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。",
+                self.selected_clue_message(f"✅ 已選擇【{clue.title}】，但{pool_name}線索卡池已空。"),
             )
 
         marker_lines = self.apply_certain_clue_markers(clue)
@@ -1299,7 +1424,9 @@ class NumberSearcherView(View):
         self.history.append(f"💡 ${cost}｜【{clue.title}】{clue.text}")
         if marker_lines:
             self.history.append(f"📌 自動標記｜{'；'.join(marker_lines)}")
-        return f"公開線索：【{clue.title}】{clue.text}{marker_text}", f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+        return f"公開線索：【{clue.title}】{clue.text}{marker_text}", self.selected_clue_message(
+            f"✅ 已選擇【{clue.title}】，效果已記錄到遊戲面板。"
+        )
 
     def pool_for_clue_type(self, clue_type: str) -> tuple[list[Clue], int, str]:
         if clue_type == "number":
@@ -1339,7 +1466,26 @@ class NumberSearcherView(View):
         )
         for index, clue in enumerate(offer.choices, start=1):
             choice_embed.add_field(name=self.offer_title(index, clue, offer), value=self.offer_text(index, clue, offer), inline=False)
+        choice_embed.add_field(name="目前線索紀錄", value=self.clue_history_summary(), inline=False)
         return choice_embed
+
+    async def show_clue_choice_message(self, interaction: discord.Interaction, offer: PendingClueOffer, *, reused: bool = False) -> None:
+        embed = self.pending_offer_embed(offer, reused=reused)
+        view = PendingClueChoiceView(self, list(offer.choices), offer.cost)
+        if self.clue_choice_message is not None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                await self.clue_choice_message.edit(content=None, embed=embed, view=view)
+                return
+            except (discord.NotFound, discord.HTTPException):
+                self.clue_choice_message = None
+
+        if interaction.response.is_done():
+            self.clue_choice_message = await interaction.followup.send(embed=embed, view=view, ephemeral=True, wait=True)
+            return
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        self.clue_choice_message = await interaction.original_response()
 
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
         if self.ended:
@@ -1347,12 +1493,7 @@ class NumberSearcherView(View):
             return
 
         if self.pending_clue_offer is not None:
-            offer = self.pending_clue_offer
-            await interaction.response.send_message(
-                embed=self.pending_offer_embed(offer, reused=True),
-                view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
-                ephemeral=True,
-            )
+            await self.show_clue_choice_message(interaction, self.pending_clue_offer, reused=True)
             return
 
         pool, sample_count, clue_type_name = self.pool_for_clue_type(clue_type)
@@ -1390,11 +1531,7 @@ class NumberSearcherView(View):
         noise_index = random.randrange(len(sampled)) if self.noise_chance > 0 and random.random() < self.noise_chance else None
         offer = PendingClueOffer(clue_type=clue_type, choices=sampled, cost=cost, noise_index=noise_index)
         self.pending_clue_offer = offer
-        await interaction.response.send_message(
-            embed=self.pending_offer_embed(offer),
-            view=PendingClueChoiceView(self, list(offer.choices), offer.cost),
-            ephemeral=True,
-        )
+        await self.show_clue_choice_message(interaction, offer)
 
     def answer_details(self) -> str:
         details = f"答案 {format_code(self.secret)}；猜測 {self.guess_count} 次；線索 {self.clue_count} 次。"
@@ -1778,6 +1915,7 @@ class NumberSearcher2DifficultyView(View):
         return get_number_searcher2_unlocked(str(self.user.id))
 
     def add_difficulty_select(self) -> None:
+        self.add_guide_button()
         unlocked = self.unlocked_level()
         options = []
         for level in range(9):
@@ -1810,6 +1948,274 @@ class NumberSearcher2DifficultyView(View):
         select.callback = callback
         self.add_item(select)
 
+    def add_guide_button(self) -> None:
+        button = Button(label="線索與難度說明", style=discord.ButtonStyle.secondary, emoji="📘", row=1)
+
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.send_message(
+                embed=build_number_searcher2_guide_embed(0),
+                view=NumberSearcher2GuideView(interaction.user),
+                ephemeral=True,
+            )
+
+        button.callback = callback
+        self.add_item(button)
+
+
+NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES = [
+    "總和",
+    "奇判定",
+    "偶判定",
+    "大小關係 A",
+    "大小關係 B",
+    "大小關係 C",
+    "極差觀測",
+    "零的領域",
+    "質數獵人",
+    "大判定",
+    "小判定",
+    "連續風暴",
+    "相同複製",
+    "全體奇偶",
+    "倍數密碼 A",
+    "倍數密碼 B",
+    "極值位置 A",
+    "極值位置 B",
+    "極值資訊 A",
+    "極值資訊 B",
+    "差計算 A",
+    "差計算 B",
+    "差計算 C",
+    "最大差",
+    "最小差",
+    "差之和",
+    "隨機差",
+    "隨機機會",
+    "隨機計數器 2A",
+    RANDOM_NUMBER_PACK_TITLE,
+    *(f"幸運號碼{digit}" for digit in DIGITS),
+]
+
+NUMBER_SEARCHER2_COLOR_GUIDE_TITLES = [
+    "藍色雷達",
+    "綠色雷達",
+    "黃色雷達",
+    "首位開榜",
+    "中位開榜",
+    "末位開榜",
+    "黃色計數器",
+    "綠色計數器",
+    "藍色計數器",
+    "隨機計數器",
+    "隨機計數器 2B",
+    RANDOM_COLOR_PACK_TITLE,
+    "藍黃配",
+    "黃綠配",
+    "藍綠配",
+    "色彩多樣性",
+    "對稱掃描",
+    "鄰居檢查",
+    "尾端檢查",
+    "色彩絕緣體",
+    "左側安全區 A",
+    "左側安全區 B",
+    "左側安全區 C",
+    "右側安全區 A",
+    "右側安全區 B",
+    "右側安全區 C",
+    "紫色雷達",
+    "紫色計數器",
+    "紫藍配",
+    "左側安全區 D",
+    "右側安全區 D",
+]
+
+NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES = [
+    "幾何總邊數",
+    "尖角觀測",
+    "圓形雷達",
+    "三角形雷達",
+    "長方形雷達",
+    "五邊形雷達",
+    "圖形多樣性",
+    "對稱幾何",
+    "鄰居幾何",
+    "圖形絕緣體",
+    "圓形計數器",
+    "三角形計數器",
+    "長方形計數器",
+    "五邊形計數器",
+    "奇偶幾何",
+    "偶數幾何",
+    "圓底密碼",
+    "尖角極值",
+    "圖形大小判定",
+    "圖形數字極差",
+    "邊數差",
+    "圓形連擊",
+    "幾何倍數檢測",
+    "最大邊數落點",
+    "最小邊數落點",
+    "隨機圖形計數器",
+    "圖形複合相乘",
+    "多邊形純淨度",
+    "尖角大合唱",
+    "邊界差尋",
+    "暖色幾何",
+    "冷色圓角",
+    "綠色幾何特徵",
+    "圖形調色盤",
+    "幾何對當",
+    "首位開榜（雙規）",
+    "中位開榜（雙規）",
+    "末位開榜（雙規）",
+    "色彩幾何配",
+    "安全區圖形檢測",
+]
+
+NUMBER_SEARCHER2_GUIDE_PAGE_SIZE = 8
+
+
+def number_searcher2_clue_guide_fields(titles: list[str]) -> list[tuple[str, str]]:
+    return [(title, clue_choice_text(Clue(title, ""))) for title in titles]
+
+
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def build_number_searcher2_guide_pages() -> list[dict[str, object]]:
+    pages: list[dict[str, object]] = [
+        {
+            "category": "overview",
+            "title": "📘 數字搜尋者2｜玩法總覽",
+            "description": (
+                "**目標：**推理三個位置的數字與顏色；N7 起還要處理圖形。\n"
+                "**操作：**一般線索會給 3 個候選讓你選 1 個公開；隨機線索與禮包給 2 個候選。\n"
+                "**導覽：**用下拉選單跳到分類，再用上一頁 / 下一頁看完整線索。"
+            ),
+            "fields": [
+                ("🔢 數字", "每局 3 位，每位為 0～9。"),
+                ("🎨 顏色", "基本顏色為黃、綠、藍；N5 起新增紫色。"),
+                ("🔷 圖形", "N7 起新增圓形、三角形、長方形、五邊形。"),
+                ("⚠️ 雜訊", "N2 起購買線索可能遇到雜訊，候選項目會被亂碼遮住。"),
+            ],
+        }
+    ]
+    sections = [
+        ("number", "🔢 數字線索", "數字線索會直接縮小三位密碼的可能性。", NUMBER_SEARCHER2_NUMBER_GUIDE_TITLES),
+        ("color", "🎨 顏色線索", "顏色線索用來判斷方塊顏色，以及同色方塊上的數字總和。", NUMBER_SEARCHER2_COLOR_GUIDE_TITLES),
+        ("shape", "🔷 圖形線索", "N7 起出現圖形線索，會結合圖形位置、邊數、顏色與數字。", NUMBER_SEARCHER2_SHAPE_GUIDE_TITLES),
+    ]
+    for category, section_title, description, titles in sections:
+        chunks = chunked(number_searcher2_clue_guide_fields(titles), NUMBER_SEARCHER2_GUIDE_PAGE_SIZE)
+        for index, fields in enumerate(chunks, start=1):
+            pages.append(
+                {
+                    "category": category,
+                    "title": f"{section_title}｜第 {index}/{len(chunks)} 頁",
+                    "description": f"{description}\n本頁列出 {len(fields)} 個線索。",
+                    "fields": fields,
+                }
+            )
+    pages.append(
+        {
+            "category": "difficulty",
+            "title": "🏁 數字搜尋者2｜難度 N0-N8",
+            "description": "難度效果為**累積式**：高難度會包含前面低難度的變化。",
+            "fields": [
+                ("N0～N2｜入門與初階干擾", "N0：正常遊戲。\nN1：隨機線索價格 400。\nN2：購買線索 5% 機率遭雜訊攻擊。"),
+                ("N3～N5｜費用壓力與紫色", "N3：猜數字費用改為 100×3^(n-1)，上限 3000；花費 5000（隨倍率縮放）以內通關額外獎勵 1000。\nN4：雜訊攻擊機率 10%。\nN5：新增紫色；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 3000。"),
+                ("N6～N8｜圖形與完整答案", "N6：線索基礎價格 150。\nN7：新增圖形與圖形線索。\nN8：需額外猜中顏色或圖形；花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000。"),
+                ("💰 費用與獎金", "基礎獎金固定 5000。只有花費 5000（隨倍率縮放）以內通關才有額外獎勵；超過就沒有額外獎金。\nN3+ 額外 1000；N5+ 額外 3000；N8 額外 5000。"),
+            ],
+        }
+    )
+    return pages
+
+NUMBER_SEARCHER2_GUIDE_PAGES = build_number_searcher2_guide_pages()
+NUMBER_SEARCHER2_GUIDE_CATEGORIES = {
+    "overview": ("玩法總覽", "📘"),
+    "number": ("數字線索", "🔢"),
+    "color": ("顏色線索", "🎨"),
+    "shape": ("圖形線索", "🔷"),
+    "difficulty": ("難度 N0-N8", "🏁"),
+}
+
+
+def number_searcher2_guide_category_start(category: str) -> int:
+    for index, page in enumerate(NUMBER_SEARCHER2_GUIDE_PAGES):
+        if page.get("category") == category:
+            return index
+    return 0
+
+
+def build_number_searcher2_guide_embed(page_index: int) -> discord.Embed:
+    page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
+    guide = NUMBER_SEARCHER2_GUIDE_PAGES[page_index]
+    embed = discord.Embed(
+        title=str(guide["title"]),
+        description=str(guide["description"]),
+        color=discord.Color.blurple(),
+    )
+    for name, value in guide["fields"]:
+        embed.add_field(name=name, value=value, inline=False)
+    category_label = NUMBER_SEARCHER2_GUIDE_CATEGORIES.get(str(guide.get("category")), ("說明", "📘"))[0]
+    embed.set_footer(text=f"{category_label}｜第 {page_index + 1}/{len(NUMBER_SEARCHER2_GUIDE_PAGES)} 頁｜可用下拉選單切換分類")
+    return embed
+
+
+class NumberSearcher2GuideView(View):
+    def __init__(self, user: discord.User, page_index: int = 0):
+        super().__init__(timeout=180)
+        self.user = user
+        self.page_index = page_index
+        self.add_category_select()
+        self.sync_button_state()
+
+    def add_category_select(self) -> None:
+        current_category = str(NUMBER_SEARCHER2_GUIDE_PAGES[self.page_index].get("category"))
+        options = [
+            discord.SelectOption(label=label, value=category, emoji=emoji, default=category == current_category)
+            for category, (label, emoji) in NUMBER_SEARCHER2_GUIDE_CATEGORIES.items()
+        ]
+        select = Select(placeholder="選擇說明分類", options=options, row=0)
+
+        async def callback(interaction: discord.Interaction):
+            page_index = number_searcher2_guide_category_start(select.values[0])
+            await interaction.response.edit_message(
+                embed=build_number_searcher2_guide_embed(page_index),
+                view=NumberSearcher2GuideView(self.user, page_index),
+            )
+
+        select.callback = callback
+        self.add_item(select)
+
+    def sync_button_state(self) -> None:
+        self.previous_page.disabled = self.page_index <= 0
+        self.next_page.disabled = self.page_index >= len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1
+
+    async def update_page(self, interaction: discord.Interaction, page_index: int) -> None:
+        page_index = max(0, min(page_index, len(NUMBER_SEARCHER2_GUIDE_PAGES) - 1))
+        await interaction.response.edit_message(
+            embed=build_number_searcher2_guide_embed(page_index),
+            view=NumberSearcher2GuideView(self.user, page_index),
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 這不是你的數字搜尋者2說明選單。", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary, emoji="◀️", row=1)
+    async def previous_page(self, interaction: discord.Interaction, button: Button):
+        await self.update_page(interaction, self.page_index - 1)
+
+    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary, emoji="▶️", row=1)
+    async def next_page(self, interaction: discord.Interaction, button: Button):
+        await self.update_page(interaction, self.page_index + 1)
+
 
 def number_searcher2_settings(difficulty: int) -> dict:
     settings = {
@@ -1834,13 +2240,11 @@ def number_searcher2_settings(difficulty: int) -> dict:
         settings["noise_chance"] = 0.10
     if difficulty >= 5:
         settings["available_colors"] = PURPLE_COLORS
-        settings["reward"] = N5_GUESS_REWARD
     if difficulty >= 6:
         settings["clue_base"] = N6_BASE_CLUE_COST
     if difficulty >= 7:
         settings["has_shapes"] = True
     if difficulty >= 8:
-        settings["reward"] = N8_GUESS_REWARD
         settings["requires_extra_guess"] = True
     return settings
 
@@ -1850,12 +2254,12 @@ def number_searcher2_description(difficulty: int) -> str:
         0: "正常遊戲",
         1: "隨機線索價格 400",
         2: "購買線索 5% 機率遭雜訊攻擊",
-        3: "猜數字費用改為 100×3^(n-1)，上限 3000",
+        3: "猜數字費用改為 100×3^(n-1)，上限 3000，花費 5000（隨倍率縮放）以內通關額外獎勵 1000",
         4: "雜訊攻擊機率提高到 10%",
-        5: "新增紫色，獎金提高到 6000",
+        5: "新增紫色，花費 5000（隨倍率縮放）以內通關額外獎勵提高為 3000",
         6: "線索基礎價格提高到 150",
         7: "新增圖形與圖形線索",
-        8: "需額外猜中顏色或圖形，獎金 8000",
+        8: "需額外猜中顏色或圖形，花費 5000（隨倍率縮放）以內通關額外獎勵提高為 5000",
     }
     return descriptions.get(difficulty, "未知難度")
 

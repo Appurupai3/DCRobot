@@ -590,7 +590,7 @@ class GameMenu(View):
     async def pirate_treasure(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PirateTreasureModal(interaction.user, build_game_menu))
 
-    @discord.ui.button(label="海盜寶藏2", style=discord.ButtonStyle.success, emoji="🗺️", row=0)
+    @discord.ui.button(label="海盜寶藏2", style=discord.ButtonStyle.danger, emoji="🗺️", row=0)
     async def pirate_treasure2(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PirateTreasure2Modal(interaction.user, build_game_menu))
 
@@ -617,7 +617,7 @@ class GameMenu(View):
         await interaction.response.send_message(embed=embed, file=file, view=view)
         view.message = await interaction.original_response()
 
-    @discord.ui.button(label="數字搜尋者2", style=discord.ButtonStyle.primary, emoji="🔢", row=2)
+    @discord.ui.button(label="數字搜尋者2", style=discord.ButtonStyle.success, emoji="🔢", row=2)
     async def number_searcher2(self, interaction: discord.Interaction, button: Button):
         await open_account(interaction.user)
         await interaction.response.send_message(
@@ -625,7 +625,7 @@ class GameMenu(View):
             view=NumberSearcher2DifficultyView(interaction.user, build_game_menu),
         )
 
-    @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.success, emoji="🎯", row=2)
+    @discord.ui.button(label="特戰棋盤", style=discord.ButtonStyle.danger, emoji="🎯", row=2)
     async def valorant_tactics(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(
             embed=build_valorant_intro_embed(),
@@ -691,7 +691,7 @@ def build_game_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="🎈 打氣球挑戰",
-        value="下注後用「打氣」按鈕讓 Pillow 產生的頭像越變越大；爆炸機率從 15% 慢慢增加到 33%，爆炸會追加從 0 倍指數上升到 10 倍的醫藥費；可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 500 倍獎金。",
+        value="下注後用「打氣」按鈕讓你的頭像越變越大；爆炸機率從 15% 慢慢增加到 33%，爆炸會追加從 0 倍指數上升到 10 倍的醫藥費；可隨時按「結束打氣」領取目前倍率，最多成功打氣 11 次可贏 500 倍獎金。",
         inline=False,
     )
     embed.add_field(
@@ -836,7 +836,15 @@ async def battle_prefix(ctx, amount: int = None, *, game: str = None):
         embed=build_battle_embed(match, "等待玩家加入，贏家全拿！"), view=view
     )
     match.message = sent
+@bot.command(name="甩門")
+async def slam_door(ctx):  
+    member = ctx.author.mention
+    await ctx.send(f'{member}你好可怕喔')
 
+@bot.tree.command(name="甩門", description="可怕")
+async def slam_door(interaction: discord.Interaction):
+    member = interaction.user.mention 
+    await interaction.response.send_message(f'{member}你好可怕喔')
 
 @bot.tree.command(name="opengame", description="開啟單人遊戲 GUI")
 async def opengame_command(interaction: discord.Interaction):
