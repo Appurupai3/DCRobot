@@ -290,10 +290,11 @@ class PortfolioGameSelect(discord.ui.Select):
         if interaction.user.id != self.viewer_id:
             await interaction.response.send_message("❌ 這不是你開啟的 Portfolio 選單。", ephemeral=True)
             return
+        await interaction.response.defer()
         selected = self.values[0]
         game_name = None if selected == "__all__" else selected
         embeds, files = build_portfolio_embeds(self.user, game_name)
-        await interaction.response.edit_message(embeds=embeds, attachments=files, view=PortfolioStatsView(self.user, interaction.user))
+        await interaction.edit_original_response(embeds=embeds, attachments=files, view=PortfolioStatsView(self.user, interaction.user))
 
 
 class PortfolioStatsView(View):

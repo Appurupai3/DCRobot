@@ -165,9 +165,10 @@ class EconomyMenu(View):
 
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3, custom_id="economy_portfolio")
     async def portfolio_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(thinking=True)
         await open_account(interaction.user)
         embeds, files = build_portfolio_embeds(interaction.user)
-        await interaction.response.send_message(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
+        await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
 
 
 async def resolve_basic_bet(
@@ -544,9 +545,10 @@ class GameMenu(View):
 
     @discord.ui.button(label="Portfolio", style=discord.ButtonStyle.secondary, emoji="📊", row=3)
     async def portfolio(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(thinking=True)
         await open_account(interaction.user)
         embeds, files = build_portfolio_embeds(interaction.user)
-        await interaction.response.send_message(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
+        await interaction.followup.send(embeds=embeds, files=files, view=PortfolioStatsView(interaction.user))
 
 
 def build_game_menu(user: discord.User):
