@@ -283,9 +283,14 @@ class BalloonPumpView(View):
                 "cashout_count": 1,
                 "cashout_500x_count": 1 if payout >= self.bet_amount * 500 else 0,
                 "pump_total": self.pumps,
+                "balloon_cashout_1": 1 if self.pumps == 1 else 0,
                 "balloon_cashout_3": 1 if self.pumps == 3 else 0,
+                "balloon_cashout_5": 1 if self.pumps >= 5 else 0,
                 "balloon_cashout_8": 1 if self.pumps >= 8 else 0,
+                "balloon_cashout_10": 1 if self.pumps == 10 else 0,
                 "balloon_cashout_25_percent": 1 if self.pumps == 6 else 0,
+                "balloon_cashout_30_percent": 1 if self.pumps >= 10 else 0,
+                "balloon_cashout_low_risk": 1 if self.pumps <= 2 else 0,
                 "pump_30_percent_survive": 1 if self._survived_30_percent else 0,
             },
         )
@@ -336,7 +341,10 @@ class BalloonPumpView(View):
                 extra_stats={
                     "pump_total": self.pumps + 1,
                     "medical_fee_8x_count": 1 if medical_fee_multiplier >= 8 else 0,
+                    "medical_fee_10x_count": 1 if medical_fee_multiplier >= 10 else 0,
                     "medical_fee_0x_count": 1 if medical_fee_multiplier == 0 else 0,
+                    "balloon_first_pump_burst": 1 if self.pumps == 0 else 0,
+                    "balloon_burst_after_9": 1 if self.pumps >= 9 else 0,
                     "medical_fee_multiplier_total": medical_fee_multiplier,
                 },
             )

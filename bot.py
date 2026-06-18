@@ -336,6 +336,17 @@ async def resolve_custom_bet(
             "special_20_win_count": 1 if special_win else 0,
             "special_20_loss_count": 1 if special_loss else 0,
             "special_20_reward_multiplier": 50 if special_win else 0,
+            "dice_first_big_win": 1 if diff > 3 else 0,
+            "dice_close_game": 1 if abs(diff) <= 2 else 0,
+            "dice_diff_11_win": 1 if diff == 11 else 0,
+            "dice_near_10x_penalty": 1 if enemy_total == 12 and player_total == 3 else 0,
+            "dice_total_12_count": (1 if player_total == 12 else 0) + (1 if enemy_total == 12 else 0),
+            "dice_total_2_count": (1 if player_total == 2 else 0) + (1 if enemy_total == 2 else 0),
+            "dice_half_step_profit": 1 if diff > 0 else 0,
+            "dice_win_streak_5": 1 if diff > 0 else 0,
+            "dice_loss_streak_6_big": 1 if diff < -4 else 0,
+            "dice_100x_profit": 1 if special_win and amount > 0 else 0,
+            "dice_roll_count": 4,
         }
     append_game_record(
         users,

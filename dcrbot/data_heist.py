@@ -8,6 +8,7 @@ from collections.abc import Callable
 import discord
 from discord.ui import Button, Modal, TextInput, View
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -169,6 +170,24 @@ class CoinFlipChallengeView(View):
             color = discord.Color.red()
 
         balance = users[uid]["wallet"]
+        toss_text = "".join(self.tosses)
+        player_won = self.winner == "player"
+        extra_stats = {
+            "coin_toss_total": len(self.tosses),
+            "coin_fast_player_win": 1 if player_won and len(self.tosses) <= 3 else 0,
+            "coin_fast_ai_win": 1 if (not player_won) and self.ai_first and len(self.tosses) <= 3 else 0,
+            "coin_long_game": 1 if len(self.tosses) > 20 else 0,
+            "coin_counter_win": 1 if player_won and not self.ai_first else 0,
+            "coin_counter_loss": 1 if (not player_won) and not self.ai_first else 0,
+            "coin_ai_first_player_win": 1 if player_won and self.ai_first else 0,
+            "coin_player_first": 1 if not self.ai_first else 0,
+            "coin_alternating_6": 1 if "HTHTHT" in toss_text or "THTHTH" in toss_text else 0,
+            "coin_mirror_ai": 1 if self.ai_first and self.player_sequence == self.ai_sequence else 0,
+            "coin_long_sequence_heads": 1 if self.player_sequence == ["H", "H", "H"] else 0,
+            "coin_all_heads_all_tails_start": 1 if self.player_sequence == ["H", "H", "H"] and self.tosses[:8] == ["T"] * 8 else 0,
+            "coin_near_miss": 1 if any(window[:2] == self.player_sequence[:2] and window != self.player_sequence for window in (self.tosses[i:i+3] for i in range(max(0, len(self.tosses)-2)))) else 0,
+            "coin_balance_close": 1 if self.tosses and abs(self.tosses.count("H") - self.tosses.count("T")) / len(self.tosses) <= 0.01 else 0,
+        }
         append_game_record(
             users,
             uid,
@@ -178,12 +197,16 @@ class CoinFlipChallengeView(View):
             delta=payout - self.bet_amount,
             balance=balance,
             details=f"玩家 {compact_sequence(self.player_sequence)}；AI {compact_sequence(self.ai_sequence)}；投擲 {len(self.tosses)} 次。",
+            extra_stats=extra_stats,
         )
         save_data(users)
+        achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "拋硬幣挑戰"))
         self.ended = True
         self.finish_buttons()
         embed = self.build_embed(f"{result_text}\n目前錢包餘額：${balance}")
         embed.color = color
+        if achievement_text:
+            embed.add_field(name="🏆 成就解鎖", value=achievement_text, inline=False)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="正面", style=discord.ButtonStyle.primary, emoji="🪙", row=0)

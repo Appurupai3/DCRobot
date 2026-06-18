@@ -69,6 +69,12 @@ class PuzzleGuessView(View):
         self.seen_0a4b = False
         self.seen_0a0b = False
         self.first_guess_2a2b = False
+        self.seen_1a1b = False
+        self.seen_1a0b_count = 0
+        self.seen_2a0b_count = 0
+        self.seen_1a3b = False
+        self.seen_3a0b = False
+        self.unique_guess_count = 0
 
 
     def show_post_game_buttons(self) -> None:
@@ -173,6 +179,7 @@ class PuzzleGuessModal(Modal):
             return
 
         if len(set(guess)) != 4:
+            view.seen_duplicate_rejected = True
             await interaction.response.send_message("❌ 數字不能重複。", ephemeral=True)
             return
 
@@ -180,6 +187,12 @@ class PuzzleGuessModal(Modal):
         bulls, cows = score_guess(view.secret, guess)
         view.seen_0a4b = view.seen_0a4b or (bulls == 0 and cows == 4)
         view.seen_0a0b = view.seen_0a0b or (bulls == 0 and cows == 0)
+        view.seen_1a1b = view.seen_1a1b or (bulls == 1 and cows == 1)
+        view.seen_1a0b_count += 1 if (bulls == 1 and cows == 0) else 0
+        view.seen_2a0b_count += 1 if (bulls == 2 and cows == 0) else 0
+        view.seen_1a3b = view.seen_1a3b or (bulls == 1 and cows == 3)
+        view.seen_3a0b = view.seen_3a0b or (bulls == 3 and cows == 0)
+        view.unique_guess_count += 1
         view.first_guess_2a2b = view.first_guess_2a2b or (view.attempts == 1 and bulls + cows >= 4 and bulls >= 2)
         view.history.append(f"第 {view.attempts} 次：{guess} -> {bulls}A{cows}B")
 
@@ -213,6 +226,22 @@ class PuzzleGuessModal(Modal):
                     "puzzle_0a4b": 1 if view.seen_0a4b else 0,
                     "puzzle_0a0b": 1 if view.seen_0a0b else 0,
                     "puzzle_first_2a2b": 1 if view.first_guess_2a2b else 0,
+                    "puzzle_1a1b": 1 if view.seen_1a1b else 0,
+                    "puzzle_1a0b": view.seen_1a0b_count,
+                    "puzzle_2a0b": view.seen_2a0b_count,
+                    "puzzle_1a3b": 1 if view.seen_1a3b else 0,
+                    "puzzle_full_8_unique": 1 if view.unique_guess_count >= 8 else 0,
+                    "puzzle_digit_used_total": view.attempts * 4,
+                    "puzzle_3a_final_loss": 1 if view.seen_3a0b else 0,
+                    "puzzle_1a1b": 1 if view.seen_1a1b else 0,
+                    "puzzle_1a0b": view.seen_1a0b_count,
+                    "puzzle_2a0b": view.seen_2a0b_count,
+                    "puzzle_1a3b": 1 if view.seen_1a3b else 0,
+                    "puzzle_full_8_unique": 1 if view.unique_guess_count >= 8 else 0,
+                    "puzzle_late_solve": 1 if view.attempts >= 6 else 0,
+                    "puzzle_solve_attempt_4": 1 if view.attempts == 4 else 0,
+                    "puzzle_digit_used_total": view.attempts * 4,
+                    "puzzle_extreme_secret_win": 1 if "0" in view.secret and "9" in view.secret else 0,
                 },
             )
             save_data(users)
