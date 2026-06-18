@@ -183,13 +183,6 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     embed.add_field(name="🎮 總遊戲次數", value=f"**{total_games}** 場", inline=True)
     embed.add_field(name="🏆 整體勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**（{total_wins}/{total_games}）", inline=True)
 
-    number_searcher2_stats = summary.get("數字搜尋者2")
-    embed.add_field(
-        name="🏅 蝕刻章專區｜數字搜尋者2",
-        value="\n".join(_number_searcher2_stamp_lines(number_searcher2_stats)),
-        inline=False,
-    )
-
     if summary:
         favorite_stats = sorted(
             summary.items(),
@@ -282,7 +275,7 @@ def build_portfolio_embeds(user: discord.User, game_name: str | None = None) -> 
         return [embed], [file]
 
     embed = build_game_stat_embed(user, game_name)
-    should_show_gallery = game_name is None or game_name == "數字搜尋者2"
+    should_show_gallery = game_name == "數字搜尋者2"
     if not should_show_gallery:
         return [embed], []
     file = _number_searcher2_stamp_gallery_file(number_searcher2_stats)
