@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import random
+import time
 from dataclasses import dataclass
 
 import discord
@@ -58,6 +59,7 @@ MARKER_BUTTON_CUSTOM_ID = "number_searcher_marker"
 REPLAY_BUTTON_CUSTOM_ID = "number_searcher_replay"
 LOBBY_BUTTON_CUSTOM_ID = "number_searcher_lobby"
 MULTIPLIER_SELECT_CUSTOM_ID = "number_searcher_multiplier"
+CLUE_CHOICE_VIEW_TIMEOUT = 180
 
 
 def format_money_delta(amount: int) -> str:
@@ -507,7 +509,7 @@ def clue_choice_text(clue: Clue) -> str:
 
 class PendingClueChoiceView(View):
     def __init__(self, parent: "NumberSearcherView", choices: list[Clue], cost: int):
-        super().__init__(timeout=60)
+        super().__init__(timeout=CLUE_CHOICE_VIEW_TIMEOUT)
         self.parent = parent
         self.choices = choices
         self.cost = cost
@@ -555,6 +557,7 @@ class PendingClueChoiceView(View):
             view=self,
         )
         self.parent.clue_choice_message = await interaction.original_response()
+        self.parent.clue_choice_opened_at = None
         self.stop()
 
 
@@ -1087,6 +1090,7 @@ class NumberSearcherView(View):
         self.seen_clue_titles: set[str] = set()
         self.pending_clue_offer: PendingClueOffer | None = None
         self.clue_choice_message: discord.InteractionMessage | None = None
+        self.clue_choice_opened_at: float | None = None
         self.ended = False
         self.message: discord.Message | None = None
         self.add_advanced_buttons()
@@ -1556,23 +1560,36 @@ class NumberSearcherView(View):
         choice_embed.add_field(name="目前線索紀錄", value=self.clue_history_summary(), inline=False)
         return choice_embed
 
+    def clue_choice_message_stale(self) -> bool:
+        if self.clue_choice_opened_at is None:
+            return False
+        return time.monotonic() - self.clue_choice_opened_at >= CLUE_CHOICE_VIEW_TIMEOUT
+
     async def show_clue_choice_message(self, interaction: discord.Interaction, offer: PendingClueOffer, *, reused: bool = False) -> None:
         embed = self.pending_offer_embed(offer, reused=reused)
         view = PendingClueChoiceView(self, list(offer.choices), offer.cost)
+        if self.clue_choice_message is not None and self.clue_choice_message_stale():
+            self.clue_choice_message = None
+            self.clue_choice_opened_at = None
+
         if self.clue_choice_message is not None:
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.defer(ephemeral=True)
+                    await interaction.response.defer()
                 await self.clue_choice_message.edit(content=None, embed=embed, view=view)
+                self.clue_choice_opened_at = time.monotonic()
                 return
             except (discord.NotFound, discord.HTTPException):
                 self.clue_choice_message = None
+                self.clue_choice_opened_at = None
 
         if interaction.response.is_done():
-            self.clue_choice_message = await interaction.followup.send(embed=embed, view=view, ephemeral=True, wait=True)
+            self.clue_choice_message = await interaction.followup.send(embed=embed, view=view, wait=True)
+            self.clue_choice_opened_at = time.monotonic()
             return
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view)
         self.clue_choice_message = await interaction.original_response()
+        self.clue_choice_opened_at = time.monotonic()
 
     async def reveal_clue(self, interaction: discord.Interaction, clue_type: str) -> None:
         if self.locked_action == clue_type:
