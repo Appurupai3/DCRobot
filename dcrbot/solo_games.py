@@ -12,6 +12,7 @@ from discord.ui import Button, Modal, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 from collections.abc import Callable
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -289,6 +290,9 @@ class BalloonPumpView(View):
             },
         )
         save_data(users)
+        achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "打氣球"))
+        if achievement_text:
+            status += f"\n\n{achievement_text}"
 
         self.ended = True
         self.show_post_game_buttons()
@@ -337,6 +341,9 @@ class BalloonPumpView(View):
                 },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "打氣球"))
+            if achievement_text:
+                embed.add_field(name="🏆 成就解鎖", value=achievement_text, inline=False)
             embed.add_field(name="醫藥費", value=f"{medical_fee_multiplier:g} 倍（-${medical_fee}）", inline=True)
             embed.add_field(name="目前錢包餘額", value=f"${balance}", inline=False)
             await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
@@ -654,8 +661,11 @@ async def run_horse_race(interaction: discord.Interaction, user: discord.User, a
         },
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "賽馬競速"))
 
     race_embed = discord.Embed(title="🐎 賽馬競速結果", color=discord.Color.green())
+    if achievement_text:
+        race_embed.add_field(name="🏆 成就解鎖", value=achievement_text, inline=False)
     race_embed.add_field(name="你的選擇", value=f"{pick}. {names[user_idx]}", inline=True)
     race_embed.add_field(name="冠軍", value=f"{names[winner_idx]}", inline=True)
     race_embed.add_field(name="賽況回顧", value="\n".join(log_lines), inline=False)

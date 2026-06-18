@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import random
 import re
 from dcrbot.battle import BATTLE_GAMES, prepare_battle_lobby
-from dcrbot.achievements import AchievementView, build_achievement_embed
+from dcrbot.achievements import AchievementView, build_achievement_embed, format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.bank import BankGuiView, build_bank_gui_payload, move_wallet_to_bank
 from dcrbot.birthfire import launch_birthfire, render_firework_frame, run_birthfire_animation
 from dcrbot.multiplayer import (
@@ -240,6 +240,7 @@ async def resolve_basic_bet(
         details=result_text,
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, game_name))
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_basic_bet(
@@ -254,8 +255,11 @@ async def resolve_basic_bet(
         )
 
     post_view = SimplePostGameView(user, replay_handler, build_game_menu)
+    final_text = f"{result_text}\n目前錢包餘額：${balance}"
+    if achievement_text:
+        final_text += f"\n\n{achievement_text}"
     await interaction.response.send_message(
-        f"{result_text}\n目前錢包餘額：${balance}",
+        final_text,
         view=post_view,
         ephemeral=True,
     )
@@ -345,6 +349,7 @@ async def resolve_custom_bet(
         extra_stats=extra_stats,
     )
     save_data(users)
+    achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, game_name))
 
     async def replay_handler(replay_interaction: discord.Interaction) -> None:
         await resolve_custom_bet(
@@ -365,13 +370,18 @@ async def resolve_custom_bet(
             await progress.edit(content=frame)
 
         final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        if achievement_text:
+            final_text += f"\n\n{achievement_text}"
         post_view = SimplePostGameView(user, replay_handler, build_game_menu)
         await asyncio.sleep(1.1)
         await progress.edit(content=f"{frames[-1]}\n{final_text}", view=post_view)
     else:
         post_view = SimplePostGameView(user, replay_handler, build_game_menu)
+        final_text = f"{result_text}\n目前錢包餘額：${balance}"
+        if achievement_text:
+            final_text += f"\n\n{achievement_text}"
         await interaction.response.send_message(
-            f"{result_text}\n目前錢包餘額：${balance}",
+            final_text,
             view=post_view,
             ephemeral=response_ephemeral,
         )

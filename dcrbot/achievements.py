@@ -19,6 +19,15 @@ ACHIEVEMENT_RECORD_PATH = LEADERBOARD_INFO_DIR / "achievements.json"
 
 
 @dataclass(frozen=True)
+class AchievementUnlock:
+    game_name: str
+    title: str
+    description: str
+    icon: str
+    unlocked_at: str
+
+
+@dataclass(frozen=True)
 class Achievement:
     icon: str
     title: str
@@ -281,9 +290,52 @@ def sync_user_achievement_records(uid: str, summary: dict[str, dict]) -> dict:
     return user_records
 
 
+def unlock_new_achievement_records(uid: str, game_name: str | None = None) -> list[AchievementUnlock]:
+    """Evaluate achievements, persist new unlocks, and return only newly earned ones."""
+
+    summary = summarize_game_records(load_data(), str(uid))
+    records = _load_achievement_records()
+    user_records = records.setdefault(str(uid), {})
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    changed = False
+    new_unlocks: list[AchievementUnlock] = []
+    games = {game_name: ACHIEVEMENTS.get(game_name, [])} if game_name else ACHIEVEMENTS
+    for current_game, achievements in games.items():
+        if not achievements:
+            continue
+        stats = summary.get(current_game, {})
+        game_records = user_records.setdefault(current_game, {})
+        for achievement in achievements:
+            if achievement.key in game_records or not achievement.check(stats):
+                continue
+            game_records[achievement.key] = {
+                "title": achievement.title,
+                "description": achievement.description,
+                "icon": achievement.icon,
+                "unlocked_at": now,
+            }
+            new_unlocks.append(AchievementUnlock(current_game, achievement.title, achievement.description, achievement.icon, now))
+            changed = True
+    if changed:
+        _save_achievement_records(records)
+    return new_unlocks
+
+
+def format_achievement_unlock_text(unlocks: list[AchievementUnlock]) -> str:
+    if not unlocks:
+        return ""
+    lines = ["🏆 **成就解鎖！**"]
+    for unlock in unlocks[:5]:
+        lines.append(f"{unlock.icon} **{unlock.title}**｜{unlock.description}")
+    if len(unlocks) > 5:
+        lines.append(f"…另外還有 {len(unlocks) - 5} 個成就已寫入 Achievement 頁面。")
+    return "\n".join(lines)
+
+
 def build_achievement_embed(user: discord.User, game_name: str | None = None) -> discord.Embed:
     uid = str(user.id)
     summary = summarize_game_records(load_data(), uid)
+    unlock_new_achievement_records(uid)
     records = sync_user_achievement_records(uid, summary)
     display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
     if game_name is None:

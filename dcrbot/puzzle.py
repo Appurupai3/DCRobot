@@ -8,6 +8,7 @@ from collections.abc import Callable
 import discord
 from discord.ui import Button, View, Modal, TextInput
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.storage import append_game_record, load_data, open_account, save_data
 
 
@@ -215,10 +216,13 @@ class PuzzleGuessModal(Modal):
                 },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "解謎挑戰"))
             status_text = (
                 f"🎉 成功解開！答案 {view.secret}，返還下注 ${view.bet_amount} 並獲得 ${reward}"
                 f"（獎勵倍率 {reward_multiplier:.2f}x）。"
             )
+            if achievement_text:
+                status_text += f"\n\n{achievement_text}"
             view.resolved = True
         elif view.attempts >= view.max_attempts:
             status_text = f"😢 挑戰失敗，正確答案為 {view.secret}。"
@@ -240,6 +244,9 @@ class PuzzleGuessModal(Modal):
                 },
             )
             save_data(users)
+            achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, "解謎挑戰"))
+            if achievement_text:
+                status_text += f"\n\n{achievement_text}"
             view.resolved = True
 
         if view.resolved:

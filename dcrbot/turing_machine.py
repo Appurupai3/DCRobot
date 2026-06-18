@@ -11,6 +11,7 @@ import discord
 from discord.ui import Button, Modal, Select, TextInput, View
 from PIL import Image, ImageDraw, ImageFont
 
+from dcrbot.achievements import format_achievement_unlock_text, unlock_new_achievement_records
 from dcrbot.etching_stamps import (
     NUMBER_SEARCHER2_STAMPS,
     newly_earned_stamp_keys,
@@ -1760,6 +1761,7 @@ class NumberSearcherView(View):
             extra_stats=extra_stats,
         )
         save_data(users)
+        achievement_text = format_achievement_unlock_text(unlock_new_achievement_records(uid, self.game_name))
         self.settlement_reward = reward
         self.ended = True
         self.show_post_game_controls()
@@ -1768,6 +1770,8 @@ class NumberSearcherView(View):
         stamp_text = ""
         if new_stamps:
             stamp_text = "\n\n✨ **蝕刻章解鎖！** " + "、".join(f"{stamp_title(key)}蝕刻章" for key in new_stamps) + "\n金屬光芒刻進收藏冊，Portfolio 已新增紀念印記。"
+        if achievement_text:
+            stamp_text += f"\n\n{achievement_text}"
         status_text = (
             f"🎉 猜對了！密碼是 {format_code(self.secret)}，獲得 ${reward}。\n"
             f"本局已花費 ${self.total_spent}，營利 {format_money_delta(profit)}。\n"
