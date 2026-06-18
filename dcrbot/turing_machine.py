@@ -1084,6 +1084,9 @@ class NumberSearcherView(View):
         self.total_spent = 0
         self.settlement_reward = 0
         self.history: list[str] = []
+        if self.negative_modifier:
+            description = NEGATIVE_MODIFIER_DESCRIPTIONS.get(self.negative_modifier, "未知效果。")
+            self.history.append(f"☠️ 開場負面詞條｜【{self.negative_modifier}】{description}")
         self.digit_marks: list[list[int]] = [[] for _ in range(CODE_LENGTH)]
         self.color_marks: list[list[str]] = [[] for _ in range(CODE_LENGTH)]
         self.shape_marks: list[str | None] = [None] * CODE_LENGTH
