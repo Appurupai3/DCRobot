@@ -350,7 +350,7 @@ def get_number_searcher2_unlocked(uid: str) -> int:
     user_stats = game_stats.get(str(uid), {})
     if not isinstance(user_stats, dict):
         return 0
-    return max(0, min(8, int(user_stats.get("unlocked_level", 0) or 0)))
+    return max(0, min(11, int(user_stats.get("unlocked_level", 0) or 0)))
 
 
 def set_number_searcher2_unlocked(uid: str, unlocked_level: int) -> None:
@@ -363,7 +363,7 @@ def set_number_searcher2_unlocked(uid: str, unlocked_level: int) -> None:
     if not isinstance(user_stats, dict):
         user_stats = _empty_game_stat(NUMBER_SEARCHER2_GAME_NAME)
     user_stats["game"] = NUMBER_SEARCHER2_GAME_NAME
-    user_stats["unlocked_level"] = max(0, min(8, int(unlocked_level)))
+    user_stats["unlocked_level"] = max(0, min(11, int(unlocked_level)))
     game_stats[str(uid)] = user_stats
     _write_json(record_path, game_stats)
     _update_leaderboard_index(
