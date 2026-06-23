@@ -8,3 +8,12 @@ leaderboard/
 *.pyo
 *.pyd
 __pycache__/
+# Kernel module build artifacts
+*.o
+*.cmd
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+modules.order
+Module.symvers
