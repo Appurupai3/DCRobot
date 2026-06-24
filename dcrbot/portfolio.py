@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import io
+
 import discord
+from PIL import Image, ImageDraw, ImageFont
 from discord.ui import View
 
+from dcrbot.etching_stamps import (
+    HIGHEST_CLEAR_EXTRA_KEY,
+    NUMBER_SEARCHER2_NEGATIVE_MODIFIERS,
+    NUMBER_SEARCHER2_STAMPS,
+    negative_modifier_clear_count,
+    stamp_unlocked,
+)
 from dcrbot.storage import get_game_records, load_data, summarize_game_records
 
 
@@ -99,11 +109,25 @@ def _extra_stat_lines(game_name: str, stats: dict) -> list[str]:
         )
         lines.append(f"平均猜測 {float(extra.get('guess_total', 0) or 0) / max(1, int(stats.get('plays', 0) or 0)):.1f} 次")
         if game_name == "數字搜尋者2":
-            highest = extra.get("highest_cleared_difficulty")
+            highest = extra.get(HIGHEST_CLEAR_EXTRA_KEY)
             highest_text = f"N{int(highest)}" if highest is not None else "尚未通關"
             unlocked = stats.get("unlocked_level")
             unlocked_text = f"N{int(unlocked)}" if unlocked is not None else "N0"
             lines.append(f"已通關最高難度 **{highest_text}**｜目前解鎖 **{unlocked_text}**")
+    return lines
+
+
+def _number_searcher2_stamp_lines(stats: dict | None) -> list[str]:
+    extra = stats.get("extra", {}) if isinstance(stats, dict) and isinstance(stats.get("extra", {}), dict) else {}
+    highest = int(extra.get(HIGHEST_CLEAR_EXTRA_KEY, 0) or 0)
+    lines: list[str] = []
+    for stamp in NUMBER_SEARCHER2_STAMPS:
+        unlocked = stamp_unlocked(stats, stamp)
+        icon = "🟨" if unlocked else "⬛"
+        state = "已收藏" if unlocked else stamp.requirement
+        lines.append(f"{icon} **{stamp.title}**｜{state}")
+    debuff_count = negative_modifier_clear_count(stats)
+    lines.append(f"☠️ 負面詞條進度 **{debuff_count}/{len(NUMBER_SEARCHER2_NEGATIVE_MODIFIERS)}**｜最高通關 **N{highest}**")
     return lines
 
 
@@ -133,6 +157,8 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
         extras = _extra_stat_lines(game_name, stats)
         if extras:
             embed.add_field(name="✨ 額外統計", value="\n".join(extras), inline=False)
+        if game_name == "數字搜尋者2":
+            embed.add_field(name="🏅 蝕刻章專區", value="\n".join(_number_searcher2_stamp_lines(stats)), inline=False)
         return embed
 
     wallet = int(user_data.get("wallet", 0) or 0)
@@ -157,6 +183,13 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
     embed.add_field(name="🎮 總遊戲次數", value=f"**{total_games}** 場", inline=True)
     embed.add_field(name="🏆 整體勝率", value=f"`{_progress_bar(win_rate)}`\n**{win_rate:.1f}%**（{total_wins}/{total_games}）", inline=True)
 
+    number_searcher2_stats = summary.get("數字搜尋者2")
+    embed.add_field(
+        name="🏅 蝕刻章專區｜數字搜尋者2",
+        value="\n".join(_number_searcher2_stamp_lines(number_searcher2_stats)),
+        inline=False,
+    )
+
     if summary:
         favorite_stats = sorted(
             summary.items(),
@@ -173,6 +206,88 @@ def build_game_stat_embed(user: discord.User, game_name: str | None = None) -> d
         embed.add_field(name="🎮 常玩的三個遊戲", value="尚未有任何遊戲統計；完成任一場遊戲後會自動累計。", inline=False)
 
     return embed
+
+
+def _load_gallery_font(size: int) -> ImageFont.ImageFont:
+    for font_path in (
+        "font/GenSekiGothic2.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "C:/Windows/Fonts/msjh.ttc",
+    ):
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _number_searcher2_stamp_gallery_file(stats: dict | None) -> discord.File:
+    width, height = 1100, 760
+    card_width, card_height = 480, 270
+    image = Image.new("RGB", (width, height), (22, 25, 34))
+    draw = ImageDraw.Draw(image)
+    title_font = _load_gallery_font(42)
+    label_font = _load_gallery_font(28)
+    small_font = _load_gallery_font(22)
+    draw.rounded_rectangle((24, 24, width - 24, height - 24), radius=34, outline=(212, 174, 82), width=4, fill=(30, 34, 46))
+    draw.text((56, 44), "數字搜尋者2｜蝕刻章收藏冊", fill=(255, 226, 150), font=title_font)
+    draw.text((58, 102), "已取得的蝕刻章會以原始章圖鑲嵌在收藏冊中。", fill=(205, 212, 230), font=small_font)
+
+    positions = ((60, 160), (560, 160), (60, 455), (560, 455))
+    for stamp, (x, y) in zip(NUMBER_SEARCHER2_STAMPS, positions):
+        unlocked = stamp_unlocked(stats, stamp)
+        border = (245, 202, 94) if unlocked else (91, 96, 112)
+        fill = (44, 39, 30) if unlocked else (40, 43, 54)
+        draw.rounded_rectangle((x, y, x + card_width, y + card_height), radius=28, fill=fill, outline=border, width=4)
+        draw.text((x + 24, y + 18), stamp.title, fill=(255, 232, 161) if unlocked else (165, 171, 190), font=label_font)
+        draw.text((x + 24, y + 56), "已收藏" if unlocked else stamp.requirement, fill=(226, 232, 245) if unlocked else (135, 142, 160), font=small_font)
+        stamp_box = (x + 150, y + 88, x + 330, y + 248)
+        if unlocked and stamp.asset_path.exists():
+            with Image.open(stamp.asset_path) as stamp_image:
+                stamp_image = stamp_image.convert("RGBA")
+                stamp_image.thumbnail((180, 160), Image.LANCZOS)
+                px = stamp_box[0] + ((stamp_box[2] - stamp_box[0]) - stamp_image.width) // 2
+                py = stamp_box[1] + ((stamp_box[3] - stamp_box[1]) - stamp_image.height) // 2
+                shadow = Image.new("RGBA", stamp_image.size, (0, 0, 0, 95))
+                image.paste(shadow, (px + 8, py + 8), shadow)
+                image.paste(stamp_image, (px, py), stamp_image)
+        else:
+            draw.rounded_rectangle(stamp_box, radius=20, fill=(27, 30, 40), outline=(82, 88, 104), width=3)
+            draw.text((x + 194, y + 140), "LOCKED", fill=(118, 126, 148), font=label_font)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename="portfolio_etching_stamps.png")
+
+
+def build_portfolio_embeds(user: discord.User, game_name: str | None = None) -> tuple[list[discord.Embed], list[discord.File]]:
+    users = load_data()
+    summary = summarize_game_records(users, str(user.id))
+    number_searcher2_stats = summary.get("數字搜尋者2")
+    if game_name == "__stamps__":
+        display_name = getattr(user, "display_name", getattr(user, "name", "玩家"))
+        embed = discord.Embed(
+            title=f"🏅 {display_name} 的蝕刻章收藏冊",
+            description="這裡展示你已取得的數字搜尋者2蝕刻章；未解鎖的位置會先保留在收藏冊中。",
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="收藏進度", value="\n".join(_number_searcher2_stamp_lines(number_searcher2_stats)), inline=False)
+        file = _number_searcher2_stamp_gallery_file(number_searcher2_stats)
+        embed.set_image(url="attachment://portfolio_etching_stamps.png")
+        return [embed], [file]
+
+    embed = build_game_stat_embed(user, game_name)
+    should_show_gallery = game_name is None or game_name == "數字搜尋者2"
+    if not should_show_gallery:
+        return [embed], []
+    file = _number_searcher2_stamp_gallery_file(number_searcher2_stats)
+    embed.set_image(url="attachment://portfolio_etching_stamps.png")
+    return [embed], [file]
 
 
 def build_portfolio_embed(user: discord.User) -> discord.Embed:
@@ -199,7 +314,10 @@ class PortfolioGameSelect(discord.ui.Select):
         self.viewer_id = (viewer or user).id
         users = load_data()
         summary = summarize_game_records(users, str(user.id))
-        options = [discord.SelectOption(label="全部遊戲", value="__all__", emoji="📊", description="查看所有遊戲總覽")]
+        options = [
+            discord.SelectOption(label="全部遊戲", value="__all__", emoji="📊", description="查看所有遊戲總覽"),
+            discord.SelectOption(label="蝕刻章收藏冊", value="__stamps__", emoji="🏅", description="查看數字搜尋者2蝕刻章圖片"),
+        ]
         for game_name, stats in sorted(summary.items(), key=lambda item: str(item[0]))[:24]:
             options.append(
                 discord.SelectOption(
@@ -215,9 +333,11 @@ class PortfolioGameSelect(discord.ui.Select):
         if interaction.user.id != self.viewer_id:
             await interaction.response.send_message("❌ 這不是你開啟的 Portfolio 選單。", ephemeral=True)
             return
+        await interaction.response.defer()
         selected = self.values[0]
-        embed = build_game_stat_embed(self.user, None if selected == "__all__" else selected)
-        await interaction.response.edit_message(embed=embed, view=PortfolioStatsView(self.user, interaction.user))
+        game_name = None if selected == "__all__" else selected
+        embeds, files = build_portfolio_embeds(self.user, game_name)
+        await interaction.edit_original_response(embeds=embeds, attachments=files, view=PortfolioStatsView(self.user, interaction.user))
 
 
 class PortfolioStatsView(View):
